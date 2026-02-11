@@ -512,7 +512,9 @@ func TestAI(t *testing.T) {
 			Choices: []ai.Choice{
 				{
 					Message: ai.Message{
-						Content: "AI response",
+						Content: []ai.ContentPart{
+							{Type: "text", Text: "AI response"},
+						},
 					},
 				},
 			},

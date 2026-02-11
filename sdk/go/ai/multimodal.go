@@ -2,11 +2,6 @@ package ai
 
 import "strings"
 
-type ImageData struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"`
-}
-
 func detectMIMEType(path string) string {
 	switch {
 	case strings.HasSuffix(path, ".png"):

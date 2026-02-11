@@ -76,14 +76,24 @@ func (c *Client) CompleteWithMessages(ctx context.Context, messages []Message, o
 		if err := opt(req); err != nil {
 			return nil, fmt.Errorf("apply option: %w", err)
 		}
-
 	}
+
 	return c.doRequest(ctx, req)
 }
 
 func (c *Client) doRequest(ctx context.Context, req *Request) (*Response, error) {
 	// Marshal request
-	body, err := json.Marshal(req)
+
+	var body []byte
+	var err error
+
+	if c.config.IsOpenRouter() {
+		payload := transformForOpenRouter(req)
+		body, err = json.Marshal(payload)
+		fmt.Printf("[DEBUG] OpenRouter JSON:\n%s\n", string(body))
+	} else {
+		body, err = json.Marshal(req)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

@@ -176,9 +176,8 @@ func TestWithImageFile(t *testing.T) {
 	assert.Len(t, req.Messages[0].Content, 1)
 
 	part := req.Messages[0].Content[0]
-	assert.Equal(t, "image_url", part.Type)
-	assert.NotNil(t, part.ImageURL)
-	assert.Contains(t, part.ImageURL.URL, "data:image/jpeg;base64,")
+	assert.Equal(t, "input_image", part.Type)
+	assert.Contains(t, part.ImageURL, "data:image/jpeg;base64,")
 }
 
 func TestWithImageURL(t *testing.T) {
@@ -193,9 +192,8 @@ func TestWithImageURL(t *testing.T) {
 	assert.Len(t, req.Messages[0].Content, 1)
 
 	part := req.Messages[0].Content[0]
-	assert.Equal(t, "image_url", part.Type)
-	assert.NotNil(t, part.ImageURL)
-	assert.Equal(t, testURL, part.ImageURL.URL)
+	assert.Equal(t, "input_image", part.Type)
+	assert.Equal(t, testURL, part.ImageURL)
 }
 
 func TestWithImageBytes(t *testing.T) {
@@ -211,9 +209,8 @@ func TestWithImageBytes(t *testing.T) {
 	assert.Len(t, req.Messages[0].Content, 1)
 
 	part := req.Messages[0].Content[0]
-	assert.Equal(t, "image_url", part.Type)
-	assert.NotNil(t, part.ImageURL)
-	assert.Contains(t, part.ImageURL.URL, "data:image/jpeg;base64,")
+	assert.Equal(t, "input_image", part.Type)
+	assert.Contains(t, part.ImageURL, "data:image/jpeg;base64,")
 }
 
 func TestWithImageFile_Error(t *testing.T) {
@@ -266,19 +263,16 @@ func TestMultipleImages(t *testing.T) {
 	assert.Len(t, req.Messages[0].Content, 3)
 
 	part1 := req.Messages[0].Content[0]
-	assert.Equal(t, "image_url", part1.Type)
-	assert.NotNil(t, part1.ImageURL)
-	assert.Equal(t, "https://example.com/image1.jpg", part1.ImageURL.URL)
+	assert.Equal(t, "input_image", part1.Type)
+	assert.Equal(t, "https://example.com/image1.jpg", part1.ImageURL)
 
 	part2 := req.Messages[0].Content[1]
-	assert.Equal(t, "image_url", part2.Type)
-	assert.NotNil(t, part2.ImageURL)
-	assert.Contains(t, part2.ImageURL.URL, "data:image/jpeg;base64,")
+	assert.Equal(t, "input_image", part2.Type)
+	assert.Contains(t, part2.ImageURL, "data:image/jpeg;base64,")
 
 	part3 := req.Messages[0].Content[2]
-	assert.Equal(t, "image_url", part3.Type)
-	assert.NotNil(t, part3.ImageURL)
-	assert.Contains(t, part3.ImageURL.URL, "data:image/png;base64,")
+	assert.Equal(t, "input_image", part3.Type)
+	assert.Contains(t, part3.ImageURL, "data:image/png;base64,")
 }
 
 func TestStructToJSONSchema(t *testing.T) {

@@ -89,3 +89,58 @@ func (c *Config) IsOpenRouter() bool {
 	return c.BaseURL == "https://openrouter.ai/api/v1" ||
 		c.BaseURL == "https://openrouter.ai/api/v1/"
 }
+
+type OpenRouterRequest struct {
+	Messages []OpenRouterMessage `json:"messages"`
+	Model    string              `json:"model,omitempty"`
+}
+
+type OpenRouterMessage struct {
+	Role    string                  `json:"role"`
+	Content []OpenRouterContentPart `json:"content"`
+}
+
+type OpenRouterContentPart struct {
+	Type     string     `json:"type"`
+	Text     string     `json:"text,omitempty"`
+	ImageURL *ImageData `json:"image_url,omitempty"`
+}
+
+type ImageData struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func transformForOpenRouter(req *Request) *OpenRouterRequest {
+	var messages []OpenRouterMessage
+
+	for _, m := range req.Messages {
+		msg := OpenRouterMessage{
+			Role: m.Role,
+		}
+
+		for _, c := range m.Content {
+			part := OpenRouterContentPart{
+				Type: c.Type,
+				Text: c.Text,
+			}
+
+			// Map Go struct's input_image to OpenRouter's image_url
+			if c.Type == "input_image" && c.ImageURL != "" {
+				part.Type = "image_url"
+				part.ImageURL = &ImageData{
+					URL: c.ImageURL,
+				}
+			}
+
+			msg.Content = append(msg.Content, part)
+		}
+
+		messages = append(messages, msg)
+	}
+
+	return &OpenRouterRequest{
+		Messages: messages,
+		Model:    req.Model,
+	}
+}

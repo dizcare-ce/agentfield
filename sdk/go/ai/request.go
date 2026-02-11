@@ -41,9 +41,9 @@ type Message struct {
 }
 
 type ContentPart struct {
-	Type     string     `json:"type"` // "text" or "image_url"
-	Text     string     `json:"text,omitempty"`
-	ImageURL *ImageData `json:"image_url,omitempty"`
+	Type     string `json:"type"` // "text" or "image_url"
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
@@ -216,11 +216,8 @@ func WithImageFile(path string) Option {
 
 		last := &r.Messages[len(r.Messages)-1]
 		last.Content = append(last.Content, ContentPart{
-			Type: "image_url",
-			ImageURL: &ImageData{
-				URL:    "data:" + mimeType + ";base64," + encoded,
-				Detail: "auto",
-			},
+			Type:     "input_image",
+			ImageURL: "data:" + mimeType + ";base64," + encoded,
 		})
 
 		return nil
@@ -235,14 +232,13 @@ func WithImageURL(url string) Option {
 				Content: []ContentPart{},
 			})
 		}
+
 		last := &r.Messages[len(r.Messages)-1]
 		last.Content = append(last.Content, ContentPart{
-			Type: "image_url",
-			ImageURL: &ImageData{
-				URL:    url,
-				Detail: "auto",
-			},
+			Type:     "input_image",
+			ImageURL: url,
 		})
+
 		return nil
 	}
 }
@@ -252,6 +248,7 @@ func WithImageBytes(data []byte, mimeType string) Option {
 		if len(data) == 0 {
 			return nil
 		}
+
 		encoded := base64.StdEncoding.EncodeToString(data)
 
 		if len(r.Messages) == 0 {
@@ -263,11 +260,8 @@ func WithImageBytes(data []byte, mimeType string) Option {
 
 		last := &r.Messages[len(r.Messages)-1]
 		last.Content = append(last.Content, ContentPart{
-			Type: "image_url",
-			ImageURL: &ImageData{
-				URL:    "data:" + mimeType + ";base64," + encoded,
-				Detail: "auto",
-			},
+			Type:     "input_image",
+			ImageURL: "data:" + mimeType + ";base64," + encoded,
 		})
 
 		return nil
