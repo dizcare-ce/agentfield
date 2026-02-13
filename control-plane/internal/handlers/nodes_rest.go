@@ -54,7 +54,7 @@ func NodeStatusLeaseHandler(storageProvider storage.StorageProvider, statusManag
 		if agent.LifecycleStatus == types.AgentStatusPendingApproval {
 			logger.Logger.Debug().Str("node_id", nodeID).Msg("ignoring status update: agent is pending_approval")
 			now := time.Now().UTC()
-			_ = storageProvider.UpdateAgentHeartbeat(ctx, nodeID, now)
+			_ = storageProvider.UpdateAgentHeartbeat(ctx, nodeID, "", now)
 			if presenceManager != nil {
 				presenceManager.Touch(nodeID, now)
 			}
@@ -96,7 +96,7 @@ func NodeStatusLeaseHandler(storageProvider storage.StorageProvider, statusManag
 		}
 
 		now := time.Now().UTC()
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, now); err != nil {
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, "", now); err != nil {
 			logger.Logger.Warn().Err(err).Str("node_id", nodeID).Msg("failed to persist heartbeat during status update")
 		}
 
@@ -158,7 +158,7 @@ func NodeActionAckHandler(storageProvider storage.StorageProvider, presenceManag
 			Msg("action acknowledgement received")
 
 		now := time.Now().UTC()
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, now); err != nil {
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, "", now); err != nil {
 			logger.Logger.Warn().Err(err).Str("node_id", nodeID).Msg("failed to persist heartbeat during action ack")
 		}
 		if presenceManager != nil {
@@ -208,7 +208,7 @@ func ClaimActionsHandler(storageProvider storage.StorageProvider, presenceManage
 		}
 
 		now := time.Now().UTC()
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, payload.NodeID, now); err != nil {
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, payload.NodeID, "", now); err != nil {
 			logger.Logger.Warn().Err(err).Str("node_id", payload.NodeID).Msg("failed to persist heartbeat during claim")
 		}
 		if presenceManager != nil {
@@ -254,7 +254,7 @@ func NodeShutdownHandler(storageProvider storage.StorageProvider, statusManager 
 		if presenceManager != nil {
 			presenceManager.Forget(nodeID)
 		}
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, now); err != nil {
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, "", now); err != nil {
 			logger.Logger.Warn().Err(err).Str("node_id", nodeID).Msg("failed to persist heartbeat during shutdown")
 		}
 

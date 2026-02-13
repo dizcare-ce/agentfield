@@ -2,6 +2,7 @@ package connector
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/config"
 	"github.com/Agent-Field/agentfield/control-plane/internal/handlers/admin"
@@ -17,6 +18,7 @@ import (
 type Handlers struct {
 	connectorConfig     config.ConnectorConfig
 	storage             storage.StorageProvider
+	statusManager       *services.StatusManager
 	accessPolicyService *services.AccessPolicyService
 	tagApprovalService  *services.TagApprovalService
 	didService          *services.DIDService
@@ -26,6 +28,7 @@ type Handlers struct {
 func NewHandlers(
 	cfg config.ConnectorConfig,
 	store storage.StorageProvider,
+	statusManager *services.StatusManager,
 	accessPolicyService *services.AccessPolicyService,
 	tagApprovalService *services.TagApprovalService,
 	didService *services.DIDService,
@@ -33,6 +36,7 @@ func NewHandlers(
 	return &Handlers{
 		connectorConfig:     cfg,
 		storage:             store,
+		statusManager:       statusManager,
 		accessPolicyService: accessPolicyService,
 		tagApprovalService:  tagApprovalService,
 		didService:          didService,
@@ -58,15 +62,8 @@ func (h *Handlers) RegisterRoutes(group *gin.RouterGroup) {
 		reasonerGroup.GET("/reasoners/:id", h.GetReasoner)
 		reasonerGroup.PUT("/reasoners/:id/version", h.SetReasonerVersion)
 		reasonerGroup.POST("/reasoners/:id/restart", h.RestartReasoner)
-	}
-
-	// DID management routes
-	if h.didService != nil {
-		didGroup := group.Group("")
-		didGroup.Use(middleware.ConnectorCapabilityCheck("did_management", caps))
-		{
-			didGroup.POST("/did/rotate-keys", h.RotateDIDKeys)
-		}
+		reasonerGroup.GET("/groups", h.ListAgentGroups)
+		reasonerGroup.GET("/groups/:group_id/nodes", h.ListGroupNodes)
 	}
 
 	// Policy management routes (proxied admin endpoints)
@@ -120,6 +117,7 @@ func (h *Handlers) ListReasoners(c *gin.Context) {
 
 	type nodeInfo struct {
 		NodeID       string                    `json:"node_id"`
+		GroupID      string                    `json:"group_id"`
 		TeamID       string                    `json:"team_id"`
 		Version      string                    `json:"version"`
 		HealthStatus types.HealthStatus        `json:"health_status"`
@@ -131,6 +129,7 @@ func (h *Handlers) ListReasoners(c *gin.Context) {
 	for _, agent := range agents {
 		result = append(result, nodeInfo{
 			NodeID:       agent.ID,
+			GroupID:      agent.GroupID,
 			TeamID:       agent.TeamID,
 			Version:      agent.Version,
 			HealthStatus: agent.HealthStatus,
@@ -161,45 +160,152 @@ func (h *Handlers) GetReasoner(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":              agent.ID,
-		"team_id":         agent.TeamID,
-		"version":         agent.Version,
-		"health_status":   agent.HealthStatus,
+		"id":               agent.ID,
+		"group_id":         agent.GroupID,
+		"team_id":          agent.TeamID,
+		"version":          agent.Version,
+		"health_status":    agent.HealthStatus,
 		"lifecycle_status": agent.LifecycleStatus,
-		"reasoners":       agent.Reasoners,
-		"skills":          agent.Skills,
-		"base_url":        agent.BaseURL,
+		"reasoners":        agent.Reasoners,
+		"skills":           agent.Skills,
+		"base_url":         agent.BaseURL,
 	})
 }
 
-// SetReasonerVersion is a placeholder for future version management.
+// SetReasonerVersion updates the version for a specific agent node.
 func (h *Handlers) SetReasonerVersion(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":   "not_implemented",
-		"message": "reasoner version management is not yet supported",
-	})
-}
+	ctx := c.Request.Context()
+	id := c.Param("id")
 
-// RestartReasoner is a placeholder for future reasoner restart functionality.
-func (h *Handlers) RestartReasoner(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":   "not_implemented",
-		"message": "reasoner restart is not yet supported",
-	})
-}
-
-// RotateDIDKeys triggers DID key rotation for the control plane.
-func (h *Handlers) RotateDIDKeys(c *gin.Context) {
-	if h.didService == nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "did_not_enabled",
-			"message": "DID system is not enabled on this control plane",
-		})
+	var body struct {
+		Version string `json:"version" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version is required"})
 		return
 	}
 
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":   "not_implemented",
-		"message": "DID key rotation via connector is not yet supported",
+	agent, err := h.storage.GetAgent(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if agent == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent node not found"})
+		return
+	}
+
+	previousVersion := agent.Version
+
+	if err := h.storage.UpdateAgentVersion(ctx, id, body.Version); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          true,
+		"previous_version": previousVersion,
 	})
 }
+
+// RestartReasoner initiates a restart for a specific agent node by transitioning
+// its lifecycle status to "starting".
+func (h *Handlers) RestartReasoner(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Param("id")
+
+	agent, err := h.storage.GetAgent(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if agent == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent node not found"})
+		return
+	}
+
+	if h.statusManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "status manager not available"})
+		return
+	}
+
+	startingState := types.AgentStateStarting
+	update := &types.AgentStatusUpdate{
+		State:  &startingState,
+		Source: types.StatusSourceManual,
+		Reason: "connector restart request",
+	}
+
+	if err := h.statusManager.UpdateAgentStatus(ctx, id, update); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"restarted_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// ListAgentGroups returns distinct agent groups with summary info.
+func (h *Handlers) ListAgentGroups(c *gin.Context) {
+	ctx := c.Request.Context()
+	teamID := c.Query("team_id")
+	if teamID == "" {
+		teamID = "default"
+	}
+
+	groups, err := h.storage.ListAgentGroups(ctx, teamID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"groups": groups,
+		"total":  len(groups),
+	})
+}
+
+// ListGroupNodes returns all nodes belonging to a specific group.
+func (h *Handlers) ListGroupNodes(c *gin.Context) {
+	ctx := c.Request.Context()
+	groupID := c.Param("group_id")
+
+	agents, err := h.storage.ListAgentsByGroup(ctx, groupID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	type nodeInfo struct {
+		NodeID          string                     `json:"node_id"`
+		GroupID         string                     `json:"group_id"`
+		TeamID          string                     `json:"team_id"`
+		Version         string                     `json:"version"`
+		HealthStatus    types.HealthStatus         `json:"health_status"`
+		LifecycleStatus types.AgentLifecycleStatus `json:"lifecycle_status"`
+		Reasoners       []types.ReasonerDefinition `json:"reasoners"`
+		Skills          []types.SkillDefinition    `json:"skills"`
+	}
+
+	var result []nodeInfo
+	for _, agent := range agents {
+		result = append(result, nodeInfo{
+			NodeID:          agent.ID,
+			GroupID:         agent.GroupID,
+			TeamID:          agent.TeamID,
+			Version:         agent.Version,
+			HealthStatus:    agent.HealthStatus,
+			LifecycleStatus: agent.LifecycleStatus,
+			Reasoners:       agent.Reasoners,
+			Skills:          agent.Skills,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"nodes": result,
+		"total": len(result),
+	})
+}
+

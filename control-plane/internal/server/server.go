@@ -1481,6 +1481,7 @@ func (s *AgentFieldServer) setupRoutes() {
 			connectorHandlers := connectorpkg.NewHandlers(
 				s.config.Features.Connector,
 				s.storage,
+				s.statusManager,
 				s.accessPolicyService,
 				s.tagApprovalService,
 				s.didService,

@@ -589,7 +589,7 @@ func (sm *StatusManager) persistStatus(ctx context.Context, nodeID string, statu
 	}
 
 	// Update heartbeat timestamp
-	if err := sm.storage.UpdateAgentHeartbeat(ctx, nodeID, status.LastSeen); err != nil {
+	if err := sm.storage.UpdateAgentHeartbeat(ctx, nodeID, "", status.LastSeen); err != nil {
 		return fmt.Errorf("failed to update heartbeat: %w", err)
 	}
 

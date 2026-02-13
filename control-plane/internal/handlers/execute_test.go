@@ -149,6 +149,12 @@ func (m *MockStorageProvider) GetLockStatus(ctx context.Context, key string) (*t
 func (m *MockStorageProvider) RegisterAgent(ctx context.Context, agent *types.AgentNode) error {
 	return nil
 }
+func (m *MockStorageProvider) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	return nil, nil
+}
+func (m *MockStorageProvider) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
 func (m *MockStorageProvider) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
 	return nil, nil
 }
@@ -158,7 +164,7 @@ func (m *MockStorageProvider) UpdateAgentHealth(ctx context.Context, id string, 
 func (m *MockStorageProvider) UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error {
 	return nil
 }
-func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
+func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	return nil
 }
 func (m *MockStorageProvider) UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error {

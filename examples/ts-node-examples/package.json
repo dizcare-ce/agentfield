@@ -12,7 +12,8 @@
     "dev:serverless": "tsx serverless-hello/main.ts",
     "dev:vc": "tsx verifiable-credentials/main.ts",
     "dev:perm-a": "tsx permission-agent-a/main.ts",
-    "dev:perm-b": "tsx permission-agent-b/main.ts"
+    "dev:perm-b": "tsx permission-agent-b/main.ts",
+    "dev:multi-version": "tsx multi-version/main.ts"
   },
   "dependencies": {
     "@agentfield/sdk": "file:../../sdk/typescript",

@@ -105,11 +105,16 @@ type StorageProvider interface {
 	// Agent registry
 	RegisterAgent(ctx context.Context, agent *types.AgentNode) error
 	GetAgent(ctx context.Context, id string) (*types.AgentNode, error)
+	GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error)
+	ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error)
 	ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error)
+	ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error)
+	ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error)
 	UpdateAgentHealth(ctx context.Context, id string, status types.HealthStatus) error
 	UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error
-	UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error
+	UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error
 	UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error
+	UpdateAgentVersion(ctx context.Context, id string, version string) error
 
 	// Configuration
 	SetConfig(ctx context.Context, key string, value interface{}) error

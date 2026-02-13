@@ -1047,6 +1047,7 @@ func (ls *LocalStorage) ensurePostgresIndexes(ctx context.Context) error {
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_parent_workflow_id ON workflow_executions(parent_workflow_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_root_workflow_id ON workflow_executions(root_workflow_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_status ON workflow_executions(status)",
+		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_group_id ON agent_nodes(group_id)",
 	}
 
 	for _, stmt := range indexStatements {
@@ -1146,6 +1147,7 @@ func (ls *LocalStorage) ensureSQLiteIndexes() error {
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_team ON agent_nodes(team_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_health ON agent_nodes(health_status)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_lifecycle ON agent_nodes(lifecycle_status)",
+		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_group_id ON agent_nodes(group_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_dids_agent_node ON agent_dids(agent_node_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_dids_agentfield_server ON agent_dids(agentfield_server_id)",
 		"CREATE INDEX IF NOT EXISTS idx_component_dids_agent_did ON component_dids(agent_did)",
@@ -1259,7 +1261,41 @@ func (ls *LocalStorage) runPostgresMigrations(ctx context.Context) error {
                         applied_at TIMESTAMPTZ DEFAULT NOW(),
                         description TEXT
                 );`)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
+	}
+
+	migrations := []struct {
+		version     string
+		description string
+		sql         string
+	}{
+		{
+			version:     "015",
+			description: "Backfill group_id on agent_nodes with id",
+			sql:         `UPDATE agent_nodes SET group_id = id WHERE group_id = '' OR group_id IS NULL;`,
+		},
+	}
+
+	for _, m := range migrations {
+		var count int
+		err := ls.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, m.version).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("failed to check migration %s: %w", m.version, err)
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := ls.db.ExecContext(ctx, m.sql); err != nil {
+			return fmt.Errorf("failed to apply migration %s: %w", m.version, err)
+		}
+		if _, err := ls.db.ExecContext(ctx, `INSERT INTO schema_migrations (version, description) VALUES ($1, $2)`, m.version, m.description); err != nil {
+			return fmt.Errorf("failed to record migration %s: %w", m.version, err)
+		}
+		log.Printf("Applied postgres migration %s: %s", m.version, m.description)
+	}
+
+	return nil
 }
 
 // buildExecutionVCTableSQL returns the CREATE TABLE statement for execution VC storage.
@@ -1603,6 +1639,11 @@ func (ls *LocalStorage) runMigrations() error {
 			version:     "014",
 			description: "Add document size column to workflow_vcs",
 			sql:         `ALTER TABLE workflow_vcs ADD COLUMN document_size_bytes INTEGER DEFAULT 0;`,
+		},
+		{
+			version:     "015",
+			description: "Backfill group_id on agent_nodes with id",
+			sql:         `UPDATE agent_nodes SET group_id = id WHERE group_id = '' OR group_id IS NULL;`,
 		},
 	}
 
@@ -4299,14 +4340,15 @@ func (ls *LocalStorage) RegisterAgent(ctx context.Context, agent *types.AgentNod
 func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent *types.AgentNode) error {
 	query := `
 		INSERT INTO agent_nodes (
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
 			registered_at, features, metadata, proposed_tags, approved_tags
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id, version) DO UPDATE SET
+			group_id = excluded.group_id,
 			team_id = excluded.team_id,
 			base_url = excluded.base_url,
-			version = excluded.version,
+			traffic_weight = excluded.traffic_weight,
 			deployment_type = excluded.deployment_type,
 			invocation_url = excluded.invocation_url,
 			reasoners = excluded.reasoners,
@@ -4349,8 +4391,13 @@ func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent 
 		return fmt.Errorf("failed to marshal approved tags: %w", err)
 	}
 
+	trafficWeight := agent.TrafficWeight
+	if trafficWeight == 0 {
+		trafficWeight = 100
+	}
+
 	_, err = q.ExecContext(ctx, query,
-		agent.ID, agent.TeamID, agent.BaseURL, agent.Version, agent.DeploymentType, agent.InvocationURL,
+		agent.ID, agent.Version, agent.GroupID, agent.TeamID, agent.BaseURL, trafficWeight, agent.DeploymentType, agent.InvocationURL,
 		reasonersJSON, skillsJSON, commConfigJSON, agent.HealthStatus, agent.LifecycleStatus,
 		agent.LastHeartbeat, agent.RegisteredAt, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON,
 	)
@@ -4362,7 +4409,9 @@ func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent 
 	return nil
 }
 
-// GetAgent retrieves an agent node record from SQLite by ID.
+// GetAgent retrieves the default (unversioned) agent node record by ID.
+// It filters for version = '' to return only the default agent.
+// Use GetAgentVersion for a specific version, or ListAgentVersions for all versions.
 func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNode, error) {
 	// Check context cancellation early
 	if err := ctx.Err(); err != nil {
@@ -4371,10 +4420,10 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 
 	query := `
 		SELECT
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
 			registered_at, features, metadata, proposed_tags, approved_tags
-		FROM agent_nodes WHERE id = ?`
+		FROM agent_nodes WHERE id = ? AND version = ''`
 
 	row := ls.db.QueryRowContext(ctx, query, id)
 
@@ -4385,7 +4434,7 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 	var invocationURL sql.NullString
 
 	err := row.Scan(
-		&agent.ID, &agent.TeamID, &agent.BaseURL, &agent.Version, &agent.DeploymentType, &invocationURL,
+		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
 		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
 		&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
 		&proposedTagsJSON, &approvedTagsJSON,
@@ -4467,16 +4516,170 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 	return agent, nil
 }
 
+// GetAgentVersion retrieves a specific (id, version) agent node.
+func (ls *LocalStorage) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get agent version: %w", err)
+	}
+
+	query := `
+		SELECT
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
+			communication_config, health_status, lifecycle_status, last_heartbeat,
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE id = ? AND version = ?`
+
+	row := ls.db.QueryRowContext(ctx, query, id, version)
+	return ls.scanAgentNode(row)
+}
+
+// ListAgentVersions returns all versioned agents with the given ID (version != '').
+func (ls *LocalStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agent versions: %w", err)
+	}
+
+	query := `
+		SELECT
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
+			communication_config, health_status, lifecycle_status, last_heartbeat,
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE id = ? AND version != '' ORDER BY registered_at DESC`
+
+	rows, err := ls.db.QueryContext(ctx, query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agent versions for '%s': %w", id, err)
+	}
+	defer rows.Close()
+
+	return ls.scanAgentNodes(ctx, rows)
+}
+
+// scanAgentNode scans a single row into an AgentNode, applying post-processing.
+func (ls *LocalStorage) scanAgentNode(row *sql.Row) (*types.AgentNode, error) {
+	agent := &types.AgentNode{}
+	var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
+	var proposedTagsJSON, approvedTagsJSON []byte
+	var healthStatusStr, lifecycleStatusStr string
+	var invocationURL sql.NullString
+
+	err := row.Scan(
+		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
+		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
+		&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+		&proposedTagsJSON, &approvedTagsJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent node with ID '%s' version '%s' not found", agent.ID, agent.Version)
+		}
+		return nil, fmt.Errorf("failed to scan agent node: %w", err)
+	}
+
+	ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
+		reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
+	return agent, nil
+}
+
+// scanAgentNodes scans multiple rows into AgentNode slices, applying post-processing.
+func (ls *LocalStorage) scanAgentNodes(ctx context.Context, rows *sql.Rows) ([]*types.AgentNode, error) {
+	agents := []*types.AgentNode{}
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled during agent list iteration: %w", err)
+		}
+
+		agent := &types.AgentNode{}
+		var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
+		var proposedTagsJSON, approvedTagsJSON []byte
+		var healthStatusStr, lifecycleStatusStr string
+		var invocationURL sql.NullString
+
+		err := rows.Scan(
+			&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
+			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
+			&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+			&proposedTagsJSON, &approvedTagsJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
+		}
+
+		ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
+			reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
+		agents = append(agents, agent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error after listing agent nodes: %w", err)
+	}
+	return agents, nil
+}
+
+// postProcessAgentNode applies common post-processing to a scanned AgentNode.
+func (ls *LocalStorage) postProcessAgentNode(agent *types.AgentNode, healthStatusStr, lifecycleStatusStr string, invocationURL sql.NullString,
+	reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON []byte) {
+
+	agent.HealthStatus = types.HealthStatus(healthStatusStr)
+	agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
+	if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
+		url := strings.TrimSpace(invocationURL.String)
+		agent.InvocationURL = &url
+	}
+
+	if len(reasonersJSON) > 0 {
+		_ = json.Unmarshal(reasonersJSON, &agent.Reasoners)
+	}
+	if len(skillsJSON) > 0 {
+		_ = json.Unmarshal(skillsJSON, &agent.Skills)
+	}
+	if len(commConfigJSON) > 0 {
+		_ = json.Unmarshal(commConfigJSON, &agent.CommunicationConfig)
+	}
+	if len(featuresJSON) > 0 {
+		_ = json.Unmarshal(featuresJSON, &agent.Features)
+	}
+	if len(metadataJSON) > 0 {
+		_ = json.Unmarshal(metadataJSON, &agent.Metadata)
+	}
+	if len(proposedTagsJSON) > 0 {
+		_ = json.Unmarshal(proposedTagsJSON, &agent.ProposedTags)
+	}
+	if len(approvedTagsJSON) > 0 {
+		_ = json.Unmarshal(approvedTagsJSON, &agent.ApprovedTags)
+	}
+
+	if strings.TrimSpace(agent.DeploymentType) == "" {
+		if agent.InvocationURL != nil && strings.TrimSpace(*agent.InvocationURL) != "" {
+			agent.DeploymentType = "serverless"
+		} else if agent.Metadata.Custom != nil {
+			if v, ok := agent.Metadata.Custom["serverless"]; ok && fmt.Sprint(v) == "true" {
+				agent.DeploymentType = "serverless"
+			}
+		}
+		if strings.TrimSpace(agent.DeploymentType) == "" {
+			agent.DeploymentType = "long_running"
+		}
+	}
+	if agent.DeploymentType == "serverless" && (agent.InvocationURL == nil || strings.TrimSpace(*agent.InvocationURL) == "") {
+		if trimmed := strings.TrimSpace(agent.BaseURL); trimmed != "" {
+			execURL := strings.TrimSuffix(trimmed, "/") + "/execute"
+			agent.InvocationURL = &execURL
+		}
+	}
+
+	reconstructAgentLevelTags(agent)
+}
+
 // ListAgents retrieves agent node records from SQLite based on filters.
 func (ls *LocalStorage) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
-	// Check context cancellation early
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled during list agents: %w", err)
 	}
-	// Build query with filters
+
 	query := `
 		SELECT
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
 			registered_at, features, metadata, proposed_tags, approved_tags
 		FROM agent_nodes`
@@ -4484,19 +4687,19 @@ func (ls *LocalStorage) ListAgents(ctx context.Context, filters types.AgentFilte
 	var conditions []string
 	var args []interface{}
 
-	// Add health status filter
 	if filters.HealthStatus != nil {
 		conditions = append(conditions, "health_status = ?")
 		args = append(args, string(*filters.HealthStatus))
 	}
-
-	// Add team ID filter
 	if filters.TeamID != nil {
 		conditions = append(conditions, "team_id = ?")
 		args = append(args, *filters.TeamID)
 	}
+	if filters.GroupID != nil {
+		conditions = append(conditions, "group_id = ?")
+		args = append(args, *filters.GroupID)
+	}
 
-	// Add WHERE clause if there are conditions
 	if len(conditions) > 0 {
 		query += " WHERE " + conditions[0]
 		for i := 1; i < len(conditions); i++ {
@@ -4512,99 +4715,60 @@ func (ls *LocalStorage) ListAgents(ctx context.Context, filters types.AgentFilte
 	}
 	defer rows.Close()
 
-	agents := []*types.AgentNode{}
+	return ls.scanAgentNodes(ctx, rows)
+}
+
+// ListAgentsByGroup returns all agents belonging to a specific group.
+func (ls *LocalStorage) ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error) {
+	return ls.ListAgents(ctx, types.AgentFilters{GroupID: &groupID})
+}
+
+// ListAgentGroups returns distinct agent groups with summary info for a team.
+func (ls *LocalStorage) ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agent groups: %w", err)
+	}
+
+	var query string
+	if ls.mode == "postgres" {
+		query = `
+			SELECT group_id, team_id, COUNT(*) as node_count, STRING_AGG(DISTINCT version, ',') as versions
+			FROM agent_nodes
+			WHERE team_id = $1
+			GROUP BY group_id, team_id
+			ORDER BY group_id`
+	} else {
+		query = `
+			SELECT group_id, team_id, COUNT(*) as node_count, GROUP_CONCAT(DISTINCT version) as versions
+			FROM agent_nodes
+			WHERE team_id = ?
+			GROUP BY group_id, team_id
+			ORDER BY group_id`
+	}
+
+	rows, err := ls.db.QueryContext(ctx, query, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agent groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []types.AgentGroupSummary
 	for rows.Next() {
-		// Check context cancellation during iteration
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context cancelled during agent list iteration: %w", err)
+		var g types.AgentGroupSummary
+		var versionsStr sql.NullString
+		if err := rows.Scan(&g.GroupID, &g.TeamID, &g.NodeCount, &versionsStr); err != nil {
+			return nil, fmt.Errorf("failed to scan agent group row: %w", err)
 		}
-
-		agent := &types.AgentNode{}
-		var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
-		var proposedTagsJSON, approvedTagsJSON []byte
-		var healthStatusStr, lifecycleStatusStr string
-		var invocationURL sql.NullString
-
-		err := rows.Scan(
-			&agent.ID, &agent.TeamID, &agent.BaseURL, &agent.Version, &agent.DeploymentType, &invocationURL,
-			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-			&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
-			&proposedTagsJSON, &approvedTagsJSON,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
+		if versionsStr.Valid && versionsStr.String != "" {
+			g.Versions = strings.Split(versionsStr.String, ",")
 		}
-
-		agent.HealthStatus = types.HealthStatus(healthStatusStr)
-		agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
-		if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
-			url := strings.TrimSpace(invocationURL.String)
-			agent.InvocationURL = &url
-		}
-
-		if len(reasonersJSON) > 0 {
-			if err := json.Unmarshal(reasonersJSON, &agent.Reasoners); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent reasoners: %w", err)
-			}
-		}
-		if len(skillsJSON) > 0 {
-			if err := json.Unmarshal(skillsJSON, &agent.Skills); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent skills: %w", err)
-			}
-		}
-		if len(commConfigJSON) > 0 {
-			if err := json.Unmarshal(commConfigJSON, &agent.CommunicationConfig); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent communication config: %w", err)
-			}
-		}
-		if len(featuresJSON) > 0 {
-			if err := json.Unmarshal(featuresJSON, &agent.Features); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent features: %w", err)
-			}
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &agent.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent metadata: %w", err)
-			}
-		}
-		if len(proposedTagsJSON) > 0 {
-			if err := json.Unmarshal(proposedTagsJSON, &agent.ProposedTags); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent proposed tags: %w", err)
-			}
-		}
-		if len(approvedTagsJSON) > 0 {
-			if err := json.Unmarshal(approvedTagsJSON, &agent.ApprovedTags); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent approved tags: %w", err)
-			}
-		}
-		if strings.TrimSpace(agent.DeploymentType) == "" {
-			if agent.InvocationURL != nil && strings.TrimSpace(*agent.InvocationURL) != "" {
-				agent.DeploymentType = "serverless"
-			} else if agent.Metadata.Custom != nil {
-				if v, ok := agent.Metadata.Custom["serverless"]; ok && fmt.Sprint(v) == "true" {
-					agent.DeploymentType = "serverless"
-				}
-			}
-			if strings.TrimSpace(agent.DeploymentType) == "" {
-				agent.DeploymentType = "long_running"
-			}
-		}
-		if agent.DeploymentType == "serverless" && (agent.InvocationURL == nil || strings.TrimSpace(*agent.InvocationURL) == "") {
-			if trimmed := strings.TrimSpace(agent.BaseURL); trimmed != "" {
-				execURL := strings.TrimSuffix(trimmed, "/") + "/execute"
-				agent.InvocationURL = &execURL
-			}
-		}
-
-		reconstructAgentLevelTags(agent)
-		agents = append(agents, agent)
+		groups = append(groups, g)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error after listing agent nodes: %w", err)
+		return nil, fmt.Errorf("error after listing agent groups: %w", err)
 	}
 
-	return agents, nil
+	return groups, nil
 }
 
 // UpdateAgentHealth updates the health status of an agent node in SQLite.
@@ -4702,25 +4866,22 @@ func (ls *LocalStorage) UpdateAgentHealthAtomic(ctx context.Context, id string, 
 }
 
 // UpdateAgentHeartbeat updates only the heartbeat timestamp of an agent node in SQLite.
-func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
-	// Check context cancellation early
+// If version is empty, it updates the default (unversioned) agent.
+func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled during update agent heartbeat: %w", err)
 	}
 
-	// Begin transaction for atomic operation
 	tx, err := ls.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for agent heartbeat update: %w", err)
 	}
 	defer rollbackTx(tx, "UpdateAgentHeartbeat:"+id)
 
-	// Execute the heartbeat update using the transaction
-	if err := ls.executeUpdateAgentHeartbeat(ctx, tx, id, heartbeatTime); err != nil {
+	if err := ls.executeUpdateAgentHeartbeat(ctx, tx, id, version, heartbeatTime); err != nil {
 		return err
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit agent heartbeat transaction: %w", err)
 	}
@@ -4729,16 +4890,15 @@ func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, hea
 }
 
 // executeUpdateAgentHeartbeat performs the actual heartbeat timestamp update using DBTX interface
-func (ls *LocalStorage) executeUpdateAgentHeartbeat(ctx context.Context, q DBTX, id string, heartbeatTime time.Time) error {
+func (ls *LocalStorage) executeUpdateAgentHeartbeat(ctx context.Context, q DBTX, id string, version string, heartbeatTime time.Time) error {
 	query := `
 		UPDATE agent_nodes
 		SET last_heartbeat = ?
-		WHERE id = ?;`
+		WHERE id = ? AND version = ?;`
 
-	// Store timestamp in UTC format with timezone info
-	_, err := q.ExecContext(ctx, query, heartbeatTime.UTC().Format(time.RFC3339Nano), id)
+	_, err := q.ExecContext(ctx, query, heartbeatTime.UTC().Format(time.RFC3339Nano), id, version)
 	if err != nil {
-		return fmt.Errorf("failed to update agent heartbeat for ID '%s': %w", id, err)
+		return fmt.Errorf("failed to update agent heartbeat for ID '%s' version '%s': %w", id, version, err)
 	}
 
 	return nil
@@ -4782,6 +4942,30 @@ func (ls *LocalStorage) executeUpdateAgentLifecycleStatus(ctx context.Context, q
 	if err != nil {
 		fmt.Printf("❌ DEBUG: Database update failed for node %s: %v\n", id, err)
 		return fmt.Errorf("failed to update agent lifecycle status for ID '%s': %w", id, err)
+	}
+
+	return nil
+}
+
+// UpdateAgentVersion updates only the version field for an agent node.
+func (ls *LocalStorage) UpdateAgentVersion(ctx context.Context, id string, version string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during update agent version: %w", err)
+	}
+
+	tx, err := ls.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for agent version update: %w", err)
+	}
+	defer rollbackTx(tx, "UpdateAgentVersion:"+id)
+
+	query := `UPDATE agent_nodes SET version = ? WHERE id = ?;`
+	if _, err := tx.ExecContext(ctx, query, version, id); err != nil {
+		return fmt.Errorf("failed to update agent version for ID '%s': %w", id, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit agent version transaction: %w", err)
 	}
 
 	return nil
@@ -7551,7 +7735,7 @@ func (ls *LocalStorage) ListAgentsByLifecycleStatus(ctx context.Context, status 
 
 	query := `
 		SELECT
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
 			registered_at, features, metadata, proposed_tags, approved_tags
 		FROM agent_nodes WHERE lifecycle_status = ? ORDER BY registered_at DESC`
@@ -7562,80 +7746,7 @@ func (ls *LocalStorage) ListAgentsByLifecycleStatus(ctx context.Context, status 
 	}
 	defer rows.Close()
 
-	agents := []*types.AgentNode{}
-	for rows.Next() {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context cancelled during agent list iteration: %w", err)
-		}
-
-		agent := &types.AgentNode{}
-		var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
-		var proposedTagsJSON, approvedTagsJSON []byte
-		var healthStatusStr, lifecycleStatusStr string
-		var invocationURL sql.NullString
-
-		err := rows.Scan(
-			&agent.ID, &agent.TeamID, &agent.BaseURL, &agent.Version, &agent.DeploymentType, &invocationURL,
-			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-			&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
-			&proposedTagsJSON, &approvedTagsJSON,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
-		}
-
-		agent.HealthStatus = types.HealthStatus(healthStatusStr)
-		agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
-		if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
-			url := strings.TrimSpace(invocationURL.String)
-			agent.InvocationURL = &url
-		}
-
-		if len(reasonersJSON) > 0 {
-			if err := json.Unmarshal(reasonersJSON, &agent.Reasoners); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent reasoners: %w", err)
-			}
-		}
-		if len(skillsJSON) > 0 {
-			if err := json.Unmarshal(skillsJSON, &agent.Skills); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent skills: %w", err)
-			}
-		}
-		if len(commConfigJSON) > 0 {
-			if err := json.Unmarshal(commConfigJSON, &agent.CommunicationConfig); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent communication config: %w", err)
-			}
-		}
-		if len(featuresJSON) > 0 {
-			if err := json.Unmarshal(featuresJSON, &agent.Features); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent features: %w", err)
-			}
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &agent.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent metadata: %w", err)
-			}
-		}
-		if len(proposedTagsJSON) > 0 {
-			if err := json.Unmarshal(proposedTagsJSON, &agent.ProposedTags); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent proposed tags: %w", err)
-			}
-		}
-		if len(approvedTagsJSON) > 0 {
-			if err := json.Unmarshal(approvedTagsJSON, &agent.ApprovedTags); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent approved tags: %w", err)
-			}
-		}
-
-		reconstructAgentLevelTags(agent)
-		agents = append(agents, agent)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating agents: %w", err)
-	}
-
-	return agents, nil
+	return ls.scanAgentNodes(ctx, rows)
 }
 
 // reconstructAgentLevelTags ensures agent-level ProposedTags and ApprovedTags

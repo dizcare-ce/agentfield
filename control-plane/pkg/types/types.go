@@ -156,10 +156,12 @@ type AccessControlMetadata struct {
 
 // AgentNode represents a registered agent service.
 type AgentNode struct {
-	ID      string `json:"id" db:"id"`
-	TeamID  string `json:"team_id" db:"team_id"`
-	BaseURL string `json:"base_url" db:"base_url"`
-	Version string `json:"version" db:"version"`
+	ID             string `json:"id" db:"id"`
+	GroupID        string `json:"group_id" db:"group_id"`
+	TeamID         string `json:"team_id" db:"team_id"`
+	BaseURL        string `json:"base_url" db:"base_url"`
+	Version        string `json:"version" db:"version"`
+	TrafficWeight  int    `json:"traffic_weight" db:"traffic_weight"` // Weight for A/B traffic distribution (default 100)
 
 	// Serverless support
 	DeploymentType string  `json:"deployment_type" db:"deployment_type"`         // "long_running" or "serverless"
@@ -574,8 +576,17 @@ type ExecutionFilters struct {
 // AgentFilters holds filters for querying agent nodes.
 type AgentFilters struct {
 	TeamID       *string       `json:"team_id,omitempty"`
+	GroupID      *string       `json:"group_id,omitempty"`
 	HealthStatus *HealthStatus `json:"health_status,omitempty"`
 	Features     []string      `json:"features,omitempty"`
+}
+
+// AgentGroupSummary provides aggregate info about an agent group.
+type AgentGroupSummary struct {
+	GroupID   string   `json:"group_id"`
+	TeamID    string   `json:"team_id"`
+	NodeCount int      `json:"node_count"`
+	Versions  []string `json:"versions"`
 }
 
 // EventFilter holds filters for querying memory events.

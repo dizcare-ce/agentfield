@@ -61,7 +61,7 @@ this.http = axios.create({
 
   async heartbeat(status: 'starting' | 'ready' | 'degraded' | 'offline' = 'ready'): Promise<HealthStatus> {
     const nodeId = this.config.nodeId;
-    const bodyStr = JSON.stringify({ status, timestamp: new Date().toISOString() });
+    const bodyStr = JSON.stringify({ status, version: this.config.version ?? '', timestamp: new Date().toISOString() });
     const authHeaders = this.didAuthenticator.signRequest(Buffer.from(bodyStr));
     const res = await this.http.post(
       `/api/v1/nodes/${nodeId}/heartbeat`,

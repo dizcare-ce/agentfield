@@ -74,6 +74,7 @@ type DiscoveryResponse struct {
 // AgentCapability describes a single agent and its reasoners/skills.
 type AgentCapability struct {
 	AgentID        string               `json:"agent_id"`
+	GroupID        string               `json:"group_id"`
 	BaseURL        string               `json:"base_url"`
 	Version        string               `json:"version"`
 	HealthStatus   string               `json:"health_status"`
@@ -487,6 +488,7 @@ func buildDiscoveryResponse(agents []*types.AgentNode, filters DiscoveryFilters)
 
 		capability := AgentCapability{
 			AgentID:        agent.ID,
+			GroupID:        agent.GroupID,
 			BaseURL:        agent.BaseURL,
 			Version:        agent.Version,
 			HealthStatus:   string(agent.HealthStatus),

@@ -51,9 +51,11 @@ func (AgentExecutionModel) TableName() string { return "agent_executions" }
 
 type AgentNodeModel struct {
 	ID                  string     `gorm:"column:id;primaryKey"`
+	Version             string     `gorm:"column:version;primaryKey;not null;default:''"`
+	GroupID             string     `gorm:"column:group_id;not null;default:'';index"`
 	TeamID              string     `gorm:"column:team_id;not null;index"`
 	BaseURL             string     `gorm:"column:base_url;not null"`
-	Version             string     `gorm:"column:version;not null"`
+	TrafficWeight       int        `gorm:"column:traffic_weight;not null;default:100"`
 	DeploymentType      string     `gorm:"column:deployment_type;default:'long_running';index"`
 	InvocationURL       *string    `gorm:"column:invocation_url"`
 	Reasoners           []byte     `gorm:"column:reasoners"`

@@ -343,23 +343,27 @@ func (hc *HeartbeatCache) shouldUpdateDatabase(nodeID string, now time.Time, sta
 }
 
 // processHeartbeatAsync processes heartbeat database updates asynchronously
-func processHeartbeatAsync(storageProvider storage.StorageProvider, uiService *services.UIService, nodeID string, cached *CachedNodeData) {
+func processHeartbeatAsync(storageProvider storage.StorageProvider, uiService *services.UIService, nodeID string, version string, cached *CachedNodeData) {
 	go func() {
 		ctx := context.Background()
 
 		// Verify node exists only when we need to update DB
 		if _, err := storageProvider.GetAgent(ctx, nodeID); err != nil {
-			logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
-			return
+			// If not found as default, try finding any version
+			versions, listErr := storageProvider.ListAgentVersions(ctx, nodeID)
+			if listErr != nil || len(versions) == 0 {
+				logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
+				return
+			}
 		}
 
 		// Update heartbeat in database
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, cached.LastDBUpdate); err != nil {
-			logger.Logger.Error().Err(err).Msgf("❌ HEARTBEAT_CONTENTION: Failed to update heartbeat for node %s - %v", nodeID, err)
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, version, cached.LastDBUpdate); err != nil {
+			logger.Logger.Error().Err(err).Msgf("❌ HEARTBEAT_CONTENTION: Failed to update heartbeat for node %s version '%s' - %v", nodeID, version, err)
 			return
 		}
 
-		logger.Logger.Debug().Msgf("💓 HEARTBEAT_CONTENTION: Async DB update completed for node %s", nodeID)
+		logger.Logger.Debug().Msgf("💓 HEARTBEAT_CONTENTION: Async DB update completed for node %s version '%s'", nodeID, version)
 	}()
 }
 
@@ -392,6 +396,11 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 		}
 
 		logger.Logger.Debug().Msgf("✅ Node validation passed for ID: %s", newNode.ID)
+
+		// Default group_id to agent id for backward compatibility
+		if newNode.GroupID == "" {
+			newNode.GroupID = newNode.ID
+		}
 
 		// Normalize proposed_tags → tags for backward compatibility.
 		// If a skill/reasoner has proposed_tags but no tags, copy proposed_tags to tags.
@@ -681,6 +690,11 @@ func ListNodesHandler(storageProvider storage.StorageProvider) gin.HandlerFunc {
 			filters.TeamID = &teamID
 		}
 
+		// Check for group_id filter parameter
+		if groupID := c.Query("group_id"); groupID != "" {
+			filters.GroupID = &groupID
+		}
+
 		// Check for show_all parameter to override default active filter
 		if showAll := c.Query("show_all"); showAll == "true" {
 			filters.HealthStatus = nil // Remove health status filter to show all nodes
@@ -738,6 +752,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 
 		// Try to parse enhanced heartbeat data (optional)
 		var enhancedHeartbeat struct {
+			Version    string `json:"version,omitempty"`
 			Status     string `json:"status,omitempty"`
 			MCPServers []struct {
 				Alias     string `json:"alias"`
@@ -745,7 +760,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				ToolCount int    `json:"tool_count"`
 			} `json:"mcp_servers,omitempty"`
 			Timestamp   string `json:"timestamp,omitempty"`
-			HealthScore *int   `json:"health_score,omitempty"` // New: allow agents to report health score
+			HealthScore *int   `json:"health_score,omitempty"`
 		}
 
 		// Read the request body if present
@@ -791,7 +806,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 			}
 
 			// Process heartbeat asynchronously to avoid blocking the response
-			processHeartbeatAsync(storageProvider, uiService, nodeID, cached)
+			processHeartbeatAsync(storageProvider, uiService, nodeID, enhancedHeartbeat.Version, cached)
 
 			logger.Logger.Debug().Msgf("💓 Heartbeat DB update queued for node: %s at %s", nodeID, now.Format(time.RFC3339))
 		} else {

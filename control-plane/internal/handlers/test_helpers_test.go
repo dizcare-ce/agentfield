@@ -45,6 +45,10 @@ func (s *testExecutionStorage) GetAgent(ctx context.Context, id string) (*types.
 	return nil, nil
 }
 
+func (s *testExecutionStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
+
 func (s *testExecutionStorage) StoreWorkflowExecution(ctx context.Context, execution *types.WorkflowExecution) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

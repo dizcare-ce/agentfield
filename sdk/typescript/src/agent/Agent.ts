@@ -1110,7 +1110,7 @@ export class Agent {
       const agentTags = this.config.tags ?? [];
       const regResponse = await this.agentFieldClient.register({
         id: this.config.nodeId,
-        version: this.config.version,
+        version: this.config.version ?? '',
         base_url: publicUrl,
         public_url: publicUrl,
         deployment_type: this.config.deploymentType ?? 'long_running',

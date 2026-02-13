@@ -192,6 +192,12 @@ func (s *stubStorage) GetLockStatus(ctx context.Context, key string) (*types.Dis
 
 // Agent registry
 func (s *stubStorage) RegisterAgent(ctx context.Context, agent *types.AgentNode) error { return nil }
+func (s *stubStorage) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	return nil, nil
+}
+func (s *stubStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
 func (s *stubStorage) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
 	return nil, nil
 }
@@ -201,11 +207,20 @@ func (s *stubStorage) UpdateAgentHealth(ctx context.Context, id string, status t
 func (s *stubStorage) UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error {
 	return nil
 }
-func (s *stubStorage) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
+func (s *stubStorage) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	return nil
 }
 func (s *stubStorage) UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error {
 	return nil
+}
+func (s *stubStorage) UpdateAgentVersion(ctx context.Context, id string, version string) error {
+	return nil
+}
+func (s *stubStorage) ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
+func (s *stubStorage) ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error) {
+	return nil, nil
 }
 
 // Configuration
