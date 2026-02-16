@@ -49,3 +49,7 @@ reports/
 
 # Typescript
 .env
+
+# Pipeline artifacts and worktrees
+.artifacts/
+.worktrees/
