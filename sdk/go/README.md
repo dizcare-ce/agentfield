@@ -45,6 +45,43 @@ func main() {
 - `client`: Low-level HTTP client for the AgentField control plane.
 - `types`: Shared data structures and contracts.
 - `ai`: Helpers for interacting with AI providers via the control plane.
+- `did`: Decentralized Identity (DID) and Verifiable Credentials (VC) for compliance audit trails.
+
+## DID/VC Features
+
+Enable cryptographic identity management and tamper-proof audit trails for compliance-grade workflows:
+
+```go
+// Enable DID/VC in agent configuration
+agent, err := agentfieldagent.New(agentfieldagent.Config{
+    NodeID:        "my-agent",
+    AgentFieldURL: "https://control-plane.example.com",
+    Token:         "your-api-token",
+    VCEnabled:     true,  // Enable DIDs and verifiable credentials
+})
+
+// Get the agent's DID
+if agent.DID().IsEnabled() {
+    agentDID := agent.DID().GetAgentDID()
+    log.Printf("Agent DID: %s", agentDID)
+}
+
+// Generate credentials for executions (W3C compliant)
+cred, err := agent.DID().GenerateCredential(context.Background(), did.GenerateCredentialOptions{
+    ExecutionID: "exec-123",
+    InputData:   map[string]any{"query": "analyze"},
+    OutputData:  map[string]any{"result": 42},
+    Status:      "succeeded",
+})
+
+// Export audit trail for compliance
+export, err := agent.DID().ExportAuditTrail(context.Background(), did.AuditTrailFilter{
+    WorkflowID: stringPtr("workflow-xyz"),
+    Limit:      intPtr(1000),
+})
+```
+
+For detailed usage, see the [`did` package documentation](./did/README.md).
 
 ## Testing
 
