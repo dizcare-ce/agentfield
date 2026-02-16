@@ -1234,3 +1234,223 @@ func TestAgentVCEnabledWithoutToken(t *testing.T) {
 	assert.False(t, headerReceived)
 	assert.NotNil(t, agent.DID())
 }
+
+// TestExecutionContextDIDPopulationVCEnabled verifies that ExecutionContext DID fields are populated
+// when VCEnabled=true with registered reasoners.
+func TestExecutionContextDIDPopulationVCEnabled(t *testing.T) {
+	// Mock control plane server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/did/register" && r.Method == http.MethodPost {
+			// Return response with registered reasoners
+			response := map[string]any{
+				"agent_did": map[string]any{
+					"did":              "did:example:agent:test-agent",
+					"private_key_jwk":  `{"kty":"EC"}`,
+					"public_key_jwk":   `{"kty":"EC"}`,
+					"derivation_path": "m/44'/0'/0'/0/0",
+					"component_type":   "agent",
+				},
+				"reasoner_dids": map[string]any{
+					"test_reasoner": map[string]any{
+						"did":              "did:example:reasoner:test_reasoner",
+						"private_key_jwk":  `{"kty":"EC"}`,
+						"public_key_jwk":   `{"kty":"EC"}`,
+						"derivation_path": "m/44'/0'/0'/0/1",
+						"component_type":   "reasoner",
+						"function_name":    "test_reasoner",
+					},
+				},
+				"skill_dids":    map[string]any{},
+				"agentfield_server_id": "server-123",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+		}
+	}))
+	defer mockServer.Close()
+
+	// Create agent with VCEnabled (use serverless deployment to avoid async execution)
+	cfg := Config{
+		NodeID:         "test-agent",
+		Version:        "1.0.0",
+		AgentFieldURL:  mockServer.URL,
+		VCEnabled:      true,
+		DeploymentType: "serverless",
+		Logger:         log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+	require.True(t, agent.DID().IsEnabled())
+
+	// Register a test reasoner
+	agent.RegisterReasoner("test_reasoner", func(ctx context.Context, input map[string]any) (any, error) {
+		ec := ExecutionContextFrom(ctx)
+		// Verify DID fields are populated
+		assert.Equal(t, "did:example:reasoner:test_reasoner", ec.CallerDID)
+		assert.Equal(t, "did:example:reasoner:test_reasoner", ec.TargetDID)
+		assert.Equal(t, "did:example:agent:test-agent", ec.AgentNodeDID)
+		return map[string]any{"status": "ok"}, nil
+	})
+
+	// Simulate HTTP request to the reasoner (note: X-Execution-ID set to trigger potential async, but serverless mode will execute synchronously)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/reasoners/test_reasoner",
+		bytes.NewReader([]byte(`{"input":"test"}`)),
+	)
+	req.Header.Set("X-Run-ID", "run_123")
+	req.Header.Set("X-Execution-ID", "exec_123")
+	req.Header.Set("X-Session-ID", "session_123")
+
+	w := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(w, req)
+
+	// Verify response
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestExecutionContextDIDPopulationVCDisabled verifies that ExecutionContext DID fields
+// remain empty when VCEnabled=false.
+func TestExecutionContextDIDPopulationVCDisabled(t *testing.T) {
+	// Create agent with VCEnabled=false
+	cfg := Config{
+		NodeID:  "test-agent",
+		Version: "1.0.0",
+		Logger:  log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+	require.False(t, agent.DID().IsEnabled())
+
+	// Register a test reasoner
+	agent.RegisterReasoner("test_reasoner", func(ctx context.Context, input map[string]any) (any, error) {
+		ec := ExecutionContextFrom(ctx)
+		// Verify DID fields are empty
+		assert.Equal(t, "", ec.CallerDID)
+		assert.Equal(t, "", ec.TargetDID)
+		assert.Equal(t, "", ec.AgentNodeDID)
+		return map[string]any{"status": "ok"}, nil
+	})
+
+	// Simulate HTTP request to the reasoner
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/reasoners/test_reasoner",
+		bytes.NewReader([]byte(`{"input":"test"}`)),
+	)
+	req.Header.Set("X-Run-ID", "run_123")
+	req.Header.Set("X-Execution-ID", "exec_123")
+
+	w := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(w, req)
+
+	// Verify response
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestExecutionContextDIDPopulationFallback verifies that GetFunctionDID falls back to
+// agent DID when reasoner is not registered.
+func TestExecutionContextDIDPopulationFallback(t *testing.T) {
+	// Mock control plane server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/did/register" && r.Method == http.MethodPost {
+			// Return response with only agent DID (no reasoners)
+			response := map[string]any{
+				"agent_did": map[string]any{
+					"did":              "did:example:agent:test-agent",
+					"private_key_jwk":  `{"kty":"EC"}`,
+					"public_key_jwk":   `{"kty":"EC"}`,
+					"derivation_path": "m/44'/0'/0'/0/0",
+					"component_type":   "agent",
+				},
+				"reasoner_dids": map[string]any{},
+				"skill_dids":    map[string]any{},
+				"agentfield_server_id": "server-123",
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+		}
+	}))
+	defer mockServer.Close()
+
+	// Create agent with VCEnabled (use serverless deployment to avoid async execution)
+	cfg := Config{
+		NodeID:         "test-agent",
+		Version:        "1.0.0",
+		AgentFieldURL:  mockServer.URL,
+		VCEnabled:      true,
+		DeploymentType: "serverless",
+		Logger:         log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+	require.True(t, agent.DID().IsEnabled())
+
+	// Register a test reasoner (not registered with DID system)
+	agent.RegisterReasoner("unregistered_reasoner", func(ctx context.Context, input map[string]any) (any, error) {
+		ec := ExecutionContextFrom(ctx)
+		// Verify DID fields fall back to agent DID
+		assert.Equal(t, "did:example:agent:test-agent", ec.CallerDID)
+		assert.Equal(t, "did:example:agent:test-agent", ec.TargetDID)
+		assert.Equal(t, "did:example:agent:test-agent", ec.AgentNodeDID)
+		return map[string]any{"status": "ok"}, nil
+	})
+
+	// Simulate HTTP request to the reasoner
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/reasoners/unregistered_reasoner",
+		bytes.NewReader([]byte(`{"input":"test"}`)),
+	)
+	req.Header.Set("X-Run-ID", "run_123")
+	req.Header.Set("X-Execution-ID", "exec_123")
+
+	w := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(w, req)
+
+	// Verify response
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestExecutionContextDIDPopulationDisabledDIDSystem verifies graceful degradation when
+// DID system is disabled (agent.DID() returns nil or IsEnabled() returns false).
+func TestExecutionContextDIDPopulationDisabledDIDSystem(t *testing.T) {
+	// Create agent without DID system (VCEnabled=false)
+	cfg := Config{
+		NodeID:  "test-agent",
+		Version: "1.0.0",
+		Logger:  log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, agent.DID())
+	require.False(t, agent.DID().IsEnabled())
+
+	// Register a test reasoner
+	agent.RegisterReasoner("test_reasoner", func(ctx context.Context, input map[string]any) (any, error) {
+		ec := ExecutionContextFrom(ctx)
+		// Verify DID fields remain empty when system is disabled
+		assert.Equal(t, "", ec.CallerDID)
+		assert.Equal(t, "", ec.TargetDID)
+		assert.Equal(t, "", ec.AgentNodeDID)
+		return map[string]any{"status": "ok"}, nil
+	})
+
+	// Simulate HTTP request to the reasoner
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/reasoners/test_reasoner",
+		bytes.NewReader([]byte(`{"input":"test"}`)),
+	)
+	req.Header.Set("X-Run-ID", "run_123")
+
+	w := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(w, req)
+
+	// Verify response and no panic
+	assert.Equal(t, http.StatusOK, w.Code)
+}

@@ -874,6 +874,21 @@ func (a *Agent) handleReasoner(w http.ResponseWriter, r *http.Request) {
 		execCtx.RootWorkflowID = execCtx.WorkflowID
 	}
 
+	// Populate DID fields if VCEnabled
+	if a.cfg.VCEnabled && a.did != nil {
+		// CallerDID: resolved from ReasonerName in the execution context.
+		// In the handler context, ReasonerName is the target reasoner.
+		// Per AC3, use GetFunctionDID(ec.ReasonerName) which falls back to agent DID.
+		execCtx.CallerDID = a.did.GetFunctionDID(execCtx.ReasonerName)
+
+		// TargetDID: resolved from the target function name (the reasoner being invoked).
+		// Per AC4, targetFunctionName is derived from routing logic (the URL path).
+		execCtx.TargetDID = a.did.GetFunctionDID(name)
+
+		// AgentNodeDID: the agent's own DID per AC4.
+		execCtx.AgentNodeDID = a.did.GetAgentDID()
+	}
+
 	ctx := contextWithExecution(r.Context(), execCtx)
 
 	// In serverless mode we want a synchronous execution so the control plane can return
