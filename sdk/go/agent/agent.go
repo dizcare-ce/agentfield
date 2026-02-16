@@ -20,6 +20,7 @@ import (
 
 	"github.com/Agent-Field/agentfield/sdk/go/ai"
 	"github.com/Agent-Field/agentfield/sdk/go/client"
+	"github.com/Agent-Field/agentfield/sdk/go/did"
 	"github.com/Agent-Field/agentfield/sdk/go/types"
 )
 
@@ -39,6 +40,11 @@ type ExecutionContext struct {
 	AgentNodeID       string
 	ReasonerName      string
 	StartedAt         time.Time
+
+	// DID fields (optional, populated if VCEnabled)
+	CallerDID    string
+	TargetDID    string
+	AgentNodeDID string
 }
 
 func init() {
@@ -179,6 +185,12 @@ type Config struct {
 	// MemoryBackend allows plugging in a custom memory storage backend.
 	// Optional. If nil, an in-memory backend is used (data lost on restart).
 	MemoryBackend MemoryBackend
+
+	// VCEnabled enables Decentralized Identity and Verifiable Credentials.
+	// When true, the agent registers with the DID system and can generate
+	// credentials for compliance audit trails. When false (default), all DID
+	// operations are disabled and return empty results. Optional; default: false.
+	VCEnabled bool
 }
 
 // CLIConfig controls CLI behaviour and presentation.
@@ -201,6 +213,7 @@ type Agent struct {
 	reasoners  map[string]*Reasoner
 	aiClient   *ai.Client // AI/LLM client
 	memory     *Memory    // Memory system for state management
+	did        *did.DIDManager // DID manager for identity and credentials
 
 	serverMu sync.RWMutex
 	server   *http.Server
@@ -275,6 +288,36 @@ func New(cfg Config) (*Agent, error) {
 			return nil, err
 		}
 		a.client = c
+	}
+
+	// Initialize DID/VC if enabled
+	if cfg.VCEnabled && strings.TrimSpace(cfg.AgentFieldURL) != "" {
+		didClient, err := did.NewDIDClient(
+			cfg.AgentFieldURL,
+			map[string]string{
+				"Authorization": "Bearer " + cfg.Token,
+			},
+		)
+		if err != nil {
+			a.logger.Printf("warning: failed to create DID client: %v", err)
+			a.did = did.NewDIDManager(nil, cfg.NodeID)
+		} else {
+			a.did = did.NewDIDManager(didClient, cfg.NodeID)
+
+			// Extract reasoners for registration
+			reasoners := make([]map[string]any, 0, len(a.reasoners))
+			for name := range a.reasoners {
+				reasoners = append(reasoners, map[string]any{"id": name})
+			}
+
+			// Register agent; non-fatal if fails
+			if err := a.did.RegisterAgent(context.Background(), reasoners, []map[string]any{}); err != nil {
+				a.logger.Printf("warning: DID registration failed: %v", err)
+			}
+		}
+	} else {
+		// VCEnabled=false: create disabled manager
+		a.did = did.NewDIDManager(nil, cfg.NodeID)
 	}
 
 	return a, nil
@@ -1277,4 +1320,19 @@ func ExecutionContextFrom(ctx context.Context) ExecutionContext {
 //	agent.Memory().GlobalScope().Set(ctx, "shared_key", data)
 func (a *Agent) Memory() *Memory {
 	return a.memory
+}
+
+// DID returns the agent's DID manager for identity and credential operations.
+// DID provides methods for accessing agent and function DIDs, generating verifiable
+// credentials, and exporting audit trails. The manager is always present but may be
+// disabled if VCEnabled is not set in the config.
+//
+// Example usage:
+//
+//	if agent.DID().IsEnabled() {
+//	    agentDID := agent.DID().GetAgentDID()
+//	    credential, err := agent.DID().GenerateCredential(ctx, opts)
+//	}
+func (a *Agent) DID() *did.DIDManager {
+	return a.did
 }

@@ -908,3 +908,97 @@ func TestCallLocalUnknownReasoner(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown reasoner")
 }
+
+// TestConfigBackwardCompat verifies backward compatibility for Config without VCEnabled field.
+// Existing agents created without VCEnabled should work unchanged.
+func TestConfigBackwardCompat(t *testing.T) {
+	// Create agent without VCEnabled (defaults to false)
+	cfg := Config{
+		NodeID:        "node-1",
+		Version:       "1.0.0",
+		AgentFieldURL: "https://api.example.com",
+		Logger:        log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+	assert.NotNil(t, agent)
+
+	// Verify agent was created successfully
+	assert.Equal(t, "node-1", agent.cfg.NodeID)
+
+	// Verify DID manager exists but is disabled
+	assert.NotNil(t, agent.DID())
+	assert.False(t, agent.DID().IsEnabled())
+	assert.Equal(t, "", agent.DID().GetAgentDID())
+}
+
+// TestAgentDIDMethod verifies that agent.DID() returns a DIDManager instance.
+func TestAgentDIDMethod(t *testing.T) {
+	cfg := Config{
+		NodeID:        "node-1",
+		Version:       "1.0.0",
+		AgentFieldURL: "https://api.example.com",
+		Logger:        log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+
+	// Verify DID() method returns a DIDManager
+	didMgr := agent.DID()
+	assert.NotNil(t, didMgr)
+
+	// Verify it's disabled by default
+	assert.False(t, didMgr.IsEnabled())
+}
+
+// TestAgentVCEnabledFalse verifies that VCEnabled=false creates a disabled DIDManager.
+func TestAgentVCEnabledFalse(t *testing.T) {
+	cfg := Config{
+		NodeID:        "node-1",
+		Version:       "1.0.0",
+		AgentFieldURL: "https://api.example.com",
+		VCEnabled:     false,
+		Logger:        log.New(io.Discard, "", 0),
+	}
+
+	agent, err := New(cfg)
+	require.NoError(t, err)
+
+	// Verify DID manager is disabled
+	assert.NotNil(t, agent.DID())
+	assert.False(t, agent.DID().IsEnabled())
+	assert.Equal(t, "", agent.DID().GetAgentDID())
+}
+
+// TestExecutionContextDIDFields verifies that ExecutionContext has DID fields.
+func TestExecutionContextDIDFields(t *testing.T) {
+	ec := ExecutionContext{
+		RunID:        "run-1",
+		ExecutionID:  "exec-1",
+		ReasonerName: "test",
+		CallerDID:    "did:agent:caller",
+		TargetDID:    "did:agent:target",
+		AgentNodeDID: "did:agent:node",
+	}
+
+	// Verify fields can be set and read
+	assert.Equal(t, "did:agent:caller", ec.CallerDID)
+	assert.Equal(t, "did:agent:target", ec.TargetDID)
+	assert.Equal(t, "did:agent:node", ec.AgentNodeDID)
+}
+
+// TestExecutionContextDIDFieldsDefault verifies that DID fields default to empty string.
+func TestExecutionContextDIDFieldsDefault(t *testing.T) {
+	ec := ExecutionContext{
+		RunID:        "run-1",
+		ExecutionID:  "exec-1",
+		ReasonerName: "test",
+	}
+
+	// Verify fields default to empty string
+	assert.Equal(t, "", ec.CallerDID)
+	assert.Equal(t, "", ec.TargetDID)
+	assert.Equal(t, "", ec.AgentNodeDID)
+}
