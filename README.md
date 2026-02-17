@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-7c3aed.svg?style=flat&labelColor=1e1e2e)](LICENSE)
 [![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fsantoshkumarradha%2Fd98e2ad73502b4075f6a5f0ae4f5cae5%2Fraw%2Fbadge.json&style=flat&logo=download&logoColor=white&labelColor=1e1e2e&cacheSeconds=3600)](https://github.com/Agent-Field/agentfield)
 [![Last Commit](https://img.shields.io/github/last-commit/Agent-Field/agentfield?style=flat&logo=git&logoColor=white&color=7c3aed&labelColor=1e1e2e)](https://github.com/Agent-Field/agentfield/commits/main)
-[![Go](https://img.shields.io/badge/go-1.21+-00ADD8.svg?style=flat&labelColor=1e1e2e&logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/go-1.24+-00ADD8.svg?style=flat&labelColor=1e1e2e&logo=go&logoColor=white)](https://go.dev/)
 [![Python](https://img.shields.io/badge/python-3.8+-3776AB.svg?style=flat&labelColor=1e1e2e&logo=python&logoColor=white)](https://www.python.org/)
 [![Deploy with Docker](https://img.shields.io/badge/deploy-docker-2496ED.svg?style=flat&labelColor=1e1e2e&logo=docker&logoColor=white)](https://docs.docker.com/)
 [![Discord](https://img.shields.io/badge/discord-join%20us-5865F2.svg?style=flat&labelColor=1e1e2e&logo=discord&logoColor=white)](https://discord.gg/aBHaXMkpqh)
@@ -73,7 +73,11 @@ We call this the AI Backend. Not a chatbot, not a copilot—infrastructure for s
 ```python
 from agentfield import Agent, AIConfig
 
-app = Agent(node_id="researcher", ai_config=AIConfig(model="gpt-4o"))
+app = Agent(
+    node_id="researcher",
+    agentfield_server="http://localhost:8080",  # or set AGENTFIELD_URL env var
+    ai_config=AIConfig(model="gpt-4o"),
+)
 
 @app.skill()
 def fetch_url(url: str) -> str:
@@ -85,6 +89,7 @@ async def summarize(url: str) -> dict:
     return await app.ai(f"Summarize: {content}")
 
 app.run()  # → POST /api/v1/execute/researcher.summarize
+           # (af init templates use app.serve() for auto-port and hot-reload)
 ```
 
 [Full Python SDK Documentation →](https://agentfield.ai/api/python-sdk/overview)
@@ -328,7 +333,7 @@ AgentField isn't a framework you extend. It's infrastructure you deploy on.
 
 **AgentField SDKs at Scale** (100,000 handlers)
 
-| | Go | TypeScript | Python |
+| | Go | TypeScript | Python* |
 |---|---:|---:|---:|
 | Registration | 17 ms | 14 ms | ~5.7 s |
 | Memory/Handler | 280 B | 276 B | 7.5 KB |
@@ -342,6 +347,8 @@ AgentField isn't a framework you extend. It's infrastructure you deploy on.
 | Memory/Handler | 7.5 KB (py) / 276 B (ts) | 10.8 KB | 14.3 KB | 1.8 KB |
 
 <sub>Apple M1. Handler registration + invocation overhead (no LLM). [Methodology →](examples/benchmarks/100k-scale/)</sub>
+
+<sub>\* Python at 100k handlers extrapolated from 1k-handler measurements; Go and TypeScript directly measured.</sub>
 
 **Not a DAG builder.** Agents decide what to do next—dynamically. The control plane tracks the execution graph automatically.
 
