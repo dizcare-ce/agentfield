@@ -55,6 +55,7 @@ class LocalVerifier:
         # Cached data
         self.policies: List[Dict[str, Any]] = []
         self.revoked_dids: Set[str] = set()
+        self.registered_dids: Set[str] = set()
         self.admin_public_key_jwk: Optional[Dict[str, Any]] = None
         self.issuer_did: Optional[str] = None
 
@@ -117,6 +118,24 @@ class LocalVerifier:
                 logger.warning(f"Failed to fetch revocations: {e}")
                 success = False
 
+            # Fetch registered DIDs
+            try:
+                async with session.get(
+                    f"{self.agentfield_url}/api/v1/registered-dids",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.registered_dids = set(data.get("registered_dids", []))
+                        logger.debug(f"Refreshed {len(self.registered_dids)} registered DIDs")
+                    else:
+                        logger.warning(f"Failed to fetch registered DIDs: HTTP {resp.status}")
+                        success = False
+            except Exception as e:
+                logger.warning(f"Failed to fetch registered DIDs: {e}")
+                success = False
+
             # Fetch admin public key
             try:
                 async with session.get(
@@ -161,21 +180,39 @@ class LocalVerifier:
         """
         return caller_did in self.revoked_dids
 
+    def check_registration(self, caller_did: str) -> bool:
+        """
+        Check if a caller DID is registered with the control plane.
+
+        Returns True if registered (known), False if unknown. When the
+        registered DIDs cache is empty (not yet loaded), returns True to
+        avoid blocking requests before the first refresh completes.
+        """
+        if not self.registered_dids:
+            # Cache not yet populated — allow to avoid blocking before first refresh.
+            return True
+        return caller_did in self.registered_dids
+
     def verify_signature(
         self,
         caller_did: str,
         signature_b64: str,
         timestamp: str,
         body: bytes,
+        nonce: str = "",
     ) -> bool:
         """
         Verify an Ed25519 DID signature on an incoming request.
+
+        Resolves the caller's public key from their DID (did:key embeds the key
+        directly; other methods fall back to the admin public key).
 
         Args:
             caller_did: Caller's DID identifier
             signature_b64: Base64-encoded Ed25519 signature
             timestamp: Unix timestamp string from the request
             body: Request body bytes
+            nonce: Optional nonce from X-DID-Nonce header
 
         Returns:
             True if signature is valid, False otherwise
@@ -191,10 +228,6 @@ class LocalVerifier:
             logger.debug("Invalid timestamp format")
             return False
 
-        if not self.admin_public_key_jwk:
-            logger.debug("No admin public key available for verification")
-            return False
-
         try:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         except ImportError:
@@ -202,18 +235,20 @@ class LocalVerifier:
             return False
 
         try:
-            # Extract public key from JWK
-            x_value = self.admin_public_key_jwk.get("x", "")
-            # Add padding for base64url
-            padding = 4 - (len(x_value) % 4)
-            if padding != 4:
-                x_value += "=" * padding
-            public_key_bytes = base64.urlsafe_b64decode(x_value)
+            # Resolve public key from the caller's DID
+            public_key_bytes = self._resolve_public_key(caller_did)
+            if public_key_bytes is None:
+                logger.debug(f"Could not resolve public key for DID: {caller_did}")
+                return False
             public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
 
-            # Reconstruct the signed payload: "{timestamp}:{sha256(body)}"
+            # Reconstruct the signed payload: "{timestamp}[:{nonce}]:{sha256(body)}"
+            # Must match the format used by SDK signing (did_auth.py)
             body_hash = hashlib.sha256(body).hexdigest()
-            payload = f"{timestamp}:{body_hash}".encode("utf-8")
+            if nonce:
+                payload = f"{timestamp}:{nonce}:{body_hash}".encode("utf-8")
+            else:
+                payload = f"{timestamp}:{body_hash}".encode("utf-8")
 
             # Decode the signature
             signature_bytes = base64.b64decode(signature_b64)
@@ -225,6 +260,43 @@ class LocalVerifier:
         except Exception as e:
             logger.debug(f"Signature verification failed: {e}")
             return False
+
+    def _resolve_public_key(self, caller_did: str) -> Optional[bytes]:
+        """
+        Resolve the public key bytes from a DID.
+
+        For did:key, the public key is self-contained in the identifier:
+          did:key:z<base64url(0xed01 + 32-byte-pubkey)>
+
+        For other DID methods, falls back to the admin public key.
+        """
+        if caller_did.startswith("did:key:z"):
+            try:
+                encoded = caller_did[len("did:key:z"):]
+                decoded = base64.urlsafe_b64decode(encoded + "==")
+                # Verify Ed25519 multicodec prefix: 0xed, 0x01
+                if len(decoded) >= 34 and decoded[0] == 0xED and decoded[1] == 0x01:
+                    return decoded[2:34]
+                logger.debug(f"Invalid multicodec prefix in did:key: {decoded[:2].hex()}")
+                return None
+            except Exception as e:
+                logger.debug(f"Failed to decode did:key public key: {e}")
+                return None
+
+        # Fallback: use admin public key for non-did:key methods
+        if self.admin_public_key_jwk:
+            try:
+                x_value = self.admin_public_key_jwk.get("x", "")
+                padding = 4 - (len(x_value) % 4)
+                if padding != 4:
+                    x_value += "=" * padding
+                return base64.urlsafe_b64decode(x_value)
+            except Exception as e:
+                logger.debug(f"Failed to decode admin public key: {e}")
+                return None
+
+        logger.debug("No public key available for verification")
+        return None
 
     def evaluate_policy(
         self,

@@ -15,7 +15,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
+
 	"syscall"
 	"time"
 
@@ -878,16 +878,11 @@ func (a *Agent) localVerificationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Refresh cache if stale (best-effort, non-blocking for first request).
-		// Use atomic flag to ensure at most one refresh goroutine runs at a time.
+		// Refresh cache if stale — block until refresh completes so that
+		// registration and revocation checks use up-to-date data.
 		if a.localVerifier.NeedsRefresh() {
-			if atomic.CompareAndSwapInt32(&a.localVerifier.refreshing, 0, 1) {
-				go func() {
-					defer atomic.StoreInt32(&a.localVerifier.refreshing, 0)
-					if err := a.localVerifier.Refresh(); err != nil {
-						a.logger.Printf("warn: local verification cache refresh failed: %v", err)
-					}
-				}()
+			if err := a.localVerifier.Refresh(); err != nil {
+				a.logger.Printf("warn: local verification cache refresh failed: %v", err)
 			}
 		}
 
@@ -909,6 +904,7 @@ func (a *Agent) localVerificationMiddleware(next http.Handler) http.Handler {
 		callerDID := r.Header.Get("X-Caller-DID")
 		signature := r.Header.Get("X-DID-Signature")
 		timestamp := r.Header.Get("X-DID-Timestamp")
+		nonce := r.Header.Get("X-DID-Nonce")
 
 		// Require DID authentication — fail closed when no caller DID provided.
 		if callerDID == "" {
@@ -943,6 +939,17 @@ func (a *Agent) localVerificationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Check registration — reject DIDs not registered with the control plane
+		if !a.localVerifier.CheckRegistration(callerDID) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":   "did_not_registered",
+				"message": "Caller DID " + callerDID + " is not registered with the control plane",
+			})
+			return
+		}
+
 		// Verify signature — need to read and buffer the body
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -954,7 +961,7 @@ func (a *Agent) localVerificationMiddleware(next http.Handler) http.Handler {
 		// Restore body for downstream handlers
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
-		if !a.localVerifier.VerifySignature(callerDID, signature, timestamp, body) {
+		if !a.localVerifier.VerifySignature(callerDID, signature, timestamp, body, nonce) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":"signature_invalid","message":"DID signature verification failed"}`))

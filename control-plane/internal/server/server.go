@@ -1406,6 +1406,31 @@ func (s *AgentFieldServer) setupRoutes() {
 			logger.Logger.Info().Msg("🚫 Revocation list endpoint registered (GET /api/v1/revocations)")
 		}
 
+		// Registered DIDs endpoint — agents cache this set for local verification
+		// to ensure only known/registered DIDs are accepted on direct calls.
+		agentAPI.GET("/registered-dids", func(c *gin.Context) {
+			agentDIDs, err := s.storage.ListAgentDIDs(c.Request.Context())
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "failed_to_list_registered_dids",
+					"message": "Failed to list registered DIDs",
+				})
+				return
+			}
+			registeredDIDs := make([]string, 0, len(agentDIDs))
+			for _, info := range agentDIDs {
+				if info.Status == types.AgentDIDStatusActive {
+					registeredDIDs = append(registeredDIDs, info.DID)
+				}
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"registered_dids": registeredDIDs,
+				"total":           len(registeredDIDs),
+				"fetched_at":      time.Now().UTC().Format(time.RFC3339),
+			})
+		})
+		logger.Logger.Info().Msg("✅ Registered DIDs endpoint registered (GET /api/v1/registered-dids)")
+
 		// Issuer public key endpoint — agents use this for offline VC signature verification.
 		// Registered at /did/issuer-public-key (public, semantic path) and
 		// /admin/public-key (legacy alias for backward compatibility).

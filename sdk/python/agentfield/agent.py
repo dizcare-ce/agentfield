@@ -3973,6 +3973,7 @@ class Agent(FastAPI):
                 caller_did = request.headers.get("X-Caller-DID", "")
                 signature = request.headers.get("X-DID-Signature", "")
                 timestamp = request.headers.get("X-DID-Timestamp", "")
+                nonce = request.headers.get("X-DID-Nonce", "")
 
                 # C4: DID authentication is required for all execution endpoints
                 if not caller_did:
@@ -4004,10 +4005,20 @@ class Agent(FastAPI):
                         },
                     )
 
+                # Check registration — reject DIDs not registered with the control plane
+                if not verifier.check_registration(caller_did):
+                    return StarletteJSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "did_not_registered",
+                            "message": f"Caller DID {caller_did} is not registered with the control plane",
+                        },
+                    )
+
                 # Verify signature
                 body = await request.body()
                 if not verifier.verify_signature(
-                    caller_did, signature, timestamp, body
+                    caller_did, signature, timestamp, body, nonce
                 ):
                     return StarletteJSONResponse(
                         status_code=401,
@@ -4018,6 +4029,11 @@ class Agent(FastAPI):
                     )
 
                 # C6: Evaluate access policies
+                # Caller tags cannot be resolved at agent-side middleware level
+                # (would require a control plane lookup). Pass empty array — policies
+                # that require specific caller tags will not match, which is correct
+                # fail-open behavior. The control plane remains the primary policy
+                # enforcement point with full caller context.
                 agent_tags = getattr(agent, 'agent_tags', []) or []
                 func_name = request.url.path.rstrip('/').split('/')[-1] if request.url.path else ''
                 if not verifier.evaluate_policy([], agent_tags, func_name, {}):

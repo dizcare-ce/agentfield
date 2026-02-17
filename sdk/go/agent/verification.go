@@ -17,23 +17,22 @@ import (
 )
 
 // LocalVerifier verifies incoming requests locally using cached policies,
-// revocation lists, and the admin's Ed25519 public key. Periodically refreshes
-// caches from the control plane.
+// revocation lists, registered DIDs, and the admin's Ed25519 public key.
+// Periodically refreshes caches from the control plane.
 type LocalVerifier struct {
 	agentFieldURL   string
 	refreshInterval time.Duration
 	timestampWindow int64
 	apiKey          string
 
-	mu             sync.RWMutex
-	policies       []PolicyEntry
-	revokedDIDs    map[string]struct{}
-	adminPublicKey ed25519.PublicKey
-	issuerDID      string
-	lastRefresh    time.Time
-	initialized    bool
-
-	refreshing int32 // atomic flag: 1 = refresh goroutine running, 0 = idle
+	mu              sync.RWMutex
+	policies        []PolicyEntry
+	revokedDIDs     map[string]struct{}
+	registeredDIDs  map[string]struct{}
+	adminPublicKey  ed25519.PublicKey
+	issuerDID       string
+	lastRefresh     time.Time
+	initialized     bool
 }
 
 // PolicyEntry represents a cached access policy for local evaluation.
@@ -63,10 +62,11 @@ func NewLocalVerifier(agentFieldURL string, refreshInterval time.Duration, apiKe
 		timestampWindow: 300,
 		apiKey:          apiKey,
 		revokedDIDs:     make(map[string]struct{}),
+		registeredDIDs:  make(map[string]struct{}),
 	}
 }
 
-// Refresh fetches policies, revocations, and admin public key from the control plane.
+// Refresh fetches policies, revocations, registered DIDs, and admin public key from the control plane.
 func (v *LocalVerifier) Refresh() error {
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -82,6 +82,12 @@ func (v *LocalVerifier) Refresh() error {
 		return fmt.Errorf("fetch revocations: %w", err)
 	}
 
+	// Fetch registered DIDs
+	registered, err := v.fetchRegisteredDIDs(client)
+	if err != nil {
+		return fmt.Errorf("fetch registered DIDs: %w", err)
+	}
+
 	// Fetch admin public key
 	pubKey, issuerDID, err := v.fetchAdminPublicKey(client)
 	if err != nil {
@@ -92,6 +98,7 @@ func (v *LocalVerifier) Refresh() error {
 	defer v.mu.Unlock()
 	v.policies = policies
 	v.revokedDIDs = revoked
+	v.registeredDIDs = registered
 	v.adminPublicKey = pubKey
 	v.issuerDID = issuerDID
 	v.lastRefresh = time.Now()
@@ -114,8 +121,49 @@ func (v *LocalVerifier) CheckRevocation(callerDID string) bool {
 	return revoked
 }
 
+// CheckRegistration returns true if the caller DID is registered with the control plane.
+// When the cache is empty (not yet loaded), returns true to avoid blocking requests
+// before the first refresh completes.
+func (v *LocalVerifier) CheckRegistration(callerDID string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if len(v.registeredDIDs) == 0 {
+		return true // Cache not populated yet — allow
+	}
+	_, registered := v.registeredDIDs[callerDID]
+	return registered
+}
+
+// resolvePublicKey resolves the public key bytes from a DID.
+// For did:key, the public key is self-contained in the identifier:
+//
+//	did:key:z<base64url(0xed01 + 32-byte-pubkey)>
+//
+// For other DID methods, falls back to the admin public key.
+func (v *LocalVerifier) resolvePublicKey(callerDID string) ed25519.PublicKey {
+	if strings.HasPrefix(callerDID, "did:key:z") {
+		encoded := callerDID[len("did:key:z"):]
+		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil
+		}
+		// Verify Ed25519 multicodec prefix: 0xed, 0x01
+		if len(decoded) >= 34 && decoded[0] == 0xed && decoded[1] == 0x01 {
+			return ed25519.PublicKey(decoded[2:34])
+		}
+		return nil
+	}
+
+	// Fallback: use admin public key for non-did:key methods
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.adminPublicKey
+}
+
 // VerifySignature verifies an Ed25519 DID signature on an incoming request.
-func (v *LocalVerifier) VerifySignature(callerDID, signatureB64, timestamp string, body []byte) bool {
+// Resolves the caller's public key from their DID (did:key embeds the key
+// directly; other methods fall back to the admin public key).
+func (v *LocalVerifier) VerifySignature(callerDID, signatureB64, timestamp string, body []byte, nonce string) bool {
 	// Validate timestamp window
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
@@ -126,10 +174,8 @@ func (v *LocalVerifier) VerifySignature(callerDID, signatureB64, timestamp strin
 		return false
 	}
 
-	v.mu.RLock()
-	pubKey := v.adminPublicKey
-	v.mu.RUnlock()
-
+	// Resolve public key from the caller's DID
+	pubKey := v.resolvePublicKey(callerDID)
 	if len(pubKey) == 0 {
 		return false
 	}
@@ -140,9 +186,15 @@ func (v *LocalVerifier) VerifySignature(callerDID, signatureB64, timestamp strin
 		return false
 	}
 
-	// Reconstruct the signed payload: "{timestamp}:{sha256(body)}"
+	// Reconstruct the signed payload: "{timestamp}[:{nonce}]:{sha256(body)}"
+	// Must match the format used by SDK signing (DIDAuthenticator)
 	bodyHash := sha256.Sum256(body)
-	payload := fmt.Sprintf("%s:%x", timestamp, bodyHash)
+	var payload string
+	if nonce != "" {
+		payload = fmt.Sprintf("%s:%s:%x", timestamp, nonce, bodyHash)
+	} else {
+		payload = fmt.Sprintf("%s:%x", timestamp, bodyHash)
+	}
 
 	return ed25519.Verify(pubKey, []byte(payload), sigBytes)
 }
@@ -196,6 +248,28 @@ func (v *LocalVerifier) fetchRevocations(client *http.Client) (map[string]struct
 		revoked[d] = struct{}{}
 	}
 	return revoked, nil
+}
+
+func (v *LocalVerifier) fetchRegisteredDIDs(client *http.Client) (map[string]struct{}, error) {
+	resp, err := v.doRequest(client, "/api/v1/registered-dids")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		RegisteredDIDs []string `json:"registered_dids"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	registered := make(map[string]struct{}, len(result.RegisteredDIDs))
+	for _, d := range result.RegisteredDIDs {
+		registered[d] = struct{}{}
+	}
+	return registered, nil
 }
 
 func (v *LocalVerifier) fetchAdminPublicKey(client *http.Client) (ed25519.PublicKey, string, error) {

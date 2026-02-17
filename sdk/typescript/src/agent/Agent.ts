@@ -489,17 +489,20 @@ export class Agent {
           return next();
         }
 
-        // Refresh cache if stale (non-blocking but log errors)
+        // Refresh cache if stale
         if (verifier.needsRefresh) {
-          verifier.refresh().catch((err) => {
-            console.warn('[LocalVerifier] Background refresh failed:', err);
-          });
+          try {
+            await verifier.refresh();
+          } catch (err) {
+            console.warn('[LocalVerifier] Cache refresh failed:', err);
+          }
         }
 
         // Extract DID auth headers
         const callerDid = req.headers['x-caller-did'] as string | undefined;
         const signature = req.headers['x-did-signature'] as string | undefined;
         const timestamp = req.headers['x-did-timestamp'] as string | undefined;
+        const nonce = req.headers['x-did-nonce'] as string | undefined;
 
         // C4: Require DID authentication — fail closed when callerDid is missing
         if (!callerDid) {
@@ -517,6 +520,14 @@ export class Agent {
           });
         }
 
+        // Check registration — reject DIDs not registered with the control plane
+        if (!verifier.checkRegistration(callerDid)) {
+          return res.status(403).json({
+            error: 'did_not_registered',
+            message: `Caller DID ${callerDid} is not registered with the control plane`,
+          });
+        }
+
         // C5: Require signature when callerDid is present
         if (!signature) {
           return res.status(401).json({
@@ -528,7 +539,7 @@ export class Agent {
         // Verify signature
         if (timestamp) {
           const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
-          const valid = await verifier.verifySignature(callerDid, signature, timestamp, body);
+          const valid = await verifier.verifySignature(callerDid, signature, timestamp, body, nonce);
           if (!valid) {
             return res.status(401).json({
               error: 'signature_invalid',
@@ -544,9 +555,15 @@ export class Agent {
         }
 
         // C6: Evaluate access policy after successful signature verification
+        // Caller tags cannot be resolved at agent-side middleware level (would require
+        // a control plane lookup). Pass empty array — policies that require specific
+        // caller tags will not match, which is correct fail-open behavior for
+        // agent-side verification. The control plane remains the primary policy
+        // enforcement point with full caller context.
+        const agentTags = this.config.tags ?? [];
         const allowed = verifier.evaluatePolicy(
-          [],        // caller tags (not available at middleware level)
-          [],        // target tags (agent's own tags — not available at middleware level)
+          [],        // caller tags (not resolvable without control plane)
+          agentTags, // target tags (this agent's own tags)
           funcName,
           typeof req.body === 'object' && req.body !== null ? req.body : {},
         );
