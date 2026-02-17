@@ -15,7 +15,7 @@ Thank you for your interest in contributing to AgentField! This guide outlines h
 1. Fork the repository and clone your fork.
 2. Install dependencies:
    ```bash
-   ./scripts/install.sh
+   ./scripts/install-dev-deps.sh
    ```
 3. Create a feature branch:
    ```bash
