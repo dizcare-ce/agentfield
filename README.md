@@ -12,7 +12,7 @@
 [![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fsantoshkumarradha%2Fd98e2ad73502b4075f6a5f0ae4f5cae5%2Fraw%2Fbadge.json&style=flat&logo=download&logoColor=white&labelColor=1e1e2e&cacheSeconds=3600)](https://github.com/Agent-Field/agentfield)
 [![Last Commit](https://img.shields.io/github/last-commit/Agent-Field/agentfield?style=flat&logo=git&logoColor=white&color=7c3aed&labelColor=1e1e2e)](https://github.com/Agent-Field/agentfield/commits/main)
 [![Go](https://img.shields.io/badge/go-1.21+-00ADD8.svg?style=flat&labelColor=1e1e2e&logo=go&logoColor=white)](https://go.dev/)
-[![Python](https://img.shields.io/badge/python-3.9+-3776AB.svg?style=flat&labelColor=1e1e2e&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.8+-3776AB.svg?style=flat&labelColor=1e1e2e&logo=python&logoColor=white)](https://www.python.org/)
 [![Deploy with Docker](https://img.shields.io/badge/deploy-docker-2496ED.svg?style=flat&labelColor=1e1e2e&logo=docker&logoColor=white)](https://docs.docker.com/)
 [![Discord](https://img.shields.io/badge/discord-join%20us-5865F2.svg?style=flat&labelColor=1e1e2e&logo=discord&logoColor=white)](https://discord.gg/aBHaXMkpqh)
 
@@ -272,14 +272,14 @@ Most frameworks stop at "make the LLM call." But production agents need:
 Agents that run for hours or days. Webhooks with automatic retries. Backpressure handling when downstream services are slow.
 
 ```python
-# Fire-and-forget: webhook called when done
+# Fire-and-forget: run for up to 6 hours with SSE event streaming
 from agentfield.async_config import AsyncConfig
 result = await app.call(
     "research_agent.deep_dive",
     input={"topic": "quantum computing"},
     async_config=AsyncConfig(
-        webhook_url="https://myapp.com/webhook",
-        timeout_hours=6
+        max_execution_timeout=21600.0,  # 6 hours
+        enable_event_stream=True
     )
 )
 ```
