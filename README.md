@@ -99,7 +99,7 @@ agent, _ := agentfieldagent.New(agentfieldagent.Config{
     AgentFieldURL: "http://localhost:8080",
 })
 
-agent.RegisterSkill("summarize", func(ctx context.Context, input map[string]any) (any, error) {
+agent.RegisterReasoner("summarize", func(ctx context.Context, input map[string]any) (any, error) {
     url := input["url"].(string)
     // Your agent logic here
     return map[string]any{"summary": "..."}, nil
@@ -273,6 +273,7 @@ Agents that run for hours or days. Webhooks with automatic retries. Backpressure
 
 ```python
 # Fire-and-forget: webhook called when done
+from agentfield.async_config import AsyncConfig
 result = await app.call(
     "research_agent.deep_dive",
     input={"topic": "quantum computing"},
