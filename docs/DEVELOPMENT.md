@@ -14,7 +14,7 @@ This document provides instructions for working on the AgentField monorepo local
 ```bash
 git clone https://github.com/Agent-Field/agentfield.git
 cd agentfield
-./scripts/install.sh
+./scripts/install-dev-deps.sh
 ```
 
 The install script performs:
@@ -47,15 +47,15 @@ The install script performs:
 
 Copy `control-plane/config/.env.example` to `.env` (if available) and adjust:
 
-- `AGENTFIELD_DATABASE_URL` — PostgreSQL connection string.
+- `AGENTFIELD_POSTGRES_URL` — PostgreSQL connection string.
 - `AGENTFIELD_JWT_SECRET` — Authentication secret (development only).
 
 ## Database Migrations
 
 ```bash
 cd control-plane
-goose -dir ./migrations postgres "$AGENTFIELD_DATABASE_URL" status
-goose -dir ./migrations postgres "$AGENTFIELD_DATABASE_URL" up
+goose -dir ./migrations postgres "$AGENTFIELD_POSTGRES_URL" status
+goose -dir ./migrations postgres "$AGENTFIELD_POSTGRES_URL" up
 ```
 
 ## Frontend Development
@@ -90,7 +90,7 @@ pytest
 
 - Ensure Docker resources are sufficient (4 CPU, 8 GB RAM recommended).
 - Run `make tidy` if Go modules drift.
-- Delete `.venv` and rerun `./scripts/install.sh` if Python deps conflict.
+- Delete `.venv` and rerun `./scripts/install-dev-deps.sh` if Python deps conflict.
 - Clear `control-plane/web/node_modules` if UI builds fail after dependency upgrades.
 
 ## Conventions
@@ -101,4 +101,4 @@ pytest
 
 ## Publishing Releases
 
-See `docs/RELEASING.md` for end-to-end release steps, required secrets, and how to run dry-run builds via GitHub Actions.
+See `docs/RELEASE.md` for end-to-end release steps, required secrets, and how to run dry-run builds via GitHub Actions.
