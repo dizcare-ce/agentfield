@@ -198,42 +198,12 @@ func TestPermission_PendingApprovalBlocked(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "agent_pending_approval")
 }
 
-func TestPermission_DenyAnonymous_NoIdentityDenied(t *testing.T) {
+func TestPermission_AnonymousAllowedWhenNoPolicyMatches(t *testing.T) {
 	policy := &testPolicyService{result: &types.PolicyEvaluationResult{Matched: false}}
 	router := setupTestRouteWithConfig(policy, &testDIDWebService{publicKeys: map[string]ed25519.PublicKey{}}, nil,
-		PermissionConfig{Enabled: true, DenyAnonymous: true})
+		PermissionConfig{Enabled: true})
 
-	// Request without any caller identity headers
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/target-agent.query", bytes.NewReader([]byte(`{"x":1}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Code)
-	assert.Contains(t, w.Body.String(), "anonymous_caller_denied")
-}
-
-func TestPermission_DenyAnonymous_WithAgentHeaderAllowed(t *testing.T) {
-	policy := &testPolicyService{result: &types.PolicyEvaluationResult{Matched: false}}
-	router := setupTestRouteWithConfig(policy, &testDIDWebService{publicKeys: map[string]ed25519.PublicKey{}}, nil,
-		PermissionConfig{Enabled: true, DenyAnonymous: true})
-
-	// Request with caller agent ID header — not anonymous
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/target-agent.query", bytes.NewReader([]byte(`{"x":1}`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Caller-Agent-ID", "caller-agent")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestPermission_DenyAnonymousFalse_AllowsAnonymous(t *testing.T) {
-	policy := &testPolicyService{result: &types.PolicyEvaluationResult{Matched: false}}
-	router := setupTestRouteWithConfig(policy, &testDIDWebService{publicKeys: map[string]ed25519.PublicKey{}}, nil,
-		PermissionConfig{Enabled: true, DenyAnonymous: false})
-
-	// Request without any caller identity — DenyAnonymous is false, so allowed
+	// Request without any caller identity — allowed when no policy matches
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/execute/target-agent.query", bytes.NewReader([]byte(`{"x":1}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

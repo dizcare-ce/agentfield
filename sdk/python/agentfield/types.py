@@ -39,14 +39,12 @@ class HeartbeatData:
     version: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        d = {
+        return {
             "status": self.status.value,
             "mcp_servers": [server.to_dict() for server in self.mcp_servers],
             "timestamp": self.timestamp,
+            "version": self.version,
         }
-        if self.version:
-            d["version"] = self.version
-        return d
 
 
 @dataclass

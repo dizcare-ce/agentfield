@@ -388,14 +388,25 @@ func (sm *StatusManager) UpdateAgentStatus(ctx context.Context, nodeID string, u
 	newStatus.LastUpdated = time.Now()
 	newStatus.Source = update.Source
 
+	// Heartbeats are direct proof of life — always refresh LastSeen so that
+	// reconciliation (which checks LastHeartbeat staleness) doesn't mark the
+	// agent inactive while heartbeats are actively flowing.
+	if update.Source == types.StatusSourceHeartbeat {
+		newStatus.LastSeen = time.Now()
+	}
+
 	// Update backward compatibility fields
 	newStatus.HealthStatus = newStatus.ToLegacyHealthStatus()
 	if newStatus.LifecycleStatus == "" {
 		newStatus.LifecycleStatus = newStatus.ToLegacyLifecycleStatus()
 	}
 
-	// Persist to storage
-	if err := sm.persistStatus(ctx, nodeID, &newStatus); err != nil {
+	// Persist to storage — use the resolved agent's version for the composite key
+	agentVersion := ""
+	if resolvedAgent != nil {
+		agentVersion = resolvedAgent.Version
+	}
+	if err := sm.persistStatus(ctx, nodeID, agentVersion, &newStatus); err != nil {
 		return fmt.Errorf("failed to persist status: %w", err)
 	}
 
@@ -425,9 +436,11 @@ func (sm *StatusManager) UpdateAgentStatus(ctx context.Context, nodeID string, u
 }
 
 // UpdateFromHeartbeat updates status based on heartbeat data.
-// Uses snapshot (not live health check) to avoid overriding admin-controlled states.
+// Uses snapshot (not live health check) to avoid overriding admin-controlled states
+// and to prevent the heartbeat handler from contaminating the cache with HTTP check
+// results — the heartbeat itself is the proof of life.
 func (sm *StatusManager) UpdateFromHeartbeat(ctx context.Context, nodeID string, lifecycleStatus *types.AgentLifecycleStatus, mcpStatus *types.MCPStatusInfo, version string) error {
-	currentStatus, err := sm.GetAgentStatus(ctx, nodeID)
+	currentStatus, err := sm.GetAgentStatusSnapshot(ctx, nodeID, nil)
 	if err != nil {
 		// If agent doesn't exist, create new status
 		currentStatus = types.NewAgentStatus(types.AgentStateStarting, types.StatusSourceHeartbeat)
@@ -553,8 +566,10 @@ func (sm *StatusManager) isImmediateTransition(from, to types.AgentState) bool {
 	return !(from == types.AgentStateStarting && to == types.AgentStateActive)
 }
 
-// persistStatus persists the status to storage
-func (sm *StatusManager) persistStatus(ctx context.Context, nodeID string, status *types.AgentStatus) error {
+// persistStatus persists the status to storage.
+// The version parameter is required for UpdateAgentHeartbeat which uses the composite
+// primary key (id, version) to match the correct row.
+func (sm *StatusManager) persistStatus(ctx context.Context, nodeID string, version string, status *types.AgentStatus) error {
 	// DEFENSIVE: Enforce lifecycle_status consistency with state before persisting.
 	// This ensures that even if the auto-sync logic didn't run (e.g., state wasn't changing),
 	// the lifecycle_status will be correct in storage. This fixes the bug where offline nodes
@@ -599,9 +614,16 @@ func (sm *StatusManager) persistStatus(ctx context.Context, nodeID string, statu
 		return fmt.Errorf("failed to update lifecycle status: %w", err)
 	}
 
-	// Update heartbeat timestamp
-	if err := sm.storage.UpdateAgentHeartbeat(ctx, nodeID, "", status.LastSeen); err != nil {
-		return fmt.Errorf("failed to update heartbeat: %w", err)
+	// Only update the heartbeat timestamp for heartbeat sources. Health checks and
+	// reconciliation should NOT overwrite LastHeartbeat — it must reflect when the
+	// agent actually sent a heartbeat, not when a status update was persisted.
+	// Without this guard, a health check can overwrite a fresh heartbeat timestamp
+	// with a stale LastSeen from the cached snapshot, causing reconciliation to
+	// falsely mark the agent inactive.
+	if status.Source == types.StatusSourceHeartbeat {
+		if err := sm.storage.UpdateAgentHeartbeat(ctx, nodeID, version, status.LastSeen); err != nil {
+			return fmt.Errorf("failed to update heartbeat: %w", err)
+		}
 	}
 
 	return nil
@@ -722,6 +744,13 @@ func (sm *StatusManager) needsReconciliation(agent *types.AgentNode) bool {
 		return true
 	}
 
+	// Agents stuck in "starting" beyond the max transition time should be reconciled.
+	// Without this, agents that register but never send a "ready" heartbeat stay in
+	// "starting" forever because the check above only triggers for health_status="active".
+	if agent.LifecycleStatus == types.AgentStatusStarting && timeSinceHeartbeat > sm.config.MaxTransitionTime {
+		return true
+	}
+
 	return false
 }
 
@@ -807,7 +836,11 @@ func (sm *StatusManager) checkTransitionTimeouts() {
 				logger.Logger.Debug().Str("node_id", nodeID).Msg("cancelling stale transition: agent is pending_approval")
 			} else if status, err := sm.GetAgentStatus(ctx, nodeID); err == nil {
 				status.CompleteTransition()
-				if err := sm.persistStatus(ctx, nodeID, status); err != nil {
+				ver := ""
+				if agent != nil {
+					ver = agent.Version
+				}
+				if err := sm.persistStatus(ctx, nodeID, ver, status); err != nil {
 					logger.Logger.Warn().
 						Err(err).
 						Str("node_id", nodeID).

@@ -40,8 +40,6 @@ type TagVCVerifierInterface interface {
 type PermissionConfig struct {
 	// Enabled determines if permission checking is active
 	Enabled bool
-	// DenyAnonymous denies requests from callers with no agent identity
-	DenyAnonymous bool
 }
 
 // PermissionCheckResult contains the result of a permission check.
@@ -234,15 +232,6 @@ func PermissionCheckMiddleware(
 				c.Next()
 				return
 			}
-		}
-
-		// No policy matched — check anonymous caller restriction
-		if config.DenyAnonymous && callerDID == "" && callerAgentID == "" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error":   "anonymous_caller_denied",
-				"message": "Anonymous callers are denied when authorization is enabled",
-			})
-			return
 		}
 
 		// No policy matched — allow (backward compat for untagged agents)

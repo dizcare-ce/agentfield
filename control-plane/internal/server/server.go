@@ -346,6 +346,14 @@ func NewAgentFieldServer(cfg *config.Config) (*AgentFieldServer, error) {
 		logger.Logger.Info().Msg("🏷️  Tag approval service configured for VC issuance")
 	}
 
+	// Wire revocation callback to clear status cache and presence lease
+	if tagApprovalService != nil {
+		tagApprovalService.SetOnRevokeCallback(func(ctx context.Context, agentID string) {
+			presenceManager.Forget(agentID)
+			_ = statusManager.RefreshAgentStatus(ctx, agentID)
+		})
+	}
+
 	payloadStore := services.NewFilePayloadStore(dirs.PayloadsDir)
 
 	webhookDispatcher := services.NewWebhookDispatcher(storageProvider, services.WebhookDispatcherConfig{
@@ -1176,8 +1184,7 @@ func (s *AgentFieldServer) setupRoutes() {
 			legacyReasonerGroup := agentAPI.Group("/reasoners")
 			legacySkillGroup := agentAPI.Group("/skills")
 			permConfigLegacy := middleware.PermissionConfig{
-				Enabled:       true,
-				DenyAnonymous: s.config.Features.DID.Authorization.DenyAnonymous,
+				Enabled: true,
 			}
 			legacyMiddleware := middleware.PermissionCheckMiddleware(
 				s.accessPolicyService,
@@ -1203,8 +1210,7 @@ func (s *AgentFieldServer) setupRoutes() {
 			// Apply permission middleware if authorization is enabled
 			if s.config.Features.DID.Authorization.Enabled && s.accessPolicyService != nil && s.didWebService != nil {
 				permConfig := middleware.PermissionConfig{
-					Enabled:       true,
-					DenyAnonymous: s.config.Features.DID.Authorization.DenyAnonymous,
+					Enabled: true,
 				}
 				executeGroup.Use(middleware.PermissionCheckMiddleware(
 					s.accessPolicyService,

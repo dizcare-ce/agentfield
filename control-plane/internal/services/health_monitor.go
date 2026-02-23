@@ -345,6 +345,27 @@ func (hm *HealthMonitor) checkAgentHealth(nodeID string) {
 
 		// Only mark inactive after reaching the consecutive failure threshold
 		if activeAgent.ConsecutiveFailures >= hm.config.ConsecutiveFailures {
+			// HEARTBEAT GATE: Before marking inactive, check if the agent has sent
+			// a recent heartbeat. Heartbeats are direct proof of agent liveness —
+			// if the agent is sending heartbeats, HTTP check failures are transient
+			// and should not trigger an inactive transition. We check the storage
+			// heartbeat timestamp rather than the presence lease because the presence
+			// lease is also set by RegisterAgent (not just heartbeats).
+			if hm.statusManager != nil {
+				staleThreshold := hm.statusManager.config.HeartbeatStaleThreshold
+				if staleThreshold == 0 {
+					staleThreshold = 60 * time.Second
+				}
+				if agent, err := hm.storage.GetAgent(context.Background(), nodeID); err == nil && agent != nil {
+					if time.Since(agent.LastHeartbeat) < staleThreshold {
+						logger.Logger.Debug().Msgf("🏥 Agent %s has %d HTTP failures but heartbeat is fresh (%v ago) — not marking inactive",
+							nodeID, activeAgent.ConsecutiveFailures, time.Since(agent.LastHeartbeat))
+						hm.agentsMutex.Unlock()
+						return
+					}
+				}
+			}
+
 			if activeAgent.LastStatus != types.HealthStatusInactive {
 				activeAgent.LastStatus = types.HealthStatusInactive
 				activeAgent.LastTransition = time.Now()

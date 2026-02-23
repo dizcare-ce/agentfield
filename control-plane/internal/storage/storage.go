@@ -106,6 +106,7 @@ type StorageProvider interface {
 	RegisterAgent(ctx context.Context, agent *types.AgentNode) error
 	GetAgent(ctx context.Context, id string) (*types.AgentNode, error)
 	GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error)
+	DeleteAgentVersion(ctx context.Context, id string, version string) error
 	ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error)
 	ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error)
 	ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error)

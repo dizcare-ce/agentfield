@@ -121,10 +121,6 @@ type AuthorizationConfig struct {
 	// TagApprovalRules configures how proposed tags are handled at registration time.
 	// Default mode is "auto" (all tags auto-approved) for backward compatibility.
 	TagApprovalRules TagApprovalRulesConfig `yaml:"tag_approval_rules" mapstructure:"tag_approval_rules"`
-	// DenyAnonymous denies requests from callers with no agent identity (no DID,
-	// no X-Caller-Agent-ID, no X-Agent-Node-ID headers) when authorization is enabled.
-	// Default: false (backward compat — anonymous callers are allowed).
-	DenyAnonymous bool `yaml:"deny_anonymous" mapstructure:"deny_anonymous" default:"false"`
 	// AccessPolicies defines tag-based authorization policies for cross-agent calls.
 	AccessPolicies []AccessPolicyConfig `yaml:"access_policies" mapstructure:"access_policies"`
 }

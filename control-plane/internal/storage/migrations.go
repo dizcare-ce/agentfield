@@ -34,6 +34,28 @@ func (ls *LocalStorage) migrateAgentNodesCompositePK(ctx context.Context) error 
 	}
 	defer rollbackTx(tx, "migrateAgentNodesCompositePK")
 
+	// Ensure columns from recent features exist before table recreation.
+	// These may be absent if the DB predates those features being merged.
+	columnsToEnsure := []struct {
+		name string
+		ddl  string
+	}{
+		{"version", `ALTER TABLE agent_nodes ADD COLUMN version TEXT NOT NULL DEFAULT ''`},
+		{"proposed_tags", `ALTER TABLE agent_nodes ADD COLUMN proposed_tags BLOB`},
+		{"approved_tags", `ALTER TABLE agent_nodes ADD COLUMN approved_tags BLOB`},
+	}
+	for _, col := range columnsToEnsure {
+		var colExists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('agent_nodes') WHERE name = ?`, col.name).Scan(&colExists); err != nil {
+			return fmt.Errorf("failed to check for column %s: %w", col.name, err)
+		}
+		if colExists == 0 {
+			if _, err := tx.ExecContext(ctx, col.ddl); err != nil {
+				return fmt.Errorf("failed to add column %s: %w", col.name, err)
+			}
+		}
+	}
+
 	migrations := []string{
 		`CREATE TABLE agent_nodes_new (
 			id TEXT NOT NULL,
@@ -62,7 +84,7 @@ func (ls *LocalStorage) migrateAgentNodesCompositePK(ctx context.Context) error 
 			reasoners, skills, communication_config, health_status, lifecycle_status,
 			last_heartbeat, registered_at, features, metadata, proposed_tags, approved_tags
 		) SELECT
-			id, version, group_id, team_id, base_url, deployment_type, invocation_url,
+			id, version, id, team_id, base_url, deployment_type, invocation_url,
 			reasoners, skills, communication_config, health_status, lifecycle_status,
 			last_heartbeat, registered_at, features, metadata, proposed_tags, approved_tags
 		FROM agent_nodes`,
@@ -108,6 +130,23 @@ func (ls *LocalStorage) migrateAgentNodesCompositePKPostgres(ctx context.Context
 			_ = tx.Rollback()
 		}
 	}()
+
+	// Ensure columns from recent features exist before altering PK.
+	ensureColumns := []string{
+		`ALTER TABLE agent_nodes ADD COLUMN IF NOT EXISTS version TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_nodes ADD COLUMN IF NOT EXISTS group_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_nodes ADD COLUMN IF NOT EXISTS proposed_tags BYTEA`,
+		`ALTER TABLE agent_nodes ADD COLUMN IF NOT EXISTS approved_tags BYTEA`,
+	}
+	for _, ddl := range ensureColumns {
+		if _, err = tx.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("postgres ensure column failed: %w", err)
+		}
+	}
+	// Backfill group_id with id where empty
+	if _, err = tx.ExecContext(ctx, `UPDATE agent_nodes SET group_id = id WHERE group_id = '' OR group_id IS NULL`); err != nil {
+		return fmt.Errorf("postgres backfill group_id failed: %w", err)
+	}
 
 	migrations := []string{
 		`ALTER TABLE agent_nodes DROP CONSTRAINT IF EXISTS agent_nodes_pkey`,

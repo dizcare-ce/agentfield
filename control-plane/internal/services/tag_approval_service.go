@@ -48,6 +48,7 @@ type TagApprovalService struct {
 	config    config.TagApprovalRulesConfig
 	storage   TagApprovalStorage
 	vcService TagApprovalVCService // optional, can be nil
+	onRevoke  func(ctx context.Context, agentID string)
 	mu        sync.RWMutex
 }
 
@@ -63,6 +64,13 @@ func NewTagApprovalService(cfg config.TagApprovalRulesConfig, storage TagApprova
 		config:  cfg,
 		storage: storage,
 	}
+}
+
+// SetOnRevokeCallback sets a callback invoked after tags are revoked,
+// used to clear status caches and presence leases.
+// Must be called during initialization before any concurrent use.
+func (s *TagApprovalService) SetOnRevokeCallback(fn func(ctx context.Context, agentID string)) {
+	s.onRevoke = fn
 }
 
 // SetVCService sets the VC service for tag VC issuance (optional dependency).
@@ -365,6 +373,10 @@ func (s *TagApprovalService) RevokeAgentTags(ctx context.Context, agentID string
 		Str("revoked_by", revokedBy).
 		Str("reason", reason).
 		Msg("Agent tags revoked")
+
+	if s.onRevoke != nil {
+		s.onRevoke(ctx, agentID)
+	}
 
 	return nil
 }

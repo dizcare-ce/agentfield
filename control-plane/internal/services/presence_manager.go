@@ -95,6 +95,19 @@ func (pm *PresenceManager) HasLease(nodeID string) bool {
 	return exists
 }
 
+// HasFreshLease returns true if the agent has a lease with a heartbeat
+// received within the HeartbeatTTL. This is used by the health monitor
+// to avoid marking agents inactive when heartbeats are still flowing.
+func (pm *PresenceManager) HasFreshLease(nodeID string) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	lease, exists := pm.leases[nodeID]
+	if !exists {
+		return false
+	}
+	return !lease.MarkedOffline && time.Since(lease.LastSeen) < pm.config.HeartbeatTTL
+}
+
 func (pm *PresenceManager) SetExpireCallback(fn func(string)) {
 	pm.mu.Lock()
 	pm.expireCallback = fn
@@ -179,12 +192,21 @@ func (pm *PresenceManager) markInactive(nodeID string) {
 		return
 	}
 
-	// Read version from the lease while holding the lock.
+	// Re-check lease freshness under lock. Between collecting expired nodes in
+	// checkExpirations() and calling this callback, a Touch() may have refreshed
+	// the lease (e.g., agent re-registered). If so, skip the inactive transition.
 	pm.mu.RLock()
-	var version string
-	if lease, ok := pm.leases[nodeID]; ok {
-		version = lease.Version
+	lease, ok := pm.leases[nodeID]
+	if !ok {
+		pm.mu.RUnlock()
+		return
 	}
+	if !lease.MarkedOffline {
+		// Lease was refreshed by Touch() after we collected it as expired
+		pm.mu.RUnlock()
+		return
+	}
+	version := lease.Version
 	pm.mu.RUnlock()
 
 	ctx := context.Background()

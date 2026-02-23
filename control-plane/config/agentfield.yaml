@@ -84,7 +84,6 @@ features:
       default_approval_duration_hours: 24
       admin_token: "admin-secret"
       internal_token: "internal-secret-token"
-      deny_anonymous: true
       tag_approval_rules:
         default_mode: "auto"
         rules:

@@ -4440,11 +4440,12 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 	var proposedTagsJSON, approvedTagsJSON []byte
 	var healthStatusStr, lifecycleStatusStr string
 	var invocationURL sql.NullString
+	var lastHeartbeat, registeredAt sql.NullTime
 
 	err := row.Scan(
 		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
 		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-		&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+		&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
 		&proposedTagsJSON, &approvedTagsJSON,
 	)
 
@@ -4455,6 +4456,12 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 		return nil, fmt.Errorf("failed to get agent node with ID '%s': %w", id, err)
 	}
 
+	if lastHeartbeat.Valid {
+		agent.LastHeartbeat = lastHeartbeat.Time
+	}
+	if registeredAt.Valid {
+		agent.RegisteredAt = registeredAt.Time
+	}
 	agent.HealthStatus = types.HealthStatus(healthStatusStr)
 	agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
 	if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
@@ -4541,6 +4548,19 @@ func (ls *LocalStorage) GetAgentVersion(ctx context.Context, id string, version 
 	return ls.scanAgentNode(row)
 }
 
+// DeleteAgentVersion deletes a specific agent version row from the agent_nodes table.
+func (ls *LocalStorage) DeleteAgentVersion(ctx context.Context, id string, version string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during delete agent version: %w", err)
+	}
+
+	_, err := ls.db.ExecContext(ctx, `DELETE FROM agent_nodes WHERE id = ? AND version = ?`, id, version)
+	if err != nil {
+		return fmt.Errorf("failed to delete agent version id='%s' version='%s': %w", id, version, err)
+	}
+	return nil
+}
+
 // ListAgentVersions returns all versioned agents with the given ID (version != '').
 func (ls *LocalStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
 	if err := ctx.Err(); err != nil {
@@ -4570,11 +4590,12 @@ func (ls *LocalStorage) scanAgentNode(row *sql.Row) (*types.AgentNode, error) {
 	var proposedTagsJSON, approvedTagsJSON []byte
 	var healthStatusStr, lifecycleStatusStr string
 	var invocationURL sql.NullString
+	var lastHeartbeat, registeredAt sql.NullTime
 
 	err := row.Scan(
 		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
 		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-		&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+		&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
 		&proposedTagsJSON, &approvedTagsJSON,
 	)
 	if err != nil {
@@ -4584,6 +4605,12 @@ func (ls *LocalStorage) scanAgentNode(row *sql.Row) (*types.AgentNode, error) {
 		return nil, fmt.Errorf("failed to scan agent node: %w", err)
 	}
 
+	if lastHeartbeat.Valid {
+		agent.LastHeartbeat = lastHeartbeat.Time
+	}
+	if registeredAt.Valid {
+		agent.RegisteredAt = registeredAt.Time
+	}
 	ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
 		reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
 	return agent, nil
@@ -4602,17 +4629,24 @@ func (ls *LocalStorage) scanAgentNodes(ctx context.Context, rows *sql.Rows) ([]*
 		var proposedTagsJSON, approvedTagsJSON []byte
 		var healthStatusStr, lifecycleStatusStr string
 		var invocationURL sql.NullString
+		var lastHeartbeat, registeredAt sql.NullTime
 
 		err := rows.Scan(
 			&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
 			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-			&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+			&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
 			&proposedTagsJSON, &approvedTagsJSON,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
 		}
 
+		if lastHeartbeat.Valid {
+			agent.LastHeartbeat = lastHeartbeat.Time
+		}
+		if registeredAt.Valid {
+			agent.RegisteredAt = registeredAt.Time
+		}
 		ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
 			reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
 		agents = append(agents, agent)

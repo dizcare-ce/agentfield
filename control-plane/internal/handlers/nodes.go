@@ -347,13 +347,20 @@ func processHeartbeatAsync(storageProvider storage.StorageProvider, uiService *s
 	go func() {
 		ctx := context.Background()
 
-		// Verify node exists only when we need to update DB
-		if _, err := storageProvider.GetAgent(ctx, nodeID); err != nil {
-			// If not found as default, try finding any version
-			versions, listErr := storageProvider.ListAgentVersions(ctx, nodeID)
-			if listErr != nil || len(versions) == 0 {
-				logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
+		// Verify node exists using the resolved version
+		if version != "" {
+			if _, err := storageProvider.GetAgentVersion(ctx, nodeID, version); err != nil {
+				logger.Logger.Error().Err(err).Msgf("❌ Node %s version '%s' not found during heartbeat update", nodeID, version)
 				return
+			}
+		} else {
+			if _, err := storageProvider.GetAgent(ctx, nodeID); err != nil {
+				// If not found as default, try finding any version
+				versions, listErr := storageProvider.ListAgentVersions(ctx, nodeID)
+				if listErr != nil || len(versions) == 0 {
+					logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
+					return
+				}
 			}
 		}
 
@@ -503,6 +510,16 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 		var existingNode *types.AgentNode
 		if newNode.Version != "" {
 			existingNode, _ = storageProvider.GetAgentVersion(ctx, newNode.ID, newNode.Version)
+
+			// Clean up stale empty-version row if the agent is now registering with a proper version.
+			// This handles upgrades from older SDKs that didn't send version during registration.
+			if stale, _ := storageProvider.GetAgentVersion(ctx, newNode.ID, ""); stale != nil {
+				if err := storageProvider.DeleteAgentVersion(ctx, newNode.ID, ""); err != nil {
+					logger.Logger.Warn().Err(err).Msgf("⚠️ Failed to clean up stale empty-version row for agent %s", newNode.ID)
+				} else {
+					logger.Logger.Info().Msgf("🧹 Cleaned up stale empty-version row for agent %s (now registering as %s)", newNode.ID, newNode.Version)
+				}
+			}
 		} else {
 			existingNode, _ = storageProvider.GetAgent(ctx, newNode.ID)
 		}
@@ -831,7 +848,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 
 		if needsDBUpdate {
 			// Verify node exists only when we need to update DB.
-			var existingNode *types.AgentNode
+			// Use the outer-scoped existingNode so it's available for status processing below.
 			var err error
 			if enhancedHeartbeat.Version != "" {
 				existingNode, err = storageProvider.GetAgentVersion(ctx, nodeID, enhancedHeartbeat.Version)
@@ -860,8 +877,10 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				presenceManager.Touch(nodeID, existingNode.Version, now)
 			}
 
-			// Process heartbeat asynchronously to avoid blocking the response
-			processHeartbeatAsync(storageProvider, uiService, nodeID, enhancedHeartbeat.Version, cached)
+			// Process heartbeat asynchronously to avoid blocking the response.
+			// Use existingNode.Version (resolved from DB) instead of the heartbeat payload version
+			// to handle old SDKs that may not send version in heartbeats.
+			processHeartbeatAsync(storageProvider, uiService, nodeID, existingNode.Version, cached)
 
 			logger.Logger.Debug().Msgf("💓 Heartbeat DB update queued for node: %s at %s", nodeID, now.Format(time.RFC3339))
 		} else {
@@ -941,8 +960,14 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				}
 			}
 
+			// Resolve version from DB record when available, fall back to heartbeat payload
+			resolvedVersion := enhancedHeartbeat.Version
+			if existingNode != nil {
+				resolvedVersion = existingNode.Version
+			}
+
 			// Update status through unified system
-			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, lifecycleStatus, mcpStatus, enhancedHeartbeat.Version); err != nil {
+			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, lifecycleStatus, mcpStatus, resolvedVersion); err != nil {
 				logger.Logger.Error().Err(err).Msgf("❌ Failed to update unified status for node %s", nodeID)
 				// Continue processing - don't fail the heartbeat
 			}
@@ -953,7 +978,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 					HealthScore: enhancedHeartbeat.HealthScore,
 					Source:      types.StatusSourceHeartbeat,
 					Reason:      "health score from heartbeat",
-					Version:     enhancedHeartbeat.Version,
+					Version:     resolvedVersion,
 				}
 
 				if err := statusManager.UpdateAgentStatus(ctx, nodeID, update); err != nil {
