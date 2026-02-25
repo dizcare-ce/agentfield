@@ -51,6 +51,13 @@ storage:
   local:
     database_path: ""
     kv_store_path: ""
+  postgres:
+    host: "localhost"
+    port: 5433
+    database: "agentfield_dev"
+    user: "agentfield"
+    password: "agentfield"
+    sslmode: "disable"
   vector:
     enabled: true
     distance: "cosine"
