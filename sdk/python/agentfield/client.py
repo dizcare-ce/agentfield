@@ -25,6 +25,13 @@ from .logger import get_logger
 from .status import normalize_status
 from .execution_context import generate_run_id
 from .did_auth import DIDAuthenticator
+from .exceptions import (
+    AgentFieldError,
+    AgentFieldClientError,
+    ExecutionTimeoutError,
+    RegistrationError,
+    ValidationError,
+)
 
 httpx = None  # type: ignore
 
@@ -357,7 +364,7 @@ class AgentFieldClient:
         reload_needed = httpx is None or current_module is not httpx
         httpx_module = _ensure_httpx(force_reload=reload_needed)
         if httpx_module is None:
-            raise RuntimeError("httpx is required for async HTTP operations")
+            raise AgentFieldClientError("httpx is required for async HTTP operations")
 
         if self._async_http_client and not getattr(
             self._async_http_client, "is_closed", False
@@ -418,7 +425,7 @@ class AgentFieldClient:
 
         try:
             client = await self.get_async_http_client()
-        except RuntimeError:
+        except AgentFieldClientError:
             return await _to_thread(self._sync_request, method, url, **kwargs)
 
         return await client.request(method, url, **kwargs)
@@ -520,14 +527,24 @@ class AgentFieldClient:
                 self._async_http_client_lock = None
 
     def register_node(self, node_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Register agent node with AgentField server"""
-        response = requests.post(
-            f"{self.api_base}/nodes/register",
-            json=node_data,
-            headers=self._get_auth_headers(),
-        )
-        response.raise_for_status()  # Raise an exception for bad status codes
-        return response.json()
+        """
+        Register agent node with AgentField server.
+
+        Raises:
+            RegistrationError: If registration fails.
+        """
+        try:
+            response = requests.post(
+                f"{self.api_base}/nodes/register",
+                json=node_data,
+                headers=self._get_auth_headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+        except RegistrationError:
+            raise
+        except Exception as exc:
+            raise RegistrationError(f"Failed to register node: {exc}") from exc
 
     def update_health(
         self, node_id: str, health_data: Dict[str, Any]
@@ -656,6 +673,10 @@ class AgentFieldClient:
         The public signature remains unchanged, but internally we now submit the
         execution, poll for completion with adaptive backoff, and return the final
         result once the worker finishes processing.
+
+        Raises:
+            AgentFieldClientError: If submission or polling fails.
+            ExecutionTimeoutError: If execution does not complete in time.
         """
 
         execution_headers = self._prepare_execution_headers(headers)
@@ -680,6 +701,10 @@ class AgentFieldClient:
     ) -> Dict[str, Any]:
         """
         Blocking version of execute used by synchronous callers.
+
+        Raises:
+            AgentFieldClientError: If submission or polling fails.
+            ExecutionTimeoutError: If execution does not complete in time.
         """
 
         execution_headers = self._prepare_execution_headers(headers)
@@ -754,7 +779,7 @@ class AgentFieldClient:
                 timeout=self.async_config.polling_timeout,
             )
         except requests.RequestException as exc:
-            raise RuntimeError(f"Failed to submit execution: {exc}") from exc
+            raise AgentFieldClientError(f"Failed to submit execution: {exc}") from exc
         if response.status_code >= 400:
             try:
                 error_body = response.json()
@@ -821,7 +846,7 @@ class AgentFieldClient:
         target_type = body.get("type") or body.get("target_type")
 
         if not execution_id or not run_id:
-            raise RuntimeError("Execution submission missing identifiers")
+            raise AgentFieldClientError("Execution submission missing identifiers")
 
         return _Submission(
             execution_id=execution_id,
@@ -867,7 +892,7 @@ class AgentFieldClient:
                 return payload
 
             if (time.time() - start) > self.async_config.max_execution_timeout:
-                raise TimeoutError(
+                raise ExecutionTimeoutError(
                     f"Execution {submission.execution_id} exceeded timeout"
                 )
 
@@ -911,7 +936,7 @@ class AgentFieldClient:
                 return payload
 
             if (time.time() - start) > self.async_config.max_execution_timeout:
-                raise TimeoutError(
+                raise ExecutionTimeoutError(
                     f"Execution {submission.execution_id} exceeded timeout"
                 )
 
@@ -1259,11 +1284,11 @@ class AgentFieldClient:
             str: Execution ID for tracking the execution
 
         Raises:
-            RuntimeError: If async execution is disabled or at capacity
-            aiohttp.ClientError: For HTTP-related errors
+            AgentFieldClientError: If async execution is disabled or request setup fails.
+            ExecutionTimeoutError: If fallback execution exceeds timeout.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             final_headers = self._prepare_execution_headers(headers)
@@ -1285,6 +1310,8 @@ class AgentFieldClient:
 
         except Exception as e:
             logger.error(f"Failed to submit async execution for target {target}: {e}")
+            if isinstance(e, AgentFieldError):
+                raise
 
             # Never fall back on authorization errors (401/403) — these are
             # permanent failures that retrying won't fix and would hit replay
@@ -1306,9 +1333,15 @@ class AgentFieldClient:
                     return synthetic_id
                 except Exception as sync_error:
                     logger.error(f"Sync fallback also failed: {sync_error}")
-                    raise e
+                    if isinstance(sync_error, AgentFieldError):
+                        raise
+                    raise AgentFieldClientError(
+                        f"Async execution failed for target {target}"
+                    ) from sync_error
             else:
-                raise
+                raise AgentFieldClientError(
+                    f"Async execution failed for target {target}"
+                ) from e
 
     async def poll_execution_status(
         self, execution_id: str
@@ -1323,11 +1356,10 @@ class AgentFieldClient:
             Optional[Dict]: Execution status dictionary or None if not found
 
         Raises:
-            RuntimeError: If async execution is disabled
-            aiohttp.ClientError: For HTTP-related errors
+            AgentFieldClientError: If async execution is disabled.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             manager = await self._get_async_execution_manager()
@@ -1342,11 +1374,15 @@ class AgentFieldClient:
 
             return status
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to poll execution status for {execution_id[:8]}...: {e}"
             )
-            raise
+            raise AgentFieldClientError(
+                f"Failed to poll execution status: {e}"
+            ) from e
 
     async def batch_check_statuses(
         self, execution_ids: List[str]
@@ -1361,14 +1397,14 @@ class AgentFieldClient:
             Dict[str, Optional[Dict]]: Mapping of execution_id to status dict
 
         Raises:
-            RuntimeError: If async execution is disabled
-            ValueError: If execution_ids list is empty
+            AgentFieldClientError: If async execution is disabled.
+            ValidationError: If execution_ids is empty.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         if not execution_ids:
-            raise ValueError("execution_ids list cannot be empty")
+            raise ValidationError("execution_ids list cannot be empty")
 
         try:
             manager = await self._get_async_execution_manager()
@@ -1401,9 +1437,13 @@ class AgentFieldClient:
 
             return results
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(f"Failed to batch check execution statuses: {e}")
-            raise
+            raise AgentFieldClientError(
+                f"Failed to batch check execution statuses: {e}"
+            ) from e
 
     async def wait_for_execution_result(
         self, execution_id: str, timeout: Optional[float] = None
@@ -1419,12 +1459,11 @@ class AgentFieldClient:
             Any: Execution result
 
         Raises:
-            RuntimeError: If async execution is disabled or execution fails
-            TimeoutError: If execution times out
-            KeyError: If execution_id is not found
+            AgentFieldClientError: If async execution is disabled.
+            ExecutionTimeoutError: If execution times out.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             manager = await self._get_async_execution_manager()
@@ -1433,11 +1472,22 @@ class AgentFieldClient:
             logger.debug(f"Execution {execution_id[:8]}... completed successfully")
             return result
 
+        except TimeoutError as exc:
+            logger.error(
+                f"Failed to wait for execution result {execution_id[:8]}...: {exc}"
+            )
+            raise ExecutionTimeoutError(
+                f"Execution {execution_id} exceeded timeout"
+            ) from exc
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to wait for execution result {execution_id[:8]}...: {e}"
             )
-            raise
+            raise AgentFieldClientError(
+                f"Failed to wait for execution result: {e}"
+            ) from e
 
     async def cancel_async_execution(
         self, execution_id: str, reason: Optional[str] = None
@@ -1453,10 +1503,10 @@ class AgentFieldClient:
             bool: True if execution was cancelled, False if not found or already terminal
 
         Raises:
-            RuntimeError: If async execution is disabled
+            AgentFieldClientError: If async execution is disabled.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             manager = await self._get_async_execution_manager()
@@ -1473,9 +1523,13 @@ class AgentFieldClient:
 
             return cancelled
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(f"Failed to cancel execution {execution_id[:8]}...: {e}")
-            raise
+            raise AgentFieldClientError(
+                f"Failed to cancel execution: {e}"
+            ) from e
 
     async def list_async_executions(
         self, status_filter: Optional[str] = None, limit: Optional[int] = None
@@ -1491,10 +1545,10 @@ class AgentFieldClient:
                     List[Dict]: List of execution status dictionaries
 
                 Raises:
-                    RuntimeError: If async execution is disabled
+                    AgentFieldClientError: If async execution is disabled.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             manager = await self._get_async_execution_manager()
@@ -1513,9 +1567,13 @@ class AgentFieldClient:
 
             return executions
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(f"Failed to list async executions: {e}")
-            raise
+            raise AgentFieldClientError(
+                f"Failed to list async executions: {e}"
+            ) from e
 
     async def get_async_execution_metrics(self) -> Dict[str, Any]:
         """
@@ -1525,10 +1583,10 @@ class AgentFieldClient:
             Dict[str, Any]: Metrics dictionary with execution statistics
 
         Raises:
-            RuntimeError: If async execution is disabled
+            AgentFieldClientError: If async execution is disabled.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             if self._async_execution_manager is None:
@@ -1542,9 +1600,13 @@ class AgentFieldClient:
 
             return metrics
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(f"Failed to get async execution metrics: {e}")
-            raise
+            raise AgentFieldClientError(
+                f"Failed to get async execution metrics: {e}"
+            ) from e
 
     async def cleanup_async_executions(self) -> int:
         """
@@ -1554,10 +1616,10 @@ class AgentFieldClient:
             int: Number of executions cleaned up
 
         Raises:
-            RuntimeError: If async execution is disabled
+            AgentFieldClientError: If async execution is disabled.
         """
         if not self.async_config.enable_async_execution:
-            raise RuntimeError("Async execution is disabled in configuration")
+            raise AgentFieldClientError("Async execution is disabled in configuration")
 
         try:
             if self._async_execution_manager is None:
@@ -1570,9 +1632,13 @@ class AgentFieldClient:
 
             return cleanup_count
 
+        except AgentFieldError:
+            raise
         except Exception as e:
             logger.error(f"Failed to cleanup async executions: {e}")
-            raise
+            raise AgentFieldClientError(
+                f"Failed to cleanup async executions: {e}"
+            ) from e
 
     async def close_async_execution_manager(self) -> None:
         """

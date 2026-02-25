@@ -46,6 +46,14 @@ from .did_auth import (
     HEADER_DID_SIGNATURE,
     HEADER_DID_TIMESTAMP,
 )
+from .exceptions import (
+    AgentFieldError,
+    AgentFieldClientError,
+    ExecutionTimeoutError,
+    MemoryAccessError,
+    RegistrationError,
+    ValidationError,
+)
 
 __all__ = [
     "Agent",
@@ -91,6 +99,13 @@ __all__ = [
     "HEADER_CALLER_DID",
     "HEADER_DID_SIGNATURE",
     "HEADER_DID_TIMESTAMP",
+    # Exceptions
+    "AgentFieldError",
+    "AgentFieldClientError",
+    "ExecutionTimeoutError",
+    "MemoryAccessError",
+    "RegistrationError",
+    "ValidationError",
 ]
 
-__version__ = "0.1.42-rc.1"
+__version__ = "0.1.42-rc.3"

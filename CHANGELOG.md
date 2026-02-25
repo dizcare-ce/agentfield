@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.42-rc.3] - 2026-02-24
+
+
+### Added
+
+- Feat(python-sdk): add domain-specific exception hierarchy (#187)
+
+* feat(python-sdk): add domain-specific exception hierarchy
+
+* fix(python-sdk): harden exception wrapping and add tests
+
+- Add double-wrap guards (except MemoryAccessError: raise) in all
+  memory.py methods so MemoryAccessError never gets re-wrapped
+- Wrap bare re-raises in client.py async methods (poll, batch_check,
+  wait_for_result, cancel, list, metrics, cleanup) as
+  AgentFieldClientError to match their documented Raises contracts
+- Broaden register_node catch to Exception (catches JSONDecodeError
+  in addition to requests.RequestException)
+- Add 45 tests covering hierarchy, imports, client errors,
+  registration, execution timeout, validation, memory wrapping,
+  and double-wrap prevention
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ebaa4d2)
+
+## [0.1.42-rc.2] - 2026-02-24
+
+
+### Documentation
+
+- Docs(python-sdk): document memory scope hierarchy (#184) (fde9ce2)
+
 ## [0.1.42-rc.1] - 2026-02-18
 
 
