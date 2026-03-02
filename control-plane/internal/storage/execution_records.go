@@ -34,13 +34,13 @@ func (ls *LocalStorage) CreateExecutionRecord(ctx context.Context, exec *types.E
 		INSERT INTO executions (
 			execution_id, run_id, parent_execution_id,
 			agent_node_id, reasoner_id, node_id,
-			status, input_payload, result_payload, error_message,
+			status, status_reason, input_payload, result_payload, error_message,
 			input_uri, result_uri,
 			session_id, actor_id,
 			started_at, completed_at, duration_ms,
 			notes,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	// Serialize notes to JSON
 	var notesJSON []byte
@@ -62,6 +62,7 @@ func (ls *LocalStorage) CreateExecutionRecord(ctx context.Context, exec *types.E
 		exec.ReasonerID,
 		exec.NodeID,
 		exec.Status,
+		exec.StatusReason,
 		bytesOrNil(exec.InputPayload),
 		bytesOrNil(exec.ResultPayload),
 		exec.ErrorMessage,
@@ -88,7 +89,7 @@ func (ls *LocalStorage) GetExecutionRecord(ctx context.Context, executionID stri
 	query := `
 		SELECT execution_id, run_id, parent_execution_id,
 		       agent_node_id, reasoner_id, node_id,
-		       status, input_payload, result_payload, error_message,
+		       status, status_reason, input_payload, result_payload, error_message,
 		       input_uri, result_uri,
 		       session_id, actor_id,
 		       started_at, completed_at, duration_ms,
@@ -125,7 +126,7 @@ func (ls *LocalStorage) UpdateExecutionRecord(ctx context.Context, executionID s
 	row := tx.QueryRowContext(ctx, `
 		SELECT execution_id, run_id, parent_execution_id,
 		       agent_node_id, reasoner_id, node_id,
-		       status, input_payload, result_payload, error_message,
+		       status, status_reason, input_payload, result_payload, error_message,
 		       input_uri, result_uri,
 		       session_id, actor_id,
 		       started_at, completed_at, duration_ms,
@@ -169,6 +170,7 @@ func (ls *LocalStorage) UpdateExecutionRecord(ctx context.Context, executionID s
 			reasoner_id = ?,
 			node_id = ?,
 			status = ?,
+			status_reason = ?,
 			input_payload = ?,
 			result_payload = ?,
 			error_message = ?,
@@ -192,6 +194,7 @@ func (ls *LocalStorage) UpdateExecutionRecord(ctx context.Context, executionID s
 		updated.ReasonerID,
 		updated.NodeID,
 		updated.Status,
+		updated.StatusReason,
 		bytesOrNil(updated.InputPayload),
 		bytesOrNil(updated.ResultPayload),
 		updated.ErrorMessage,
@@ -270,7 +273,7 @@ func (ls *LocalStorage) QueryExecutionRecords(ctx context.Context, filter types.
 	queryBuilder.WriteString(`
 		SELECT execution_id, run_id, parent_execution_id,
 		       agent_node_id, reasoner_id, node_id,
-		       status, input_payload, result_payload, error_message,
+		       status, status_reason, input_payload, result_payload, error_message,
 		       input_uri, result_uri,
 		       session_id, actor_id,
 		       started_at, completed_at, duration_ms,
@@ -418,7 +421,8 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			SUM(CASE WHEN LOWER(status) = 'running' THEN 1 ELSE 0 END) AS running_count,
 			SUM(CASE WHEN LOWER(status) = 'pending' THEN 1 ELSE 0 END) AS pending_count,
 			SUM(CASE WHEN LOWER(status) = 'queued' THEN 1 ELSE 0 END) AS queued_count,
-			SUM(CASE WHEN LOWER(status) IN ('running','pending','queued') THEN 1 ELSE 0 END) AS active_executions,
+			SUM(CASE WHEN LOWER(status) = 'waiting' THEN 1 ELSE 0 END) AS waiting_count,
+			SUM(CASE WHEN LOWER(status) IN ('running','pending','queued','waiting') THEN 1 ELSE 0 END) AS active_executions,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN execution_id END) AS root_execution_id,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN agent_node_id END) AS root_agent_node_id,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN reasoner_id END) AS root_reasoner_id,
@@ -426,7 +430,7 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			MAX(actor_id) AS actor_id,
 			CASE
 				WHEN SUM(CASE WHEN LOWER(status) IN ('failed','cancelled','timeout') THEN 1 ELSE 0 END) > 0 THEN 2
-				WHEN SUM(CASE WHEN LOWER(status) IN ('running','pending','queued') THEN 1 ELSE 0 END) > 0 THEN 1
+				WHEN SUM(CASE WHEN LOWER(status) IN ('running','pending','queued','waiting') THEN 1 ELSE 0 END) > 0 THEN 1
 				ELSE 0
 			END AS status_rank
 		FROM executions
@@ -465,6 +469,7 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			runningCount       int
 			pendingCount       int
 			queuedCount        int
+			waitingCount       int
 			activeExecutions   int
 			rootExecutionID    sql.NullString
 			rootAgentNodeID    sql.NullString
@@ -486,6 +491,7 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			&runningCount,
 			&pendingCount,
 			&queuedCount,
+			&waitingCount,
 			&activeExecutions,
 			&rootExecutionID,
 			&rootAgentNodeID,
@@ -507,6 +513,7 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 				string(types.ExecutionStatusCancelled): cancelledCount,
 				string(types.ExecutionStatusTimeout):   timeoutCount,
 				string(types.ExecutionStatusRunning):   runningCount,
+				string(types.ExecutionStatusWaiting):   waitingCount,
 				string(types.ExecutionStatusPending):   pendingCount,
 				string(types.ExecutionStatusQueued):    queuedCount,
 			},
@@ -705,6 +712,7 @@ func (ls *LocalStorage) getRunAggregation(ctx context.Context, runID string) (*R
 
 		// Count active executions
 		if normalized == string(types.ExecutionStatusRunning) ||
+			normalized == string(types.ExecutionStatusWaiting) ||
 			normalized == string(types.ExecutionStatusPending) ||
 			normalized == string(types.ExecutionStatusQueued) {
 			activeCount += count
@@ -1033,6 +1041,7 @@ func scanExecution(scanner interface {
 		actorID                      sql.NullString
 		inputURI                     sql.NullString
 		resultURI                    sql.NullString
+		statusReason                 sql.NullString
 		inputPayload                 []byte
 		resultPayload                []byte
 		errorMessage                 sql.NullString
@@ -1049,6 +1058,7 @@ func scanExecution(scanner interface {
 		&exec.ReasonerID,
 		&exec.NodeID,
 		&exec.Status,
+		&statusReason,
 		&inputPayload,
 		&resultPayload,
 		&errorMessage,
@@ -1078,6 +1088,9 @@ func scanExecution(scanner interface {
 	}
 	if actorID.Valid {
 		exec.ActorID = &actorID.String
+	}
+	if statusReason.Valid {
+		exec.StatusReason = &statusReason.String
 	}
 	exec.InputPayload = append(json.RawMessage(nil), inputPayload...)
 	if len(resultPayload) > 0 {

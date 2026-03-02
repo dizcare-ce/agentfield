@@ -81,12 +81,17 @@ type apiWorkflowExecution struct {
 	AgentNodeID       string  `json:"agent_node_id"`
 	ReasonerID        string  `json:"reasoner_id"`
 	Status            string  `json:"status"`
+	StatusReason      *string `json:"status_reason,omitempty"`
 	StartedAt         string  `json:"started_at"`
 	CompletedAt       *string `json:"completed_at,omitempty"`
 	WorkflowDepth     int     `json:"workflow_depth"`
 	ActiveChildren    int     `json:"active_children"`
 	PendingChildren   int     `json:"pending_children"`
 	LastUpdatedAt     *string `json:"last_updated_at,omitempty"`
+	// Approval fields (populated when execution has an approval request)
+	ApprovalRequestID  *string `json:"approval_request_id,omitempty"`
+	ApprovalRequestURL *string `json:"approval_request_url,omitempty"`
+	ApprovalStatus     *string `json:"approval_status,omitempty"`
 }
 
 func (h *WorkflowRunHandler) ListWorkflowRunsHandler(c *gin.Context) {
@@ -200,7 +205,9 @@ func convertAggregationToSummary(agg *storage.RunSummaryAggregation) WorkflowRun
 
 	// Check if terminal
 	summary.Terminal = summary.Status == string(types.ExecutionStatusSucceeded) ||
-		summary.Status == string(types.ExecutionStatusFailed)
+		summary.Status == string(types.ExecutionStatusFailed) ||
+		summary.Status == string(types.ExecutionStatusTimeout) ||
+		summary.Status == string(types.ExecutionStatusCancelled)
 
 	// Calculate duration if completed
 	if summary.Terminal {
@@ -213,30 +220,30 @@ func convertAggregationToSummary(agg *storage.RunSummaryAggregation) WorkflowRun
 	return summary
 }
 
-// deriveStatusFromCounts determines overall workflow status from status counts
+// deriveStatusFromCounts determines overall workflow status from status counts.
+// Priority: active (running/waiting/pending/queued) > failed > timeout > cancelled > succeeded.
 func deriveStatusFromCounts(statusCounts map[string]int, activeExecutions int) string {
+	// If there are active executions (running, waiting, pending, queued), the workflow is running
+	if activeExecutions > 0 {
+		return string(types.ExecutionStatusRunning)
+	}
+
 	// If there are any failed executions, the workflow is failed
 	if statusCounts[string(types.ExecutionStatusFailed)] > 0 {
 		return string(types.ExecutionStatusFailed)
 	}
 
-	// If there are active executions, the workflow is running
-	if activeExecutions > 0 {
-		return string(types.ExecutionStatusRunning)
+	// If there are any timed-out executions, the workflow timed out
+	if statusCounts[string(types.ExecutionStatusTimeout)] > 0 {
+		return string(types.ExecutionStatusTimeout)
 	}
 
-	// If all executions succeeded, the workflow succeeded
-	totalSucceeded := statusCounts[string(types.ExecutionStatusSucceeded)]
-	totalAll := 0
-	for _, count := range statusCounts {
-		totalAll += count
+	// If there are any cancelled executions, the workflow is cancelled
+	if statusCounts[string(types.ExecutionStatusCancelled)] > 0 {
+		return string(types.ExecutionStatusCancelled)
 	}
 
-	if totalSucceeded == totalAll && totalAll > 0 {
-		return string(types.ExecutionStatusSucceeded)
-	}
-
-	// Default to succeeded if no active work
+	// All executions are in terminal non-error states (succeeded) or no executions exist
 	return string(types.ExecutionStatusSucceeded)
 }
 
@@ -315,6 +322,9 @@ func (h *WorkflowRunHandler) GetWorkflowRunDetailHandler(c *gin.Context) {
 		}
 	}
 
+	// Enrich executions in waiting status with approval data from workflow executions
+	h.enrichApprovalData(ctx, apiExecutions)
+
 	detail.Executions = apiExecutions
 
 	c.JSON(http.StatusOK, detail)
@@ -375,6 +385,7 @@ func summarizeRun(runID string, executions []*types.Execution) WorkflowRunSummar
 		normalized := types.NormalizeExecutionStatus(exec.Status)
 		summary.StatusCounts[normalized]++
 		if normalized == string(types.ExecutionStatusRunning) ||
+			normalized == string(types.ExecutionStatusWaiting) ||
 			normalized == string(types.ExecutionStatusPending) ||
 			normalized == string(types.ExecutionStatusQueued) {
 			active++
@@ -462,7 +473,7 @@ func buildAPIExecutions(nodes []handlers.WorkflowDAGNode) []apiWorkflowExecution
 		pendingChildren := 0
 		for _, child := range children {
 			switch types.NormalizeExecutionStatus(child.Status) {
-			case string(types.ExecutionStatusRunning):
+			case string(types.ExecutionStatusRunning), string(types.ExecutionStatusWaiting):
 				activeChildren++
 			case string(types.ExecutionStatusPending), string(types.ExecutionStatusQueued):
 				pendingChildren++
@@ -483,6 +494,7 @@ func buildAPIExecutions(nodes []handlers.WorkflowDAGNode) []apiWorkflowExecution
 			AgentNodeID:     node.AgentNodeID,
 			ReasonerID:      node.ReasonerID,
 			Status:          node.Status,
+			StatusReason:    node.StatusReason,
 			StartedAt:       node.StartedAt,
 			CompletedAt:     node.CompletedAt,
 			WorkflowDepth:   node.WorkflowDepth,
@@ -492,6 +504,25 @@ func buildAPIExecutions(nodes []handlers.WorkflowDAGNode) []apiWorkflowExecution
 		apiNodes = append(apiNodes, apiNode)
 	}
 	return apiNodes
+}
+
+// enrichApprovalData looks up workflow executions for any api nodes in waiting status
+// and populates their approval fields.
+func (h *WorkflowRunHandler) enrichApprovalData(ctx context.Context, executions []apiWorkflowExecution) {
+	for i := range executions {
+		// Only look up approval data for executions that have a waiting-related status
+		normalized := types.NormalizeExecutionStatus(executions[i].Status)
+		if normalized != types.ExecutionStatusWaiting {
+			continue
+		}
+		wfExec, err := h.storage.GetWorkflowExecution(ctx, executions[i].ExecutionID)
+		if err != nil || wfExec == nil {
+			continue
+		}
+		executions[i].ApprovalRequestID = wfExec.ApprovalRequestID
+		executions[i].ApprovalRequestURL = wfExec.ApprovalRequestURL
+		executions[i].ApprovalStatus = wfExec.ApprovalStatus
+	}
 }
 
 func parsePositiveInt(value string, fallback int) int {

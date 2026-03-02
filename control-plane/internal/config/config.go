@@ -37,6 +37,15 @@ type AgentFieldConfig struct {
 	NodeHealth       NodeHealthConfig       `yaml:"node_health" mapstructure:"node_health"`
 	ExecutionCleanup ExecutionCleanupConfig `yaml:"execution_cleanup" mapstructure:"execution_cleanup"`
 	ExecutionQueue   ExecutionQueueConfig   `yaml:"execution_queue" mapstructure:"execution_queue"`
+	Approval         ApprovalConfig         `yaml:"approval" mapstructure:"approval"`
+}
+
+// ApprovalConfig holds configuration for the execution approval workflow.
+// The control plane manages execution state only — agents are responsible for
+// communicating with external approval services (e.g. hax-sdk).
+type ApprovalConfig struct {
+	WebhookSecret      string `yaml:"webhook_secret" mapstructure:"webhook_secret"`             // Optional HMAC-SHA256 secret for verifying webhook callbacks
+	DefaultExpiryHours int    `yaml:"default_expiry_hours" mapstructure:"default_expiry_hours"` // Default approval expiry (hours); 0 = 72h
 }
 
 // NodeHealthConfig holds configuration for agent node health monitoring.
@@ -301,6 +310,16 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val := os.Getenv("AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN"); val != "" {
 		cfg.Features.DID.Authorization.InternalToken = val
+	}
+
+	// Approval workflow overrides
+	if val := os.Getenv("AGENTFIELD_APPROVAL_WEBHOOK_SECRET"); val != "" {
+		cfg.AgentField.Approval.WebhookSecret = val
+	}
+	if val := os.Getenv("AGENTFIELD_APPROVAL_DEFAULT_EXPIRY_HOURS"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.AgentField.Approval.DefaultExpiryHours = i
+		}
 	}
 
 	// Connector overrides

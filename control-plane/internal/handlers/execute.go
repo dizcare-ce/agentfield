@@ -39,6 +39,8 @@ type ExecutionStore interface {
 	StoreWorkflowExecution(ctx context.Context, execution *types.WorkflowExecution) error
 	UpdateWorkflowExecution(ctx context.Context, executionID string, updateFunc func(*types.WorkflowExecution) (*types.WorkflowExecution, error)) error
 	GetWorkflowExecution(ctx context.Context, executionID string) (*types.WorkflowExecution, error)
+	QueryWorkflowExecutions(ctx context.Context, filters types.WorkflowExecutionFilters) ([]*types.WorkflowExecution, error)
+	StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error
 	GetExecutionEventBus() *events.ExecutionEventBus
 }
 
@@ -88,6 +90,7 @@ type ExecutionStatusResponse struct {
 	ExecutionID       string                         `json:"execution_id"`
 	RunID             string                         `json:"run_id"`
 	Status            string                         `json:"status"`
+	StatusReason      *string                        `json:"status_reason,omitempty"`
 	Result            interface{}                    `json:"result,omitempty"`
 	Error             *string                        `json:"error,omitempty"`
 	ErrorDetails      interface{}                    `json:"error_details,omitempty"`
@@ -96,6 +99,10 @@ type ExecutionStatusResponse struct {
 	DurationMS        *int64                         `json:"duration_ms,omitempty"`
 	WebhookRegistered bool                           `json:"webhook_registered"`
 	WebhookEvents     []*types.ExecutionWebhookEvent `json:"webhook_events,omitempty"`
+	// Approval fields (populated when execution has an active approval request)
+	ApprovalRequestID  *string `json:"approval_request_id,omitempty"`
+	ApprovalStatus     *string `json:"approval_status,omitempty"`
+	ApprovalRequestURL *string `json:"approval_request_url,omitempty"`
 }
 
 // BatchStatusRequest allows the UI to fetch multiple execution statuses at once.
@@ -107,12 +114,13 @@ type BatchStatusRequest struct {
 type BatchStatusResponse map[string]ExecutionStatusResponse
 
 type executionStatusUpdateRequest struct {
-	Status      string                 `json:"status" binding:"required"`
-	Result      map[string]interface{} `json:"result,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	DurationMS  *int64                 `json:"duration_ms,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
-	Progress    *int                   `json:"progress,omitempty"`
+	Status       string                 `json:"status" binding:"required"`
+	StatusReason *string                `json:"status_reason,omitempty"`
+	Result       map[string]interface{} `json:"result,omitempty"`
+	Error        string                 `json:"error,omitempty"`
+	DurationMS   *int64                 `json:"duration_ms,omitempty"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	Progress     *int                   `json:"progress,omitempty"`
 }
 
 type executionController struct {
@@ -411,7 +419,7 @@ func (c *executionController) handleStatus(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, renderStatus(exec))
+	ctx.JSON(http.StatusOK, c.renderStatusWithApproval(reqCtx, exec))
 }
 
 func (c *executionController) handleBatchStatus(ctx *gin.Context) {
@@ -440,7 +448,7 @@ func (c *executionController) handleBatchStatus(ctx *gin.Context) {
 			}
 			continue
 		}
-		response[id] = renderStatus(exec)
+		response[id] = c.renderStatusWithApproval(reqCtx, exec)
 	}
 
 	ctx.JSON(http.StatusOK, response)
@@ -488,7 +496,29 @@ func (c *executionController) handleStatusUpdate(ctx *gin.Context) {
 			return nil, fmt.Errorf("execution %s not found", executionID)
 		}
 
+		// Guard: executions in "waiting" state can only transition to
+		// running, cancelled, or failed. The approval webhook handler
+		// manages the waiting→running transition; direct jumps to
+		// succeeded or timeout would desync the executions and
+		// workflow_executions tables.
+		if current.Status == types.ExecutionStatusWaiting {
+			switch normalizedStatus {
+			case string(types.ExecutionStatusRunning),
+				string(types.ExecutionStatusCancelled),
+				string(types.ExecutionStatusFailed):
+				// allowed
+			default:
+				logger.Logger.Warn().
+					Str("execution_id", executionID).
+					Str("current_status", string(current.Status)).
+					Str("requested_status", normalizedStatus).
+					Msg("rejecting status update: execution is waiting for approval")
+				return nil, fmt.Errorf("execution %s is in 'waiting' state; only running, cancelled, or failed transitions are allowed", executionID)
+			}
+		}
+
 		current.Status = normalizedStatus
+		current.StatusReason = req.StatusReason
 		if len(resultBytes) > 0 {
 			current.ResultPayload = json.RawMessage(resultBytes)
 			current.ResultURI = resultURI
@@ -547,6 +577,8 @@ func (c *executionController) handleStatusUpdate(ctx *gin.Context) {
 		elapsed = time.Duration(*updated.DurationMS) * time.Millisecond
 	}
 
+	c.updateWorkflowExecutionStatus(reqCtx, executionID, normalizedStatus, req.StatusReason)
+
 	if isTerminal {
 		c.updateWorkflowExecutionFinalState(reqCtx, executionID, types.ExecutionStatus(normalizedStatus), updated.ResultPayload, elapsed, errorMsg)
 		if updated.WebhookRegistered {
@@ -559,12 +591,63 @@ func (c *executionController) handleStatusUpdate(ctx *gin.Context) {
 		"error":    req.Error,
 		"progress": req.Progress,
 	}
+	if req.StatusReason != nil && strings.TrimSpace(*req.StatusReason) != "" {
+		eventData["status_reason"] = strings.TrimSpace(*req.StatusReason)
+	}
 	if inputPayload := decodeJSON(updated.InputPayload); inputPayload != nil {
 		eventData["input"] = inputPayload
 	}
 	c.publishExecutionEvent(updated, normalizedStatus, eventData)
 
-	ctx.JSON(http.StatusOK, renderStatus(updated))
+	ctx.JSON(http.StatusOK, c.renderStatusWithApproval(reqCtx, updated))
+}
+
+func (c *executionController) updateWorkflowExecutionStatus(
+	ctx context.Context,
+	executionID string,
+	status string,
+	statusReason *string,
+) {
+	if c.store == nil {
+		return
+	}
+
+	var normalizedReason *string
+	if statusReason != nil {
+		trimmed := strings.TrimSpace(*statusReason)
+		if trimmed != "" {
+			normalizedReason = &trimmed
+		}
+	}
+
+	err := c.store.UpdateWorkflowExecution(ctx, executionID, func(current *types.WorkflowExecution) (*types.WorkflowExecution, error) {
+		if current == nil {
+			return nil, fmt.Errorf("execution with ID %s not found", executionID)
+		}
+
+		current.Status = status
+		current.StatusReason = normalizedReason
+		current.UpdatedAt = time.Now().UTC()
+
+		if !types.IsTerminalExecutionStatus(status) {
+			current.CompletedAt = nil
+			if current.DurationMS != nil {
+				current.DurationMS = nil
+			}
+		}
+
+		return current, nil
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return
+		}
+		logger.Logger.Error().
+			Err(err).
+			Str("execution_id", executionID).
+			Str("status", status).
+			Msg("failed to update workflow execution status")
+	}
 }
 
 func (c *executionController) publishExecutionEvent(exec *types.Execution, status string, data map[string]interface{}) {
@@ -1052,10 +1135,21 @@ func (c *executionController) completeExecution(ctx context.Context, plan *prepa
 	resultURI := c.savePayload(ctx, result)
 
 	var lastErr error
+	var alreadyCancelled bool
 	for attempt := 0; attempt < 5; attempt++ {
 		updated, err := c.store.UpdateExecutionRecord(ctx, plan.exec.ExecutionID, func(current *types.Execution) (*types.Execution, error) {
 			if current == nil {
 				return nil, fmt.Errorf("execution %s not found", plan.exec.ExecutionID)
+			}
+			// Guard: don't overwrite if already cancelled (e.g. by approval rejection webhook)
+			// or waiting for approval — the approval webhook handler manages the transition.
+			if current.Status == types.ExecutionStatusCancelled || current.Status == types.ExecutionStatusWaiting {
+				logger.Logger.Info().
+					Str("execution_id", plan.exec.ExecutionID).
+					Str("current_status", string(current.Status)).
+					Msg("skipping completion update; execution already cancelled or waiting for approval")
+				alreadyCancelled = true
+				return current, nil
 			}
 			now := time.Now().UTC()
 			current.Status = types.ExecutionStatusSucceeded
@@ -1069,6 +1163,9 @@ func (c *executionController) completeExecution(ctx context.Context, plan *prepa
 			return current, nil
 		})
 		if err == nil {
+			if alreadyCancelled {
+				return nil
+			}
 			c.updateWorkflowExecutionFinalState(
 				ctx,
 				plan.exec.ExecutionID,
@@ -1104,10 +1201,21 @@ func (c *executionController) failExecution(ctx context.Context, plan *preparedE
 	errMsg := callErr.Error()
 	resultURI := c.savePayload(ctx, result)
 	var lastErr error
+	var alreadyCancelled bool
 	for attempt := 0; attempt < 5; attempt++ {
 		updated, err := c.store.UpdateExecutionRecord(ctx, plan.exec.ExecutionID, func(current *types.Execution) (*types.Execution, error) {
 			if current == nil {
 				return nil, fmt.Errorf("execution %s not found", plan.exec.ExecutionID)
+			}
+			// Guard: don't overwrite if already cancelled (e.g. by approval rejection webhook)
+			// or waiting for approval — the approval webhook handler manages the transition.
+			if current.Status == types.ExecutionStatusCancelled || current.Status == types.ExecutionStatusWaiting {
+				logger.Logger.Info().
+					Str("execution_id", plan.exec.ExecutionID).
+					Str("current_status", string(current.Status)).
+					Msg("skipping failure update; execution already cancelled or waiting for approval")
+				alreadyCancelled = true
+				return current, nil
 			}
 			now := time.Now().UTC()
 			current.Status = types.ExecutionStatusFailed
@@ -1123,6 +1231,9 @@ func (c *executionController) failExecution(ctx context.Context, plan *preparedE
 			return current, nil
 		})
 		if err == nil {
+			if alreadyCancelled {
+				return nil
+			}
 			c.updateWorkflowExecutionFinalState(
 				ctx,
 				plan.exec.ExecutionID,
@@ -1457,6 +1568,7 @@ func renderStatus(exec *types.Execution) ExecutionStatusResponse {
 		ExecutionID:       exec.ExecutionID,
 		RunID:             exec.RunID,
 		Status:            exec.Status,
+		StatusReason:      exec.StatusReason,
 		Result:            decodeJSON(exec.ResultPayload),
 		Error:             exec.ErrorMessage,
 		StartedAt:         exec.StartedAt.UTC().Format(time.RFC3339),
@@ -1470,6 +1582,23 @@ func renderStatus(exec *types.Execution) ExecutionStatusResponse {
 	if exec.Status == types.ExecutionStatusFailed && len(exec.ResultPayload) > 0 {
 		resp.ErrorDetails = decodeJSON(exec.ResultPayload)
 	}
+	return resp
+}
+
+// renderStatusWithApproval enriches the base status response with approval
+// fields from the corresponding WorkflowExecution record, if one exists.
+func (c *executionController) renderStatusWithApproval(ctx context.Context, exec *types.Execution) ExecutionStatusResponse {
+	resp := renderStatus(exec)
+
+	// Best-effort enrichment — if the lookup fails we still return the base response.
+	wfExec, err := c.store.GetWorkflowExecution(ctx, exec.ExecutionID)
+	if err != nil || wfExec == nil {
+		return resp
+	}
+
+	resp.ApprovalRequestID = wfExec.ApprovalRequestID
+	resp.ApprovalStatus = wfExec.ApprovalStatus
+	resp.ApprovalRequestURL = wfExec.ApprovalRequestURL
 	return resp
 }
 
