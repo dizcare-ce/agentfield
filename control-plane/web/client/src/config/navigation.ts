@@ -75,6 +75,19 @@ export const navigationSections: NavigationSection[] = [
     ]
   },
   {
+    id: 'authorization',
+    title: 'Authorization',
+    items: [
+      {
+        id: 'authorization',
+        label: 'Authorization',
+        href: '/authorization',
+        icon: 'shield-check',
+        description: 'Manage access policies and agent tag approvals'
+      }
+    ]
+  },
+  {
     id: 'settings',
     title: 'Settings',
     items: [

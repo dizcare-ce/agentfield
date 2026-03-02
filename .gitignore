@@ -14,6 +14,14 @@ dist/
 coverage.out
 *.test
 tmp/
+examples/go_agent_nodes/permission_agent_*
+examples/go_agent_nodes/go_agent_nodes
+
+# Compiled binaries
+control-plane/agentfield-server
+control-plane/af
+examples/**/go_agent_node*
+!examples/**/*.go
 
 # Python
 __pycache__/

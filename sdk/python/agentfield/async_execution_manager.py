@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 import aiohttp
 
 from .async_config import AsyncConfig
-from .execution_state import ExecutionPriority, ExecutionState, ExecutionStatus
+from .execution_state import ExecuteError, ExecutionPriority, ExecutionState, ExecutionStatus
 from .http_connection_manager import ConnectionManager
 from .logger import get_logger
 from .result_cache import ResultCache
@@ -179,6 +179,7 @@ class AsyncExecutionManager:
         connection_manager: Optional[ConnectionManager] = None,
         result_cache: Optional[ResultCache] = None,
         auth_headers: Optional[Dict[str, str]] = None,
+        did_authenticator: Optional[Any] = None,
     ):
         """
         Initialize the async execution manager.
@@ -190,6 +191,7 @@ class AsyncExecutionManager:
             result_cache: Optional ResultCache instance
             auth_headers: Optional auth headers (e.g. X-API-Key) included in
                 every polling request to the control plane
+            did_authenticator: Optional DIDAuthenticator for signing requests
         """
         self.base_url = base_url.rstrip("/")
         self.config = config or AsyncConfig()
@@ -201,6 +203,7 @@ class AsyncExecutionManager:
         # Initialize components
         self.connection_manager = connection_manager or ConnectionManager(self.config)
         self.result_cache = result_cache or ResultCache(self.config)
+        self._did_authenticator = did_authenticator
 
         # Execution tracking
         self._executions: Dict[str, ExecutionState] = {}
@@ -382,6 +385,14 @@ class AsyncExecutionManager:
             else:
                 raise TypeError("webhook must be a WebhookConfig or dict")
 
+        # Serialize with compact separators so the signed bytes match what gets sent.
+        body_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Add DID authentication headers if configured
+        if self._did_authenticator is not None and self._did_authenticator.is_configured:
+            did_headers = self._did_authenticator.sign_headers(body_bytes)
+            request_headers.update(did_headers)
+
         # Set timeout
         execution_timeout = timeout or self.config.default_execution_timeout
 
@@ -391,11 +402,20 @@ class AsyncExecutionManager:
             async with self.connection_manager.get_session() as session:
                 response = await session.post(
                     url,
-                    json=payload,
+                    data=body_bytes,
                     headers=request_headers,
                     timeout=self.config.polling_timeout,
                 )
-                response.raise_for_status()
+                if response.status >= 400:
+                    try:
+                        error_body = await response.json()
+                    except Exception:
+                        error_body = None
+                    body_msg = ""
+                    if isinstance(error_body, dict):
+                        body_msg = error_body.get("message") or error_body.get("error") or ""
+                    msg = f"{response.status}, {body_msg}" if body_msg else str(response.status)
+                    raise ExecuteError(response.status, msg, error_body)
                 result = await response.json()
 
             execution_id = result.get("execution_id")

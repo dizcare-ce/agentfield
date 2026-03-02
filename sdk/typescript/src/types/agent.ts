@@ -21,8 +21,16 @@ export interface AgentConfig {
   heartbeatIntervalMs?: number;
   defaultHeaders?: Record<string, string | number | boolean | undefined>;
   apiKey?: string;
+  did?: string;
+  privateKeyJwk?: string;
   mcp?: MCPConfig;
   deploymentType?: DeploymentType;
+  /** Enable decentralized local verification of incoming DID signatures. */
+  localVerification?: boolean;
+  /** Cache refresh interval for local verification in seconds (default: 300). */
+  verificationRefreshInterval?: number;
+  /** Agent-level tags for tag-based authorization policies. */
+  tags?: string[];
 }
 
 export interface AIConfig {

@@ -12,6 +12,9 @@ agentfield:
     webhook_max_attempts: 3       # Number of attempts before marking the webhook as failed
     webhook_retry_backoff: 1s     # Initial backoff between webhook retries (exponential)
     webhook_max_retry_backoff: 5s # Upper bound for webhook retry backoff
+  approval:
+    webhook_secret: ""                 # Optional HMAC-SHA256 secret for verifying approval webhook callbacks
+    default_expiry_hours: 72           # Default approval expiry (hours)
 
 ui:
   enabled: true
@@ -36,6 +39,11 @@ api:
       - "Accept"
       - "Authorization"
       - "X-Requested-With"
+      - "X-API-Key"
+      - "X-Admin-Token"
+      - "X-Caller-DID"
+      - "X-DID-Signature"
+      - "X-DID-Timestamp"
     exposed_headers:
       - "Content-Length"
       - "X-Total-Count"
@@ -46,6 +54,13 @@ storage:
   local:
     database_path: ""
     kv_store_path: ""
+  postgres:
+    host: "localhost"
+    port: 5433
+    database: "agentfield_dev"
+    user: "agentfield"
+    password: "agentfield"
+    sslmode: "disable"
   vector:
     enabled: true
     distance: "cosine"
@@ -71,3 +86,62 @@ features:
       encryption: "AES-256-GCM"
       backup_enabled: true
       backup_interval: "24h"
+    authorization:
+      enabled: true
+      did_auth_enabled: false
+      domain: "localhost:8080"
+      timestamp_window_seconds: 300
+      default_approval_duration_hours: 24
+      admin_token: "admin-secret"
+      internal_token: "internal-secret-token"
+      tag_approval_rules:
+        default_mode: "auto"
+        rules:
+          - tags: ["sensitive", "financial", "payments"]
+            approval: "manual"
+            reason: "Sensitive/financial tags require admin review"
+          - tags: ["public", "analytics"]
+            approval: "auto"
+            reason: "Auto-approved"
+      access_policies:
+        - name: "analytics_to_data_service"
+          caller_tags: ["analytics"]
+          target_tags: ["data-service"]
+          allow_functions: ["query_*", "get_*", "analyze_*"]
+          deny_functions: ["delete_*", "update_*"]
+          constraints:
+            limit:
+              operator: "<="
+              value: 1000
+          action: "allow"
+          priority: 100
+        - name: "payments_to_payments"
+          caller_tags: ["payments"]
+          target_tags: ["payments"]
+          allow_functions: ["process_*", "get_*"]
+          deny_functions: ["refund_*"]
+          constraints:
+            amount:
+              operator: "<="
+              value: 10000
+          action: "allow"
+          priority: 90
+  connector:
+    enabled: true
+    token: "test-connector-token-123"
+    capabilities:
+      policy_management:
+        enabled: true
+        read_only: false
+      tag_management:
+        enabled: true
+        read_only: false
+      did_management:
+        enabled: false
+      reasoner_management:
+        enabled: true
+        read_only: false
+      status_read:
+        enabled: true
+      observability_config:
+        enabled: false

@@ -86,7 +86,7 @@ func TestPresenceManager_Touch(t *testing.T) {
 	nodeID := "node-touch-1"
 	now := time.Now()
 
-	pm.Touch(nodeID, now)
+	pm.Touch(nodeID, "", now)
 
 	// Verify lease exists
 	require.True(t, pm.HasLease(nodeID))
@@ -97,11 +97,11 @@ func TestPresenceManager_Touch_UpdateExisting(t *testing.T) {
 
 	nodeID := "node-touch-update"
 	now1 := time.Now()
-	pm.Touch(nodeID, now1)
+	pm.Touch(nodeID, "", now1)
 
 	time.Sleep(10 * time.Millisecond)
 	now2 := time.Now()
-	pm.Touch(nodeID, now2)
+	pm.Touch(nodeID, "", now2)
 
 	// Verify lease still exists
 	require.True(t, pm.HasLease(nodeID))
@@ -111,7 +111,7 @@ func TestPresenceManager_Forget(t *testing.T) {
 	pm, _ := setupPresenceManagerTest(t)
 
 	nodeID := "node-forget-1"
-	pm.Touch(nodeID, time.Now())
+	pm.Touch(nodeID, "", time.Now())
 	require.True(t, pm.HasLease(nodeID))
 
 	pm.Forget(nodeID)
@@ -124,7 +124,7 @@ func TestPresenceManager_HasLease(t *testing.T) {
 	nodeID := "node-lease-1"
 	require.False(t, pm.HasLease(nodeID))
 
-	pm.Touch(nodeID, time.Now())
+	pm.Touch(nodeID, "", time.Now())
 	require.True(t, pm.HasLease(nodeID))
 
 	pm.Forget(nodeID)
@@ -132,34 +132,55 @@ func TestPresenceManager_HasLease(t *testing.T) {
 }
 
 func TestPresenceManager_SetExpireCallback(t *testing.T) {
-	pm, _ := setupPresenceManagerTest(t)
+	pm, provider := setupPresenceManagerTest(t)
 
+	// Register the agent in storage so UpdateAgentStatus can look up its status.
+	// Without this, markInactive → UpdateAgentStatus → GetAgentStatusSnapshot → GetAgent
+	// fails and returns early before invoking the callback.
+	ctx := context.Background()
+	nodeID := "node-callback-1"
+	require.NoError(t, provider.RegisterAgent(ctx, &types.AgentNode{
+		ID:            nodeID,
+		BaseURL:       "http://localhost:9999",
+		LastHeartbeat: time.Now(),
+	}))
+
+	var mu sync.Mutex
 	var callbackInvoked bool
 	var callbackNodeID string
 
-	callback := func(nodeID string) {
+	callback := func(id string) {
+		mu.Lock()
 		callbackInvoked = true
-		callbackNodeID = nodeID
+		callbackNodeID = id
+		mu.Unlock()
 	}
 
 	pm.SetExpireCallback(callback)
 	require.NotNil(t, pm.expireCallback)
 
+	// Use shorter intervals for faster test execution
+	pm.config.HeartbeatTTL = 500 * time.Millisecond
+	pm.config.SweepInterval = 200 * time.Millisecond
+
 	// Start the presence manager to trigger expiration
 	pm.Start()
 
-	// Touch a node
-	nodeID := "node-callback-1"
-	pm.Touch(nodeID, time.Now().Add(-10*time.Second)) // Touch in the past
+	// Touch a node in the past so it's already expired
+	pm.Touch(nodeID, "", time.Now().Add(-10*time.Second))
 
-	// Wait for expiration
-	time.Sleep(2 * time.Second)
+	// Wait for sweep to detect the expired node (generous margin for CI)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return callbackInvoked
+	}, 5*time.Second, 100*time.Millisecond, "expire callback should have been invoked")
 
 	pm.Stop()
 
-	// Callback should have been invoked
-	require.True(t, callbackInvoked)
+	mu.Lock()
 	require.Equal(t, nodeID, callbackNodeID)
+	mu.Unlock()
 }
 
 func TestPresenceManager_ExpirationDetection(t *testing.T) {
@@ -167,19 +188,22 @@ func TestPresenceManager_ExpirationDetection(t *testing.T) {
 
 	// Set shorter TTL for testing
 	pm.config.HeartbeatTTL = 500 * time.Millisecond
-	pm.config.SweepInterval = 100 * time.Millisecond
+	pm.config.SweepInterval = 200 * time.Millisecond
+	// Set hard evict TTL short so the lease gets deleted after expiration.
+	// The sweep first marks offline (MarkedOffline=true) keeping the lease,
+	// then on the next sweep removes it if HardEvictTTL has elapsed.
+	pm.config.HardEvictTTL = 1 * time.Second
 
 	pm.Start()
 
 	nodeID := "node-expire-1"
-	pm.Touch(nodeID, time.Now())
+	pm.Touch(nodeID, "", time.Now())
 	require.True(t, pm.HasLease(nodeID))
 
-	// Wait for expiration
-	time.Sleep(700 * time.Millisecond)
-
-	// Node should be marked offline
-	require.False(t, pm.HasLease(nodeID))
+	// Wait for expiration: TTL expires → marked offline → hard evict removes lease
+	require.Eventually(t, func() bool {
+		return !pm.HasLease(nodeID)
+	}, 5*time.Second, 100*time.Millisecond, "node should be removed after TTL + hard evict expiration")
 
 	pm.Stop()
 }
@@ -198,7 +222,7 @@ func TestPresenceManager_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numNodes; j++ {
 				nodeID := "node-concurrent-" + string(rune('0'+j))
-				pm.Touch(nodeID, time.Now())
+				pm.Touch(nodeID, "", time.Now())
 				_ = pm.HasLease(nodeID)
 			}
 		}(i)
@@ -220,7 +244,7 @@ func TestPresenceManager_StartStop(t *testing.T) {
 
 	// Verify it's running
 	nodeID := "node-start-stop"
-	pm.Touch(nodeID, time.Now())
+	pm.Touch(nodeID, "", time.Now())
 	require.True(t, pm.HasLease(nodeID))
 
 	pm.Stop()
@@ -240,7 +264,7 @@ func TestPresenceManager_HardEviction(t *testing.T) {
 	pm.Start()
 
 	nodeID := "node-hard-evict"
-	pm.Touch(nodeID, time.Now().Add(-2*time.Second)) // Touch in the past beyond hard evict TTL
+	pm.Touch(nodeID, "", time.Now().Add(-2*time.Second)) // Touch in the past beyond hard evict TTL
 
 	// Wait for hard eviction
 	time.Sleep(1 * time.Second)
@@ -257,7 +281,7 @@ func TestPresenceManager_MultipleNodes(t *testing.T) {
 	nodeIDs := []string{"node-1", "node-2", "node-3"}
 
 	for _, nodeID := range nodeIDs {
-		pm.Touch(nodeID, time.Now())
+		pm.Touch(nodeID, "", time.Now())
 		require.True(t, pm.HasLease(nodeID))
 	}
 

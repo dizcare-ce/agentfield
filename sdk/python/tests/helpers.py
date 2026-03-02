@@ -30,6 +30,7 @@ class DummyAgentFieldClient:
         vc_metadata=None,
         version: str = "1.0.0",
         agent_metadata=None,
+        tags=None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         self.register_calls.append(
             {
@@ -41,6 +42,7 @@ class DummyAgentFieldClient:
                 "vc_metadata": vc_metadata,
                 "version": version,
                 "agent_metadata": agent_metadata,
+                "tags": tags,
             }
         )
         return True, {"resolved_base_url": base_url}
@@ -106,6 +108,7 @@ class StubAgent:
     )
     reasoners: List[Dict[str, Any]] = field(default_factory=list)
     skills: List[Dict[str, Any]] = field(default_factory=list)
+    agent_tags: List[str] = field(default_factory=list)
     agentfield_connected: bool = True
     _current_status: AgentStatus = AgentStatus.STARTING
     callback_candidates: List[str] = field(default_factory=list)
@@ -264,6 +267,11 @@ def create_test_agent(
             self.api_base = f"{base_url}/api/v1"
             self.async_config = async_config
             self.api_key = api_key
+            self.did_credentials: Optional[Tuple[str, str]] = None
+
+        def set_did_credentials(self, did: str, private_key_jwk: str) -> bool:
+            self.did_credentials = (did, private_key_jwk)
+            return True
 
     def _agentfield_client_factory(
         base_url: str, async_config: Any = None, api_key: Optional[str] = None
@@ -403,6 +411,16 @@ def create_test_agent(
             self.node_id = node
             self.api_key = api_key
             self.registered: Dict[str, Any] = {}
+            self.identity_package = SimpleNamespace(
+                agent_did=SimpleNamespace(
+                    did=f"did:agent:{node}",
+                    private_key_jwk='{"kty":"OKP","crv":"Ed25519","d":"fake-key"}',
+                    public_key_jwk='{"kty":"OKP","crv":"Ed25519","x":"fake-pub"}',
+                ),
+                reasoner_dids={},
+                skill_dids={},
+                agentfield_server_id="test-server",
+            )
 
         def register_agent(self, reasoners: List[dict], skills: List[dict]) -> bool:
             self.registered = {"reasoners": reasoners, "skills": skills}

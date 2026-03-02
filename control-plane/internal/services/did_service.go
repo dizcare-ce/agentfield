@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/config"
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
+	"golang.org/x/crypto/hkdf"
 )
 
 // DIDService handles DID generation, management, and resolution.
@@ -95,6 +97,27 @@ func (s *DIDService) GetAgentFieldServerID() (string, error) {
 // getAgentFieldServerID is an internal helper that returns the af server ID.
 func (s *DIDService) getAgentFieldServerID() (string, error) {
 	return s.GetAgentFieldServerID()
+}
+
+// GetControlPlaneIssuerDID returns the root DID (did:key format) for the
+// control plane, suitable for signing VCs. This DID is resolvable via
+// ResolveDID(), unlike the did:web URI returned by GenerateDIDWeb().
+func (s *DIDService) GetControlPlaneIssuerDID() (string, error) {
+	if !s.config.Enabled {
+		return "", fmt.Errorf("DID system is disabled")
+	}
+	agentfieldServerID, err := s.getAgentFieldServerID()
+	if err != nil {
+		return "", err
+	}
+	registry, err := s.registry.GetRegistry(agentfieldServerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get DID registry: %w", err)
+	}
+	if registry.RootDID == "" {
+		return "", fmt.Errorf("root DID not initialized")
+	}
+	return registry.RootDID, nil
 }
 
 // validateAgentFieldServerRegistry ensures that the af server registry exists before operations.
@@ -472,6 +495,28 @@ func (s *DIDService) ResolveDID(did string) (*types.DIDIdentity, error) {
 	return nil, fmt.Errorf("DID not found: %s", did)
 }
 
+// ResolveAgentIDByDID looks up the agent node ID for any DID (including did:key)
+// by searching the in-memory DID registry. Returns empty string if not found.
+func (s *DIDService) ResolveAgentIDByDID(did string) string {
+	if !s.config.Enabled {
+		return ""
+	}
+	agentfieldServerID, err := s.getAgentFieldServerID()
+	if err != nil {
+		return ""
+	}
+	registry, err := s.registry.GetRegistry(agentfieldServerID)
+	if err != nil {
+		return ""
+	}
+	for _, agentInfo := range registry.AgentNodes {
+		if agentInfo.DID == did {
+			return agentInfo.AgentNodeID
+		}
+	}
+	return ""
+}
+
 // generateDIDWithKeys generates a DID with private and public keys from master seed and derivation path.
 func (s *DIDService) generateDIDWithKeys(masterSeed []byte, derivationPath string) (string, string, string, error) {
 	// Derive private key using simplified BIP32-style derivation
@@ -511,15 +556,19 @@ func (s *DIDService) generateDIDFromSeed(masterSeed []byte, derivationPath strin
 	return s.generateDIDKey(publicKey), nil
 }
 
-// derivePrivateKey derives a private key from master seed using simplified BIP32-style derivation.
+// derivePrivateKey derives a private key from master seed using HKDF (RFC 5869).
+// Uses domain-separated derivation with SHA-256, the derivation path as info,
+// and a fixed salt for domain separation.
 func (s *DIDService) derivePrivateKey(masterSeed []byte, derivationPath string) (ed25519.PrivateKey, error) {
-	// Simplified derivation: hash master seed with derivation path
-	h := sha256.New()
-	h.Write(masterSeed)
-	h.Write([]byte(derivationPath))
-	derivedSeed := h.Sum(nil)
+	salt := []byte("agentfield-did-key-derivation-v1")
+	info := []byte(derivationPath)
 
-	// Generate Ed25519 private key from derived seed
+	hkdfReader := hkdf.New(sha256.New, masterSeed, salt, info)
+	derivedSeed := make([]byte, ed25519.SeedSize) // 32 bytes
+	if _, err := io.ReadFull(hkdfReader, derivedSeed); err != nil {
+		return nil, fmt.Errorf("HKDF key derivation failed: %w", err)
+	}
+
 	privateKey := ed25519.NewKeyFromSeed(derivedSeed)
 	return privateKey, nil
 }
@@ -945,12 +994,35 @@ func (s *DIDService) buildExistingIdentityPackage(existingAgent *types.AgentDIDI
 		agentfieldServerID = "unknown"
 	}
 
+	// Retrieve master seed to re-derive private keys for the requesting agent.
+	// Agents need their private keys to sign cross-agent requests (DID auth).
+	var masterSeed []byte
+	registry, err := s.registry.GetRegistry(agentfieldServerID)
+	if err != nil {
+		logger.Logger.Error().Err(err).Msg("Failed to get registry for key re-derivation")
+	} else {
+		masterSeed = registry.MasterSeed
+	}
+
+	// Helper to re-derive private key JWK from master seed and derivation path.
+	rederivePrivKey := func(derivationPath string) string {
+		if masterSeed == nil || derivationPath == "" {
+			return ""
+		}
+		_, privKeyJWK, _, err := s.generateDIDWithKeys(masterSeed, derivationPath)
+		if err != nil {
+			logger.Logger.Error().Err(err).Str("path", derivationPath).Msg("Failed to re-derive private key")
+			return ""
+		}
+		return privKeyJWK
+	}
+
 	// Build reasoner DIDs map
 	reasonerDIDs := make(map[string]types.DIDIdentity)
 	for id, reasonerInfo := range existingAgent.Reasoners {
 		reasonerDIDs[id] = types.DIDIdentity{
 			DID:            reasonerInfo.DID,
-			PrivateKeyJWK:  "", // Don't include private keys in existing package
+			PrivateKeyJWK:  rederivePrivKey(reasonerInfo.DerivationPath),
 			PublicKeyJWK:   string(reasonerInfo.PublicKeyJWK),
 			DerivationPath: reasonerInfo.DerivationPath,
 			ComponentType:  "reasoner",
@@ -963,7 +1035,7 @@ func (s *DIDService) buildExistingIdentityPackage(existingAgent *types.AgentDIDI
 	for id, skillInfo := range existingAgent.Skills {
 		skillDIDs[id] = types.DIDIdentity{
 			DID:            skillInfo.DID,
-			PrivateKeyJWK:  "", // Don't include private keys in existing package
+			PrivateKeyJWK:  rederivePrivKey(skillInfo.DerivationPath),
 			PublicKeyJWK:   string(skillInfo.PublicKeyJWK),
 			DerivationPath: skillInfo.DerivationPath,
 			ComponentType:  "skill",
@@ -974,7 +1046,7 @@ func (s *DIDService) buildExistingIdentityPackage(existingAgent *types.AgentDIDI
 	return types.DIDIdentityPackage{
 		AgentDID: types.DIDIdentity{
 			DID:            existingAgent.DID,
-			PrivateKeyJWK:  "", // Don't include private keys in existing package
+			PrivateKeyJWK:  rederivePrivKey(existingAgent.DerivationPath),
 			PublicKeyJWK:   string(existingAgent.PublicKeyJWK),
 			DerivationPath: existingAgent.DerivationPath,
 			ComponentType:  "agent",

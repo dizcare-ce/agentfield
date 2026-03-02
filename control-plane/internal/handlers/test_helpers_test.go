@@ -45,6 +45,10 @@ func (s *testExecutionStorage) GetAgent(ctx context.Context, id string) (*types.
 	return nil, nil
 }
 
+func (s *testExecutionStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
+
 func (s *testExecutionStorage) StoreWorkflowExecution(ctx context.Context, execution *types.WorkflowExecution) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -258,6 +262,24 @@ func (s *testExecutionStorage) UpdateExecutionRecord(ctx context.Context, execut
 	}
 	out := cloned
 	return &out, nil
+}
+
+func (s *testExecutionStorage) QueryWorkflowExecutions(ctx context.Context, filters types.WorkflowExecutionFilters) ([]*types.WorkflowExecution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var results []*types.WorkflowExecution
+	for _, wfExec := range s.workflowExecutions {
+		if filters.ApprovalRequestID != nil && (wfExec.ApprovalRequestID == nil || *wfExec.ApprovalRequestID != *filters.ApprovalRequestID) {
+			continue
+		}
+		results = append(results, wfExec)
+	}
+	return results, nil
+}
+
+func (s *testExecutionStorage) StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error {
+	return nil
 }
 
 func (s *testExecutionStorage) QueryExecutionRecords(ctx context.Context, filter types.ExecutionFilter) ([]*types.Execution, error) {

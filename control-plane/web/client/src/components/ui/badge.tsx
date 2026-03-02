@@ -37,6 +37,10 @@ const badgeVariants = cva(
         pill:
           "rounded-full bg-muted/30 text-text-primary border border-border/40 px-2.5 py-0.5 text-[11px]",
 
+        // Tooltip variant – glass-style chip optimized for dark tooltip backgrounds
+        tooltip:
+          "bg-white/15 text-primary-foreground border border-white/20 rounded-md",
+
         // Status variants with standardized colors and icons
         success:
           cn(getStatusBadgeClasses("success" satisfies StatusTone), "font-mono tracking-tight"),

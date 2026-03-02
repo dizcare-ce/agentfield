@@ -343,28 +343,39 @@ func (hc *HeartbeatCache) shouldUpdateDatabase(nodeID string, now time.Time, sta
 }
 
 // processHeartbeatAsync processes heartbeat database updates asynchronously
-func processHeartbeatAsync(storageProvider storage.StorageProvider, uiService *services.UIService, nodeID string, cached *CachedNodeData) {
+func processHeartbeatAsync(storageProvider storage.StorageProvider, uiService *services.UIService, nodeID string, version string, cached *CachedNodeData) {
 	go func() {
 		ctx := context.Background()
 
-		// Verify node exists only when we need to update DB
-		if _, err := storageProvider.GetAgent(ctx, nodeID); err != nil {
-			logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
-			return
+		// Verify node exists using the resolved version
+		if version != "" {
+			if _, err := storageProvider.GetAgentVersion(ctx, nodeID, version); err != nil {
+				logger.Logger.Error().Err(err).Msgf("❌ Node %s version '%s' not found during heartbeat update", nodeID, version)
+				return
+			}
+		} else {
+			if _, err := storageProvider.GetAgent(ctx, nodeID); err != nil {
+				// If not found as default, try finding any version
+				versions, listErr := storageProvider.ListAgentVersions(ctx, nodeID)
+				if listErr != nil || len(versions) == 0 {
+					logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
+					return
+				}
+			}
 		}
 
 		// Update heartbeat in database
-		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, cached.LastDBUpdate); err != nil {
-			logger.Logger.Error().Err(err).Msgf("❌ HEARTBEAT_CONTENTION: Failed to update heartbeat for node %s - %v", nodeID, err)
+		if err := storageProvider.UpdateAgentHeartbeat(ctx, nodeID, version, cached.LastDBUpdate); err != nil {
+			logger.Logger.Error().Err(err).Msgf("❌ HEARTBEAT_CONTENTION: Failed to update heartbeat for node %s version '%s' - %v", nodeID, version, err)
 			return
 		}
 
-		logger.Logger.Debug().Msgf("💓 HEARTBEAT_CONTENTION: Async DB update completed for node %s", nodeID)
+		logger.Logger.Debug().Msgf("💓 HEARTBEAT_CONTENTION: Async DB update completed for node %s version '%s'", nodeID, version)
 	}()
 }
 
 // RegisterNodeHandler handles the registration of a new agent node.
-func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager) gin.HandlerFunc {
+func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager, didWebService *services.DIDWebService, tagApprovalService *services.TagApprovalService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		var newNode types.AgentNode
@@ -392,6 +403,30 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 		}
 
 		logger.Logger.Debug().Msgf("✅ Node validation passed for ID: %s", newNode.ID)
+
+		// Default group_id to agent id for backward compatibility
+		if newNode.GroupID == "" {
+			newNode.GroupID = newNode.ID
+		}
+
+		// Normalize proposed_tags → tags for backward compatibility.
+		// If a skill/reasoner has proposed_tags but no tags, copy proposed_tags to tags.
+		for i := range newNode.Reasoners {
+			if len(newNode.Reasoners[i].ProposedTags) > 0 && len(newNode.Reasoners[i].Tags) == 0 {
+				newNode.Reasoners[i].Tags = newNode.Reasoners[i].ProposedTags
+			}
+			if len(newNode.Reasoners[i].Tags) > 0 && len(newNode.Reasoners[i].ProposedTags) == 0 {
+				newNode.Reasoners[i].ProposedTags = newNode.Reasoners[i].Tags
+			}
+		}
+		for i := range newNode.Skills {
+			if len(newNode.Skills[i].ProposedTags) > 0 && len(newNode.Skills[i].Tags) == 0 {
+				newNode.Skills[i].Tags = newNode.Skills[i].ProposedTags
+			}
+			if len(newNode.Skills[i].Tags) > 0 && len(newNode.Skills[i].ProposedTags) == 0 {
+				newNode.Skills[i].ProposedTags = newNode.Skills[i].Tags
+			}
+		}
 
 		candidateList, defaultPort := gatherCallbackCandidates(newNode.BaseURL, newNode.CallbackDiscovery, c.ClientIP())
 		resolvedBaseURL := ""
@@ -471,25 +506,86 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 
 		newNode.CallbackDiscovery.SubmittedAt = time.Now().UTC().Format(time.RFC3339)
 
-		// Check if node with the same ID already exists
-		existingNode, err := storageProvider.GetAgent(ctx, newNode.ID)
-		isReRegistration := false
-		if err == nil && existingNode != nil {
-			isReRegistration = true
+		// Check if node with the same ID and version already exists
+		var existingNode *types.AgentNode
+		if newNode.Version != "" {
+			existingNode, _ = storageProvider.GetAgentVersion(ctx, newNode.ID, newNode.Version)
+
+			// Clean up stale empty-version row if the agent is now registering with a proper version.
+			// This handles upgrades from older SDKs that didn't send version during registration.
+			if stale, _ := storageProvider.GetAgentVersion(ctx, newNode.ID, ""); stale != nil {
+				if err := storageProvider.DeleteAgentVersion(ctx, newNode.ID, ""); err != nil {
+					logger.Logger.Warn().Err(err).Msgf("⚠️ Failed to clean up stale empty-version row for agent %s", newNode.ID)
+				} else {
+					logger.Logger.Info().Msgf("🧹 Cleaned up stale empty-version row for agent %s (now registering as %s)", newNode.ID, newNode.Version)
+				}
+			}
+		} else {
+			existingNode, _ = storageProvider.GetAgent(ctx, newNode.ID)
 		}
+		isReRegistration := existingNode != nil
 
 		// Set initial health status to UNKNOWN for new registrations
 		// The health monitor will determine the actual status based on heartbeats
 		newNode.HealthStatus = types.HealthStatusUnknown
 
-		// Handle lifecycle status for re-registrations vs new registrations
+		// Handle lifecycle status for re-registrations vs new registrations.
 		if isReRegistration {
-			// For re-registrations, preserve existing lifecycle status if the new one is empty
-			// This prevents status resets that cause oscillation
-			if newNode.LifecycleStatus == "" && existingNode.LifecycleStatus != "" {
+			// Detect admin revocation: pending_approval with nil/empty approved tags
+			// means an admin explicitly revoked this agent's tags. In that case,
+			// force the agent to stay in pending_approval until re-approved.
+			adminRevoked := existingNode.LifecycleStatus == types.AgentStatusPendingApproval &&
+				len(existingNode.ApprovedTags) == 0
+
+			if adminRevoked {
+				newNode.LifecycleStatus = types.AgentStatusPendingApproval
+			} else {
+				// Preserve existing approval state from the database.
+				// The SDK never sends approved_tags (only proposed_tags), so without
+				// this the UPSERT would overwrite approved_tags with an empty array,
+				// forcing re-approval after every CP restart or re-registration.
+				newNode.ApprovedTags = existingNode.ApprovedTags
 				newNode.LifecycleStatus = existingNode.LifecycleStatus
-			} else if newNode.LifecycleStatus == "" {
-				newNode.LifecycleStatus = types.AgentStatusStarting
+
+				// Carry over per-reasoner and per-skill approved tags.
+				if len(existingNode.ApprovedTags) > 0 {
+					approvedSet := make(map[string]struct{})
+					for _, t := range existingNode.ApprovedTags {
+						approvedSet[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+					}
+					for i := range newNode.Reasoners {
+						var approved []string
+						proposed := newNode.Reasoners[i].ProposedTags
+						if len(proposed) == 0 {
+							proposed = newNode.Reasoners[i].Tags
+						}
+						for _, t := range proposed {
+							if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+								approved = append(approved, t)
+							}
+						}
+						newNode.Reasoners[i].ApprovedTags = approved
+					}
+					for i := range newNode.Skills {
+						var approved []string
+						proposed := newNode.Skills[i].ProposedTags
+						if len(proposed) == 0 {
+							proposed = newNode.Skills[i].Tags
+						}
+						for _, t := range proposed {
+							if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+								approved = append(approved, t)
+							}
+						}
+						newNode.Skills[i].ApprovedTags = approved
+					}
+				}
+
+				// If lifecycle was offline or empty, reset to starting so the
+				// agent can go through normal startup.
+				if newNode.LifecycleStatus == "" || newNode.LifecycleStatus == types.AgentStatusOffline {
+					newNode.LifecycleStatus = types.AgentStatusStarting
+				}
 			}
 		} else {
 			// For new registrations, use provided status or default to starting
@@ -505,6 +601,29 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 			newNode.Metadata.Custom = map[string]interface{}{}
 		}
 		newNode.Metadata.Custom["callback_discovery"] = newNode.CallbackDiscovery
+
+		// Evaluate tag approval rules if the service is available and enabled.
+		// With default_mode=auto and no rules, this is a no-op (all tags auto-approved).
+		var tagApprovalResult *services.TagApprovalResult
+		if tagApprovalService != nil && tagApprovalService.IsEnabled() {
+			result := tagApprovalService.ProcessRegistrationTags(&newNode)
+			tagApprovalResult = &result
+			if len(result.Forbidden) > 0 {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error":          "forbidden_tags",
+					"message":        "Registration rejected: agent proposes forbidden tags",
+					"forbidden_tags": result.Forbidden,
+				})
+				return
+			}
+			if !result.AllAutoApproved {
+				logger.Logger.Info().
+					Str("agent_id", newNode.ID).
+					Strs("pending_tags", result.ManualReview).
+					Strs("auto_approved", result.AutoApproved).
+					Msg("Agent registration requires tag approval")
+			}
+		}
 
 		// Store the new node
 		if err := storageProvider.RegisterAgent(ctx, &newNode); err != nil {
@@ -558,11 +677,28 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 			}
 		}
 
+		// Create DID:web document so the DID auth middleware can verify this agent.
+		// This is non-fatal — DID:key registration above is the critical path.
+		if didWebService != nil {
+			if _, _, err := didWebService.GetOrCreateDIDDocument(ctx, newNode.ID); err != nil {
+				logger.Logger.Warn().Err(err).Msgf("⚠️ DID:web document creation failed for node %s (non-fatal)", newNode.ID)
+			} else {
+				logger.Logger.Debug().Msgf("✅ DID:web document ensured for node %s", newNode.ID)
+			}
+		}
+
+		// Issue Tag VC for auto-approved agents now that agent + DID are stored.
+		// This must happen AFTER RegisterAgent + DID registration so that
+		// issueTagVC can look up the agent's DID from storage.
+		if tagApprovalResult != nil && tagApprovalResult.AllAutoApproved && len(tagApprovalResult.AutoApproved) > 0 && tagApprovalService != nil {
+			tagApprovalService.IssueAutoApprovedTagsVC(ctx, newNode.ID, tagApprovalResult.AutoApproved)
+		}
+
 		// Note: Node registration events are now handled by the health monitor
 		// The health monitor will detect the new node and emit appropriate events
 
 		if presenceManager != nil {
-			presenceManager.Touch(newNode.ID, time.Now().UTC())
+			presenceManager.Touch(newNode.ID, newNode.Version, time.Now().UTC())
 		}
 
 		responsePayload := gin.H{
@@ -577,6 +713,15 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 
 		if newNode.CallbackDiscovery != nil {
 			responsePayload["callback_discovery"] = newNode.CallbackDiscovery
+		}
+
+		// Include tag approval status in response when agent is pending
+		if newNode.LifecycleStatus == types.AgentStatusPendingApproval && tagApprovalResult != nil {
+			responsePayload["status"] = "pending_approval"
+			responsePayload["message"] = "Node registered but awaiting tag approval"
+			responsePayload["proposed_tags"] = newNode.ProposedTags
+			responsePayload["pending_tags"] = tagApprovalResult.ManualReview
+			responsePayload["auto_approved_tags"] = tagApprovalResult.AutoApproved
 		}
 
 		c.JSON(http.StatusCreated, responsePayload)
@@ -603,6 +748,11 @@ func ListNodesHandler(storageProvider storage.StorageProvider) gin.HandlerFunc {
 		// Check for team_id filter parameter
 		if teamID := c.Query("team_id"); teamID != "" {
 			filters.TeamID = &teamID
+		}
+
+		// Check for group_id filter parameter
+		if groupID := c.Query("group_id"); groupID != "" {
+			filters.GroupID = &groupID
 		}
 
 		// Check for show_all parameter to override default active filter
@@ -635,8 +785,14 @@ func GetNodeHandler(storageProvider storage.StorageProvider) gin.HandlerFunc {
 			return
 		}
 
-		node, err := storageProvider.GetAgent(ctx, nodeID)
-		if err != nil {
+		var node *types.AgentNode
+		var err error
+		if version := c.Query("version"); version != "" {
+			node, err = storageProvider.GetAgentVersion(ctx, nodeID, version)
+		} else {
+			node, err = storageProvider.GetAgent(ctx, nodeID)
+		}
+		if err != nil || node == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 			return
 		}
@@ -662,6 +818,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 
 		// Try to parse enhanced heartbeat data (optional)
 		var enhancedHeartbeat struct {
+			Version    string `json:"version,omitempty"`
 			Status     string `json:"status,omitempty"`
 			MCPServers []struct {
 				Alias     string `json:"alias"`
@@ -669,7 +826,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				ToolCount int    `json:"tool_count"`
 			} `json:"mcp_servers,omitempty"`
 			Timestamp   string `json:"timestamp,omitempty"`
-			HealthScore *int   `json:"health_score,omitempty"` // New: allow agents to report health score
+			HealthScore *int   `json:"health_score,omitempty"`
 		}
 
 		// Read the request body if present
@@ -685,13 +842,19 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 		// Check if database update is needed using caching
 		now := time.Now().UTC()
 		if presenceManager != nil && presenceManager.HasLease(nodeID) {
-			presenceManager.Touch(nodeID, now)
+			presenceManager.Touch(nodeID, enhancedHeartbeat.Version, now)
 		}
 		needsDBUpdate, cached := heartbeatCache.shouldUpdateDatabase(nodeID, now, enhancedHeartbeat.Status, enhancedHeartbeat.MCPServers)
 
 		if needsDBUpdate {
-			// Verify node exists only when we need to update DB
-			existingNode, err := storageProvider.GetAgent(ctx, nodeID)
+			// Verify node exists only when we need to update DB.
+			// Use the outer-scoped existingNode so it's available for status processing below.
+			var err error
+			if enhancedHeartbeat.Version != "" {
+				existingNode, err = storageProvider.GetAgentVersion(ctx, nodeID, enhancedHeartbeat.Version)
+			} else {
+				existingNode, err = storageProvider.GetAgent(ctx, nodeID)
+			}
 			if err != nil {
 				logger.Logger.Error().Err(err).Msgf("❌ Node %s not found during heartbeat update", nodeID)
 				c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
@@ -711,11 +874,13 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 			}
 
 			if presenceManager != nil {
-				presenceManager.Touch(nodeID, now)
+				presenceManager.Touch(nodeID, existingNode.Version, now)
 			}
 
-			// Process heartbeat asynchronously to avoid blocking the response
-			processHeartbeatAsync(storageProvider, uiService, nodeID, cached)
+			// Process heartbeat asynchronously to avoid blocking the response.
+			// Use existingNode.Version (resolved from DB) instead of the heartbeat payload version
+			// to handle old SDKs that may not send version in heartbeats.
+			processHeartbeatAsync(storageProvider, uiService, nodeID, existingNode.Version, cached)
 
 			logger.Logger.Debug().Msgf("💓 Heartbeat DB update queued for node: %s at %s", nodeID, now.Format(time.RFC3339))
 		} else {
@@ -736,8 +901,24 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				}
 
 				if validStatuses[enhancedHeartbeat.Status] {
-					status := types.AgentLifecycleStatus(enhancedHeartbeat.Status)
-					lifecycleStatus = &status
+					// Protect pending_approval: heartbeats cannot override admin-controlled state
+					if existingNode == nil {
+						var err error
+						if enhancedHeartbeat.Version != "" {
+							existingNode, err = storageProvider.GetAgentVersion(ctx, nodeID, enhancedHeartbeat.Version)
+						} else {
+							existingNode, err = storageProvider.GetAgent(ctx, nodeID)
+						}
+						if err != nil {
+							logger.Logger.Error().Err(err).Msgf("❌ Failed to get node %s for pending_approval check", nodeID)
+						}
+					}
+					if existingNode != nil && existingNode.LifecycleStatus == types.AgentStatusPendingApproval {
+						logger.Logger.Debug().Msgf("⏸️ Ignoring heartbeat status update for node %s: agent is pending_approval (admin action required)", nodeID)
+					} else {
+						status := types.AgentLifecycleStatus(enhancedHeartbeat.Status)
+						lifecycleStatus = &status
+					}
 				}
 			}
 
@@ -779,8 +960,14 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 				}
 			}
 
+			// Resolve version from DB record when available, fall back to heartbeat payload
+			resolvedVersion := enhancedHeartbeat.Version
+			if existingNode != nil {
+				resolvedVersion = existingNode.Version
+			}
+
 			// Update status through unified system
-			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, lifecycleStatus, mcpStatus); err != nil {
+			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, lifecycleStatus, mcpStatus, resolvedVersion); err != nil {
 				logger.Logger.Error().Err(err).Msgf("❌ Failed to update unified status for node %s", nodeID)
 				// Continue processing - don't fail the heartbeat
 			}
@@ -791,6 +978,7 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 					HealthScore: enhancedHeartbeat.HealthScore,
 					Source:      types.StatusSourceHeartbeat,
 					Reason:      "health score from heartbeat",
+					Version:     resolvedVersion,
 				}
 
 				if err := statusManager.UpdateAgentStatus(ctx, nodeID, update); err != nil {
@@ -815,14 +1003,20 @@ func HeartbeatHandler(storageProvider storage.StorageProvider, uiService *servic
 					if existingNode == nil {
 						var err error
 						existingNode, err = storageProvider.GetAgent(ctx, nodeID)
-						if err != nil {
+						if (err != nil || existingNode == nil) && enhancedHeartbeat.Version != "" {
+							existingNode, err = storageProvider.GetAgentVersion(ctx, nodeID, enhancedHeartbeat.Version)
+						}
+						if err != nil || existingNode == nil {
 							logger.Logger.Error().Err(err).Msgf("❌ Failed to get node %s for lifecycle status update", nodeID)
 							c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 							return
 						}
 					}
 
-					if existingNode.LifecycleStatus != newStatus {
+					// Protect pending_approval: heartbeats cannot override admin-controlled state
+					if existingNode.LifecycleStatus == types.AgentStatusPendingApproval {
+						logger.Logger.Debug().Msgf("⏸️ Ignoring legacy heartbeat status for node %s: agent is pending_approval", nodeID)
+					} else if existingNode.LifecycleStatus != newStatus {
 						if err := storageProvider.UpdateAgentLifecycleStatus(ctx, nodeID, newStatus); err != nil {
 							logger.Logger.Error().Err(err).Msgf("❌ Failed to update lifecycle status for node %s", nodeID)
 						} else {
@@ -885,14 +1079,22 @@ func UpdateLifecycleStatusHandler(storageProvider storage.StorageProvider, uiSer
 		}
 
 		// Verify node exists
-		_, err := storageProvider.GetAgent(ctx, nodeID)
+		existingNode, err := storageProvider.GetAgent(ctx, nodeID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 			return
 		}
 
-		// Prepare status update for unified system
+		// Protect pending_approval: only admin tag approval can transition out of this state
 		newLifecycleStatus := types.AgentLifecycleStatus(statusUpdate.LifecycleStatus)
+		if existingNode.LifecycleStatus == types.AgentStatusPendingApproval {
+			logger.Logger.Debug().Msgf("⏸️ Rejecting lifecycle status update for node %s: agent is pending_approval (admin action required)", nodeID)
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "agent_pending_approval",
+				"message": "Cannot update lifecycle status: agent is awaiting tag approval. Use admin approval endpoint instead.",
+			})
+			return
+		}
 
 		// Prepare MCP status if provided
 		var mcpStatus *types.MCPStatusInfo
@@ -921,7 +1123,7 @@ func UpdateLifecycleStatusHandler(storageProvider storage.StorageProvider, uiSer
 
 		// Update through unified status system if available
 		if statusManager != nil {
-			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, &newLifecycleStatus, mcpStatus); err != nil {
+			if err := statusManager.UpdateFromHeartbeat(ctx, nodeID, &newLifecycleStatus, mcpStatus, ""); err != nil {
 				logger.Logger.Error().Err(err).Msgf("❌ Failed to update unified status for node %s", nodeID)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update status"})
 				return
@@ -1124,7 +1326,7 @@ func BulkNodeStatusHandler(statusManager *services.StatusManager, storageProvide
 
 // RegisterServerlessAgentHandler handles the registration of a serverless agent node
 // by discovering its capabilities via the /discover endpoint
-func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager) gin.HandlerFunc {
+func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager, didWebService *services.DIDWebService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -1318,9 +1520,19 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 			}
 		}
 
+		// Create DID:web document so the DID auth middleware can verify this agent.
+		// This is non-fatal — DID:key registration above is the critical path.
+		if didWebService != nil {
+			if _, _, err := didWebService.GetOrCreateDIDDocument(ctx, newNode.ID); err != nil {
+				logger.Logger.Warn().Err(err).Msgf("⚠️ DID:web document creation failed for serverless agent %s (non-fatal)", newNode.ID)
+			} else {
+				logger.Logger.Debug().Msgf("✅ DID:web document ensured for serverless agent %s", newNode.ID)
+			}
+		}
+
 		// Touch presence manager
 		if presenceManager != nil {
-			presenceManager.Touch(newNode.ID, time.Now().UTC())
+			presenceManager.Touch(newNode.ID, newNode.Version, time.Now().UTC())
 		}
 
 		c.JSON(http.StatusCreated, gin.H{

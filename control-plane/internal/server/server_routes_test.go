@@ -192,6 +192,12 @@ func (s *stubStorage) GetLockStatus(ctx context.Context, key string) (*types.Dis
 
 // Agent registry
 func (s *stubStorage) RegisterAgent(ctx context.Context, agent *types.AgentNode) error { return nil }
+func (s *stubStorage) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	return nil, nil
+}
+func (s *stubStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
 func (s *stubStorage) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
 	return nil, nil
 }
@@ -201,11 +207,26 @@ func (s *stubStorage) UpdateAgentHealth(ctx context.Context, id string, status t
 func (s *stubStorage) UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error {
 	return nil
 }
-func (s *stubStorage) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
+func (s *stubStorage) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	return nil
 }
 func (s *stubStorage) UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error {
 	return nil
+}
+func (s *stubStorage) UpdateAgentVersion(ctx context.Context, id string, version string) error {
+	return nil
+}
+func (s *stubStorage) DeleteAgentVersion(ctx context.Context, id string, version string) error {
+	return nil
+}
+func (s *stubStorage) UpdateAgentTrafficWeight(ctx context.Context, id string, version string, weight int) error {
+	return nil
+}
+func (s *stubStorage) ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error) {
+	return nil, nil
+}
+func (s *stubStorage) ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error) {
+	return nil, nil
 }
 
 // Configuration
@@ -364,6 +385,53 @@ func (s *stubStorage) GetDeadLetterQueue(ctx context.Context, limit, offset int)
 }
 func (s *stubStorage) DeleteFromDeadLetterQueue(ctx context.Context, ids []int64) error { return nil }
 func (s *stubStorage) ClearDeadLetterQueue(ctx context.Context) error                   { return nil }
+
+// DID document operations
+func (s *stubStorage) StoreDIDDocument(ctx context.Context, record *types.DIDDocumentRecord) error {
+	return nil
+}
+func (s *stubStorage) GetDIDDocument(ctx context.Context, did string) (*types.DIDDocumentRecord, error) {
+	return nil, nil
+}
+func (s *stubStorage) GetDIDDocumentByAgentID(ctx context.Context, agentID string) (*types.DIDDocumentRecord, error) {
+	return nil, nil
+}
+func (s *stubStorage) RevokeDIDDocument(ctx context.Context, did string) error { return nil }
+func (s *stubStorage) ListDIDDocuments(ctx context.Context) ([]*types.DIDDocumentRecord, error) {
+	return nil, nil
+}
+
+// Agent lifecycle stub
+func (s *stubStorage) ListAgentsByLifecycleStatus(ctx context.Context, status types.AgentLifecycleStatus) ([]*types.AgentNode, error) {
+	return nil, nil
+}
+
+// Access policy stubs
+func (s *stubStorage) GetAccessPolicies(ctx context.Context) ([]*types.AccessPolicy, error) {
+	return nil, nil
+}
+func (s *stubStorage) GetAccessPolicyByID(ctx context.Context, id int64) (*types.AccessPolicy, error) {
+	return nil, nil
+}
+func (s *stubStorage) CreateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error {
+	return nil
+}
+func (s *stubStorage) UpdateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error {
+	return nil
+}
+func (s *stubStorage) DeleteAccessPolicy(ctx context.Context, id int64) error { return nil }
+
+// Agent Tag VC stubs
+func (s *stubStorage) StoreAgentTagVC(ctx context.Context, agentID, agentDID, vcID, vcDocument, signature string, issuedAt time.Time, expiresAt *time.Time) error {
+	return nil
+}
+func (s *stubStorage) GetAgentTagVC(ctx context.Context, agentID string) (*types.AgentTagVCRecord, error) {
+	return nil, nil
+}
+func (s *stubStorage) RevokeAgentTagVC(ctx context.Context, agentID string) error { return nil }
+func (s *stubStorage) ListAgentTagVCs(ctx context.Context) ([]*types.AgentTagVCRecord, error) {
+	return nil, nil
+}
 
 // stubPayloadStore implements services.PayloadStore
 type stubPayloadStore struct{}

@@ -11,6 +11,7 @@ type ExecutionRecordModel struct {
 	ReasonerID        string     `gorm:"column:reasoner_id;not null;index"`
 	NodeID            string     `gorm:"column:node_id;not null;index"`
 	Status            string     `gorm:"column:status;not null;index"`
+	StatusReason      *string    `gorm:"column:status_reason"`
 	InputPayload      []byte     `gorm:"column:input_payload"`
 	ResultPayload     []byte     `gorm:"column:result_payload"`
 	ErrorMessage      *string    `gorm:"column:error_message"`
@@ -51,9 +52,11 @@ func (AgentExecutionModel) TableName() string { return "agent_executions" }
 
 type AgentNodeModel struct {
 	ID                  string     `gorm:"column:id;primaryKey"`
+	Version             string     `gorm:"column:version;primaryKey;not null;default:''"`
+	GroupID             string     `gorm:"column:group_id;not null;default:'';index"`
 	TeamID              string     `gorm:"column:team_id;not null;index"`
 	BaseURL             string     `gorm:"column:base_url;not null"`
-	Version             string     `gorm:"column:version;not null"`
+	TrafficWeight       int        `gorm:"column:traffic_weight;not null;default:100"`
 	DeploymentType      string     `gorm:"column:deployment_type;default:'long_running';index"`
 	InvocationURL       *string    `gorm:"column:invocation_url"`
 	Reasoners           []byte     `gorm:"column:reasoners"`
@@ -65,6 +68,8 @@ type AgentNodeModel struct {
 	RegisteredAt        time.Time  `gorm:"column:registered_at;autoCreateTime"`
 	Features            []byte     `gorm:"column:features"`
 	Metadata            []byte     `gorm:"column:metadata"`
+	ProposedTags        []byte     `gorm:"column:proposed_tags"`
+	ApprovedTags        []byte     `gorm:"column:approved_tags"`
 }
 
 func (AgentNodeModel) TableName() string { return "agent_nodes" }
@@ -137,6 +142,14 @@ type WorkflowExecutionModel struct {
 	LeaseExpiresAt        *time.Time `gorm:"column:lease_expires_at"`
 	ErrorMessage          *string    `gorm:"column:error_message"`
 	RetryCount            int        `gorm:"column:retry_count;default:0"`
+	ApprovalRequestID     *string    `gorm:"column:approval_request_id;index:idx_workflow_executions_approval_request_id"`
+	ApprovalRequestURL    *string    `gorm:"column:approval_request_url"`
+	ApprovalStatus        *string    `gorm:"column:approval_status"`
+	ApprovalResponse      *string    `gorm:"column:approval_response"`
+	ApprovalRequestedAt   *time.Time `gorm:"column:approval_requested_at"`
+	ApprovalRespondedAt   *time.Time `gorm:"column:approval_responded_at"`
+	ApprovalCallbackURL   *string    `gorm:"column:approval_callback_url"`
+	ApprovalExpiresAt     *time.Time `gorm:"column:approval_expires_at"`
 	Notes                 string     `gorm:"column:notes;default:'[]'"`
 	CreatedAt             time.Time  `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;autoUpdateTime"`
@@ -410,3 +423,52 @@ type ObservabilityDeadLetterQueueModel struct {
 }
 
 func (ObservabilityDeadLetterQueueModel) TableName() string { return "observability_dead_letter_queue" }
+
+// DIDDocumentModel represents a DID document record for did:web resolution.
+type DIDDocumentModel struct {
+	DID          string     `gorm:"column:did;primaryKey"`
+	AgentID      string     `gorm:"column:agent_id;not null;index"`
+	DIDDocument  []byte     `gorm:"column:did_document;type:jsonb;not null"` // JSONB in PostgreSQL, TEXT in SQLite
+	PublicKeyJWK string     `gorm:"column:public_key_jwk;not null"`
+	RevokedAt    *time.Time `gorm:"column:revoked_at;index"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (DIDDocumentModel) TableName() string { return "did_documents" }
+
+// AccessPolicyModel represents a tag-based access policy for cross-agent calls.
+type AccessPolicyModel struct {
+	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	Name           string    `gorm:"column:name;not null;uniqueIndex"`
+	CallerTags     string    `gorm:"column:caller_tags;type:text;not null"` // JSON array
+	TargetTags     string    `gorm:"column:target_tags;type:text;not null"` // JSON array
+	AllowFunctions string    `gorm:"column:allow_functions;type:text"`      // JSON array
+	DenyFunctions  string    `gorm:"column:deny_functions;type:text"`       // JSON array
+	Constraints    string    `gorm:"column:constraints;type:text"`          // JSON object
+	Action         string    `gorm:"column:action;not null;default:'allow'"`
+	Priority       int       `gorm:"column:priority;not null;default:0;index"`
+	Enabled        bool      `gorm:"column:enabled;not null;default:true;index"`
+	Description    *string   `gorm:"column:description"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (AccessPolicyModel) TableName() string { return "access_policies" }
+
+// AgentTagVCModel stores signed Agent Tag VCs issued on tag approval.
+type AgentTagVCModel struct {
+	ID         int64      `gorm:"column:id;primaryKey;autoIncrement"`
+	AgentID    string     `gorm:"column:agent_id;uniqueIndex;not null"`
+	AgentDID   string     `gorm:"column:agent_did;not null;index"`
+	VCID       string     `gorm:"column:vc_id;uniqueIndex;not null"`
+	VCDocument string     `gorm:"column:vc_document;type:text;not null"`
+	Signature  string     `gorm:"column:signature;type:text"`
+	IssuedAt   time.Time  `gorm:"column:issued_at;not null"`
+	ExpiresAt  *time.Time `gorm:"column:expires_at"`
+	RevokedAt  *time.Time `gorm:"column:revoked_at"`
+	CreatedAt  time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (AgentTagVCModel) TableName() string { return "agent_tag_vcs" }

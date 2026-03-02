@@ -10,13 +10,16 @@ type ReasonerDefinition struct {
 	ID           string          `json:"id"`
 	InputSchema  json.RawMessage `json:"input_schema"`
 	OutputSchema json.RawMessage `json:"output_schema"`
+	Tags         []string        `json:"tags,omitempty"`
+	ProposedTags []string        `json:"proposed_tags,omitempty"`
 }
 
 // SkillDefinition is included for completeness.
 type SkillDefinition struct {
-	ID          string          `json:"id"`
-	InputSchema json.RawMessage `json:"input_schema"`
-	Tags        []string        `json:"tags,omitempty"`
+	ID           string          `json:"id"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	Tags         []string        `json:"tags,omitempty"`
+	ProposedTags []string        `json:"proposed_tags,omitempty"`
 }
 
 // CommunicationConfig declares supported protocols for the agent.
@@ -54,13 +57,30 @@ type NodeRegistrationResponse struct {
 	Message           string    `json:"message,omitempty"`
 	Success           bool      `json:"success"`
 	RegisteredAt      time.Time `json:"-"`
+	Status            string    `json:"status,omitempty"`
+	ProposedTags      []string  `json:"proposed_tags,omitempty"`
+	PendingTags       []string  `json:"pending_tags,omitempty"`
+	AutoApprovedTags  []string  `json:"auto_approved_tags,omitempty"`
 }
 
 // NodeStatusUpdate is used for lease renewals.
 type NodeStatusUpdate struct {
 	Phase       string `json:"phase"`
+	Version     string `json:"version,omitempty"`
 	HealthScore *int   `json:"health_score,omitempty"`
 }
+
+// Canonical execution status values used by the control plane.
+const (
+	ExecutionStatusPending   = "pending"
+	ExecutionStatusQueued    = "queued"
+	ExecutionStatusWaiting   = "waiting"
+	ExecutionStatusRunning   = "running"
+	ExecutionStatusSucceeded = "succeeded"
+	ExecutionStatusFailed    = "failed"
+	ExecutionStatusCancelled = "cancelled"
+	ExecutionStatusTimeout   = "timeout"
+)
 
 // LeaseResponse informs the agent how long the lease lasts.
 type LeaseResponse struct {
@@ -83,6 +103,7 @@ type ActionAckRequest struct {
 // ShutdownRequest notifies the control plane that the node is draining.
 type ShutdownRequest struct {
 	Reason          string `json:"reason,omitempty"`
+	Version         string `json:"version,omitempty"`
 	ExpectedRestart string `json:"expected_restart,omitempty"`
 }
 
@@ -97,6 +118,7 @@ type WorkflowExecutionEvent struct {
 	Type              string                 `json:"type,omitempty"`
 	AgentNodeID       string                 `json:"agent_node_id,omitempty"`
 	Status            string                 `json:"status"`
+	StatusReason      *string                `json:"status_reason,omitempty"`
 	ParentExecutionID *string                `json:"parent_execution_id,omitempty"`
 	ParentWorkflowID  *string                `json:"parent_workflow_id,omitempty"`
 	InputData         map[string]interface{} `json:"input_data,omitempty"`

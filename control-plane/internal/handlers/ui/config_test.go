@@ -242,6 +242,22 @@ func (m *MockStorageProvider) GetAgent(ctx context.Context, id string) (*types.A
 	return args.Get(0).(*types.AgentNode), args.Error(1)
 }
 
+func (m *MockStorageProvider) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	args := m.Called(ctx, id, version)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*types.AgentNode), args.Error(1)
+}
+
+func (m *MockStorageProvider) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*types.AgentNode), args.Error(1)
+}
+
 func (m *MockStorageProvider) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
 	args := m.Called(ctx, filters)
 	if args.Get(0) == nil {
@@ -260,8 +276,8 @@ func (m *MockStorageProvider) UpdateAgentHealthAtomic(ctx context.Context, id st
 	return args.Error(0)
 }
 
-func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
-	args := m.Called(ctx, id, heartbeatTime)
+func (m *MockStorageProvider) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
+	args := m.Called(ctx, id, version, heartbeatTime)
 	return args.Error(0)
 }
 

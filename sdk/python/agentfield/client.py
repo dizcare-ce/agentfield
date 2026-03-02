@@ -18,12 +18,13 @@ from .types import (
     WebhookConfig,
 )
 from .async_config import AsyncConfig
-from .execution_state import ExecutionStatus
+from .execution_state import ExecuteError, ExecutionStatus
 from .result_cache import ResultCache
 from .async_execution_manager import AsyncExecutionManager
 from .logger import get_logger
 from .status import normalize_status
 from .execution_context import generate_run_id
+from .did_auth import DIDAuthenticator
 from .exceptions import (
     AgentFieldError,
     AgentFieldClientError,
@@ -33,6 +34,46 @@ from .exceptions import (
 )
 
 httpx = None  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# Typed response models for approval helpers
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ApprovalRequestResponse:
+    """Response from requesting approval for an execution."""
+    approval_request_id: str
+    approval_request_url: str
+
+
+@dataclass
+class ApprovalStatusResponse:
+    """Response from polling approval status."""
+    status: str  # pending, approved, rejected, expired
+    response: Optional[Dict[str, Any]] = None
+    request_url: Optional[str] = None
+    requested_at: Optional[str] = None
+    responded_at: Optional[str] = None
+
+
+@dataclass
+class ApprovalResult:
+    """Outcome of a human approval request, returned by ``Agent.pause()``."""
+
+    decision: str  # "approved", "rejected", "request_changes", "expired", "error"
+    feedback: str = ""
+    execution_id: str = ""
+    approval_request_id: str = ""
+    raw_response: Optional[Dict[str, Any]] = None
+
+    @property
+    def approved(self) -> bool:
+        return self.decision == "approved"
+
+    @property
+    def changes_requested(self) -> bool:
+        return self.decision == "request_changes"
 
 
 # Python 3.8 compatibility: asyncio.to_thread was added in Python 3.9
@@ -99,10 +140,15 @@ class AgentFieldClient:
         base_url: str = "http://localhost:8080",
         api_key: Optional[str] = None,
         async_config: Optional[AsyncConfig] = None,
+        did: Optional[str] = None,
+        private_key_jwk: Optional[str] = None,
     ):
         self.base_url = base_url
         self.api_base = f"{base_url}/api/v1"
         self.api_key = api_key
+
+        # DID authentication for agent-to-agent calls
+        self._did_authenticator = DIDAuthenticator(did=did, private_key_jwk=private_key_jwk)
 
         # Async execution components
         self.async_config = async_config or AsyncConfig()
@@ -112,6 +158,8 @@ class AgentFieldClient:
         self._result_cache = ResultCache(self.async_config)
         self._latest_event_stream_headers: Dict[str, str] = {}
         self._current_workflow_context = None
+        # Caller agent ID for cross-agent call identification (set by Agent after init)
+        self.caller_agent_id: Optional[str] = None
 
         # Initialize shared sync session if not already created
         if AgentFieldClient._shared_sync_session is None:
@@ -163,6 +211,42 @@ class AgentFieldClient:
         if not self.api_key:
             return {}
         return {"X-API-Key": self.api_key}
+
+    def set_did_credentials(self, did: str, private_key_jwk: str) -> bool:
+        """
+        Set DID authentication credentials for agent-to-agent calls.
+
+        Args:
+            did: The agent's DID identifier (e.g., 'did:web:example.com:agents:my-agent')
+            private_key_jwk: JWK-formatted Ed25519 private key for signing
+
+        Returns:
+            True if credentials were set successfully, False otherwise
+        """
+        return self._did_authenticator.set_credentials(did, private_key_jwk)
+
+    def get_did_auth_headers(self, body: bytes) -> Dict[str, str]:
+        """
+        Get DID authentication headers for signing a request.
+
+        Args:
+            body: Request body bytes to sign
+
+        Returns:
+            Dictionary with DID auth headers (X-Caller-DID, X-DID-Signature, X-DID-Timestamp)
+            Empty dict if DID auth is not configured
+        """
+        return self._did_authenticator.sign_headers(body)
+
+    @property
+    def did(self) -> Optional[str]:
+        """Get the configured DID identifier."""
+        return self._did_authenticator.did
+
+    @property
+    def did_auth_configured(self) -> bool:
+        """Check if DID authentication is configured."""
+        return self._did_authenticator.is_configured
 
     def _get_headers_with_context(
         self, headers: Optional[Dict[str, str]] = None
@@ -544,6 +628,7 @@ class AgentFieldClient:
         vc_metadata: Optional[Dict[str, Any]] = None,
         version: str = "1.0.0",
         agent_metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Register or update agent information with AgentField server."""
         try:
@@ -551,6 +636,7 @@ class AgentFieldClient:
             if agent_metadata:
                 custom_metadata.update(agent_metadata)
 
+            agent_tags = tags or []
             registration_data = {
                 "id": node_id,
                 "team_id": "default",
@@ -558,6 +644,7 @@ class AgentFieldClient:
                 "version": version,
                 "reasoners": reasoners,
                 "skills": skills,
+                "proposed_tags": agent_tags,
                 "communication_config": {
                     "protocols": ["http"],
                     "websocket_endpoint": "",
@@ -697,6 +784,10 @@ class AgentFieldClient:
         if actor_id:
             final_headers["X-Actor-ID"] = actor_id
 
+        # Include caller agent ID for permission middleware identification
+        if self.caller_agent_id and "X-Caller-Agent-ID" not in final_headers:
+            final_headers["X-Caller-Agent-ID"] = self.caller_agent_id
+
         sanitized_headers = self._sanitize_header_values(final_headers)
         self._maybe_update_event_stream_headers(sanitized_headers)
         return sanitized_headers
@@ -707,19 +798,40 @@ class AgentFieldClient:
         input_data: Dict[str, Any],
         headers: Dict[str, str],
     ) -> _Submission:
+        import json as json_module
+
         payload = {"input": input_data}
+        # Serialize once so the signed bytes are exactly what gets sent.
+        body_bytes = json_module.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Add DID authentication headers if configured
+        final_headers = dict(headers)
+        final_headers["Content-Type"] = "application/json"
+        if self._did_authenticator.is_configured:
+            did_headers = self._did_authenticator.sign_headers(body_bytes)
+            final_headers.update(did_headers)
+
         try:
             response = requests.post(
                 f"{self.api_base}/execute/async/{target}",
-                json=payload,
-                headers=headers,
+                data=body_bytes,
+                headers=final_headers,
                 timeout=self.async_config.polling_timeout,
             )
         except requests.RequestException as exc:
             raise AgentFieldClientError(f"Failed to submit execution: {exc}") from exc
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                error_body = response.json()
+            except Exception:
+                error_body = None
+            body_msg = ""
+            if isinstance(error_body, dict):
+                body_msg = error_body.get("message") or error_body.get("error") or ""
+            msg = f"{response.status_code}, {body_msg}" if body_msg else str(response.status_code)
+            raise ExecuteError(response.status_code, msg, error_body)
         body = response.json()
-        return self._parse_submission(body, headers, target)
+        return self._parse_submission(body, final_headers, target)
 
     async def _submit_execution_async(
         self,
@@ -727,17 +839,40 @@ class AgentFieldClient:
         input_data: Dict[str, Any],
         headers: Dict[str, str],
     ) -> _Submission:
+        import json as json_module
+
         payload = {"input": input_data}
+        # Serialize once so the signed bytes are exactly what gets sent.
+        # httpx uses compact separators (',', ':') which differ from
+        # json.dumps() defaults (', ', ': '), causing signature mismatch.
+        body_bytes = json_module.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Add DID authentication headers if configured
+        final_headers = dict(headers)
+        final_headers["Content-Type"] = "application/json"
+        if self._did_authenticator.is_configured:
+            did_headers = self._did_authenticator.sign_headers(body_bytes)
+            final_headers.update(did_headers)
+
         response = await self._async_request(
             "POST",
             f"{self.api_base}/execute/async/{target}",
-            json=payload,
-            headers=headers,
+            content=body_bytes,
+            headers=final_headers,
             timeout=self.async_config.polling_timeout,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                error_body = response.json()
+            except Exception:
+                error_body = None
+            body_msg = ""
+            if isinstance(error_body, dict):
+                body_msg = error_body.get("message") or error_body.get("error") or ""
+            msg = f"{response.status_code}, {body_msg}" if body_msg else str(response.status_code)
+            raise ExecuteError(response.status_code, msg, error_body)
         body = response.json()
-        return self._parse_submission(body, headers, target)
+        return self._parse_submission(body, final_headers, target)
 
     def _parse_submission(
         self,
@@ -874,6 +1009,7 @@ class AgentFieldClient:
             "completed_at": payload.get("completed_at"),
             "node_id": node_id,
             "error_message": payload.get("error_message") or payload.get("error"),
+            "error_details": payload.get("error_details"),
         }
 
         if metadata.get("completed_at"):
@@ -911,6 +1047,8 @@ class AgentFieldClient:
         else:
             response_result = result_value
 
+        error_details = metadata.get("error_details")
+
         response = {
             "execution_id": metadata.get("execution_id"),
             "run_id": metadata.get("run_id"),
@@ -923,6 +1061,7 @@ class AgentFieldClient:
             or datetime.datetime.utcnow().isoformat(),
             "result": response_result,
             "error_message": error_message,
+            "error_details": error_details,
             "cost": payload.get("cost"),
         }
 
@@ -1046,6 +1185,7 @@ class AgentFieldClient:
         vc_metadata: Optional[Dict[str, Any]] = None,
         version: str = "1.0.0",
         agent_metadata: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Register agent with immediate status reporting for fast lifecycle."""
         try:
@@ -1053,6 +1193,7 @@ class AgentFieldClient:
             if agent_metadata:
                 custom_metadata.update(agent_metadata)
 
+            agent_tags = tags or []
             registration_data = {
                 "id": node_id,
                 "team_id": "default",
@@ -1060,6 +1201,7 @@ class AgentFieldClient:
                 "version": version,
                 "reasoners": reasoners,
                 "skills": skills,
+                "proposed_tags": agent_tags,
                 "lifecycle_status": status.value,
                 "communication_config": {
                     "protocols": ["http"],
@@ -1153,6 +1295,7 @@ class AgentFieldClient:
                 base_url=self.base_url,
                 config=self.async_config,
                 auth_headers=self._get_auth_headers(),
+                did_authenticator=self._did_authenticator,
             )
             await self._async_execution_manager.start()
             self._maybe_update_event_stream_headers(None)
@@ -1208,6 +1351,13 @@ class AgentFieldClient:
         except Exception as e:
             logger.error(f"Failed to submit async execution for target {target}: {e}")
             if isinstance(e, AgentFieldError):
+                raise
+
+            # Never fall back on authorization errors (401/403) — these are
+            # permanent failures that retrying won't fix and would hit replay
+            # protection (Ed25519 signatures are deterministic within the same second).
+            _status = getattr(e, "status", None)
+            if _status in (401, 403):
                 raise
 
             # Fallback to sync execution if enabled
@@ -1529,6 +1679,163 @@ class AgentFieldClient:
             raise AgentFieldClientError(
                 f"Failed to cleanup async executions: {e}"
             ) from e
+
+    # ------------------------------------------------------------------ #
+    # Approval helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    async def request_approval(
+        self,
+        execution_id: str,
+        approval_request_id: str,
+        approval_request_url: str = "",
+        callback_url: str = "",
+        expires_in_hours: int = 72,
+    ) -> ApprovalRequestResponse:
+        """Request human approval for an execution, transitioning it to ``waiting``.
+
+        Calls ``POST /api/v1/agents/{node}/executions/{id}/request-approval``
+        on the control plane.  The agent is responsible for creating the
+        approval request on an external service (e.g. hax-sdk) first and
+        passing the resulting IDs here so the CP can track it.
+
+        Args:
+            execution_id: The execution to pause for approval.
+            approval_request_id: ID of the approval request on the external service.
+            approval_request_url: URL where the human can review the request.
+            callback_url: URL the CP should POST to when the approval resolves.
+            expires_in_hours: Time before the request expires.
+
+        Returns:
+            ApprovalRequestResponse with ``approval_request_id`` and ``approval_request_url``.
+
+        Raises:
+            AgentFieldClientError: If the request fails.
+        """
+        node_id = self.caller_agent_id or ""
+        body: Dict[str, Any] = {
+            "approval_request_id": approval_request_id,
+            "expires_in_hours": expires_in_hours,
+        }
+        if approval_request_url:
+            body["approval_request_url"] = approval_request_url
+        if callback_url:
+            body["callback_url"] = callback_url
+        url = f"{self.api_base}/agents/{node_id}/executions/{execution_id}/request-approval"
+
+        try:
+            client = await self.get_async_http_client()
+            response = await client.post(
+                url,
+                json=body,
+                headers=self._sanitize_header_values(self._get_headers_with_context(None)),
+                timeout=30,
+            )
+        except Exception as exc:
+            raise AgentFieldClientError(
+                f"Failed to request approval: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise AgentFieldClientError(
+                f"Approval request failed ({response.status_code}): {response.text[:500]}"
+            )
+
+        data = response.json()
+        return ApprovalRequestResponse(
+            approval_request_id=data.get("approval_request_id", ""),
+            approval_request_url=data.get("approval_request_url", ""),
+        )
+
+    async def get_approval_status(
+        self,
+        execution_id: str,
+    ) -> ApprovalStatusResponse:
+        """Get the current approval status for an execution.
+
+        Calls ``GET /api/v1/agents/{node}/executions/{id}/approval-status``.
+
+        Returns:
+            ApprovalStatusResponse with ``status`` (pending/approved/rejected/expired),
+            ``response``, ``request_url``, ``requested_at``, ``responded_at``.
+
+        Raises:
+            AgentFieldClientError: If the request fails.
+        """
+        node_id = self.caller_agent_id or ""
+        url = f"{self.api_base}/agents/{node_id}/executions/{execution_id}/approval-status"
+
+        try:
+            client = await self.get_async_http_client()
+            response = await client.get(
+                url,
+                headers=self._sanitize_header_values(self._get_headers_with_context(None)),
+                timeout=30,
+            )
+        except Exception as exc:
+            raise AgentFieldClientError(
+                f"Failed to get approval status: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise AgentFieldClientError(
+                f"Approval status request failed ({response.status_code}): {response.text[:500]}"
+            )
+
+        data = response.json()
+        return ApprovalStatusResponse(
+            status=data.get("status", "unknown"),
+            response=data.get("response"),
+            request_url=data.get("request_url"),
+            requested_at=data.get("requested_at"),
+            responded_at=data.get("responded_at"),
+        )
+
+    async def wait_for_approval(
+        self,
+        execution_id: str,
+        poll_interval: float = 5.0,
+        max_interval: float = 60.0,
+        timeout: Optional[float] = None,
+    ) -> ApprovalStatusResponse:
+        """Poll approval status with exponential backoff until resolved.
+
+        Args:
+            execution_id: Execution ID to wait for.
+            poll_interval: Initial polling interval in seconds.
+            max_interval: Maximum polling interval in seconds.
+            timeout: Total timeout in seconds (None = wait indefinitely).
+
+        Returns:
+            ApprovalStatusResponse with the final approval status (approved/rejected/expired).
+
+        Raises:
+            AgentFieldClientError: If polling encounters a non-retryable error.
+            ExecutionTimeoutError: If timeout is reached.
+        """
+        start_time = time.time()
+        interval = poll_interval
+        backoff_factor = 2.0
+
+        while True:
+            if timeout is not None and (time.time() - start_time) >= timeout:
+                raise ExecutionTimeoutError(
+                    f"Approval for execution {execution_id} timed out after {timeout}s"
+                )
+
+            await asyncio.sleep(interval)
+
+            try:
+                result = await self.get_approval_status(execution_id)
+            except AgentFieldClientError:
+                # Transient failure — back off and retry
+                interval = min(interval * backoff_factor, max_interval)
+                continue
+
+            if result.status != "pending":
+                return result
+
+            interval = min(interval * backoff_factor, max_interval)
 
     async def close_async_execution_manager(self) -> None:
         """

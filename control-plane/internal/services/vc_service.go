@@ -14,6 +14,7 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
+	"github.com/google/uuid"
 )
 
 // VCService handles verifiable credential generation, verification, and management.
@@ -160,8 +161,16 @@ func (s *VCService) GenerateExecutionVC(ctx *types.ExecutionContext, inputData, 
 		processedErrorMessage = &msg
 	}
 
-	// Resolve caller DID
-	callerIdentity, err := s.didService.ResolveDID(ctx.CallerDID)
+	// Resolve caller DID — fall back to agent's own DID for anonymous/external callers
+	callerDID := ctx.CallerDID
+	if callerDID == "" {
+		callerDID = ctx.AgentNodeDID
+	}
+	if callerDID == "" {
+		// No DID available at all — skip VC generation gracefully
+		return nil, nil
+	}
+	callerIdentity, err := s.didService.ResolveDID(callerDID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve caller DID: %w", err)
 	}
@@ -193,7 +202,7 @@ func (s *VCService) GenerateExecutionVC(ctx *types.ExecutionContext, inputData, 
 	vcDoc.Proof = types.VCProof{
 		Type:               "Ed25519Signature2020",
 		Created:            time.Now().UTC().Format(time.RFC3339),
-		VerificationMethod: fmt.Sprintf("%s#key-1", ctx.CallerDID),
+		VerificationMethod: fmt.Sprintf("%s#key-1", callerDID),
 		ProofPurpose:       "assertionMethod",
 		ProofValue:         signature,
 	}
@@ -213,9 +222,9 @@ func (s *VCService) GenerateExecutionVC(ctx *types.ExecutionContext, inputData, 
 		ExecutionID:  ctx.ExecutionID,
 		WorkflowID:   ctx.WorkflowID,
 		SessionID:    ctx.SessionID,
-		IssuerDID:    ctx.CallerDID,
+		IssuerDID:    callerDID,
 		TargetDID:    ctx.TargetDID,
-		CallerDID:    ctx.CallerDID,
+		CallerDID:    callerDID,
 		VCDocument:   json.RawMessage(vcDocBytes),
 		Signature:    signature,
 		StorageURI:   "",
@@ -344,13 +353,21 @@ func (s *VCService) CreateWorkflowVC(workflowID, sessionID string, executionVCID
 		return nil, fmt.Errorf("DID system is disabled")
 	}
 
+	// Derive start time from the first execution VC if available.
+	startTime := time.Now()
+	if len(executionVCIDs) > 0 {
+		if firstVC, err := s.vcStorage.GetExecutionVC(executionVCIDs[0]); err == nil {
+			startTime = firstVC.CreatedAt
+		}
+	}
+
 	workflowVC := &types.WorkflowVC{
 		WorkflowID:     workflowID,
 		SessionID:      sessionID,
 		ComponentVCs:   executionVCIDs,
 		WorkflowVCID:   s.generateVCID(),
 		Status:         string(types.ExecutionStatusSucceeded),
-		StartTime:      time.Now(), // TODO: Get actual start time from first execution
+		StartTime:      startTime,
 		EndTime:        &[]time.Time{time.Now()}[0],
 		TotalSteps:     len(executionVCIDs),
 		CompletedSteps: len(executionVCIDs),
@@ -458,12 +475,115 @@ func (s *VCService) signVC(vcDoc *types.VCDocument, callerIdentity *types.DIDIde
 		return "", fmt.Errorf("failed to decode private key seed: %w", err)
 	}
 
+	if len(privateKeySeed) != ed25519.SeedSize {
+		return "", fmt.Errorf("invalid private key seed length: got %d, want %d", len(privateKeySeed), ed25519.SeedSize)
+	}
+
 	privateKey := ed25519.NewKeyFromSeed(privateKeySeed)
 
 	// Sign the canonical representation
 	signature := ed25519.Sign(privateKey, canonicalBytes)
 
 	return base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+// SignAgentTagVC signs an AgentTagVCDocument using the control plane's issuer DID.
+// Returns the signed proof to be set on the VC document.
+func (s *VCService) SignAgentTagVC(vc *types.AgentTagVCDocument) (*types.VCProof, error) {
+	// Resolve the issuer's identity (control plane DID)
+	issuerIdentity, err := s.didService.ResolveDID(vc.Issuer)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve issuer DID %s for agent tag VC signing: %w", vc.Issuer, err)
+	}
+
+	// Create canonical representation (without proof) for signing
+	vcCopy := *vc
+	vcCopy.Proof = nil
+	canonicalBytes, err := json.Marshal(vcCopy)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal agent tag VC for signing: %w", err)
+	}
+
+	// Parse private key from JWK
+	var jwk map[string]interface{}
+	if err := json.Unmarshal([]byte(issuerIdentity.PrivateKeyJWK), &jwk); err != nil {
+		return nil, fmt.Errorf("failed to parse issuer private key JWK: %w", err)
+	}
+
+	dValue, ok := jwk["d"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid issuer private key JWK: missing 'd' parameter")
+	}
+
+	privateKeySeed, err := base64.RawURLEncoding.DecodeString(dValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode issuer private key seed: %w", err)
+	}
+
+	if len(privateKeySeed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("invalid issuer private key seed length: got %d, want %d", len(privateKeySeed), ed25519.SeedSize)
+	}
+
+	privateKey := ed25519.NewKeyFromSeed(privateKeySeed)
+	signature := ed25519.Sign(privateKey, canonicalBytes)
+
+	return &types.VCProof{
+		Type:               "Ed25519Signature2020",
+		Created:            time.Now().UTC().Format(time.RFC3339),
+		VerificationMethod: fmt.Sprintf("%s#key-1", vc.Issuer),
+		ProofPurpose:       "assertionMethod",
+		ProofValue:         base64.RawURLEncoding.EncodeToString(signature),
+	}, nil
+}
+
+// VerifyAgentTagVCSignature verifies the Ed25519 signature on an AgentTagVCDocument.
+func (s *VCService) VerifyAgentTagVCSignature(vc *types.AgentTagVCDocument) (bool, error) {
+	if vc.Proof == nil || vc.Proof.ProofValue == "" || vc.Proof.Type == "UnsignedAuditRecord" {
+		return false, fmt.Errorf("VC has no valid signature")
+	}
+
+	// Resolve issuer identity
+	issuerIdentity, err := s.didService.ResolveDID(vc.Issuer)
+	if err != nil {
+		return false, fmt.Errorf("cannot resolve issuer DID %s: %w", vc.Issuer, err)
+	}
+
+	// Create canonical representation (without proof)
+	vcCopy := *vc
+	vcCopy.Proof = nil
+	canonicalBytes, err := json.Marshal(vcCopy)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal agent tag VC for verification: %w", err)
+	}
+
+	// Decode signature
+	signatureBytes, err := base64.RawURLEncoding.DecodeString(vc.Proof.ProofValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode signature: %w", err)
+	}
+
+	// Parse public key from JWK
+	var jwk map[string]interface{}
+	if err := json.Unmarshal([]byte(issuerIdentity.PublicKeyJWK), &jwk); err != nil {
+		return false, fmt.Errorf("failed to parse issuer public key JWK: %w", err)
+	}
+
+	xValue, ok := jwk["x"].(string)
+	if !ok {
+		return false, fmt.Errorf("invalid issuer public key JWK: missing 'x' parameter")
+	}
+
+	publicKeyBytes, err := base64.RawURLEncoding.DecodeString(xValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode public key: %w", err)
+	}
+
+	if len(publicKeyBytes) != ed25519.PublicKeySize {
+		return false, fmt.Errorf("invalid public key length: got %d, want %d", len(publicKeyBytes), ed25519.PublicKeySize)
+	}
+
+	publicKey := ed25519.PublicKey(publicKeyBytes)
+	return ed25519.Verify(publicKey, canonicalBytes, signatureBytes), nil
 }
 
 // verifyVCSignature verifies the signature of a VC document.
@@ -493,6 +613,10 @@ func (s *VCService) verifyVCSignature(vcDoc *types.VCDocument, issuerIdentity *t
 		return false, fmt.Errorf("failed to decode public key: %w", err)
 	}
 
+	if len(publicKeyBytes) != ed25519.PublicKeySize {
+		return false, fmt.Errorf("invalid public key length: got %d, want %d", len(publicKeyBytes), ed25519.PublicKeySize)
+	}
+
 	publicKey := ed25519.PublicKey(publicKeyBytes)
 
 	// Decode signature
@@ -515,11 +639,9 @@ func (s *VCService) hashData(data []byte) string {
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
-// generateVCID generates a unique VC ID.
+// generateVCID generates a unique VC ID using a cryptographically random UUID.
 func (s *VCService) generateVCID() string {
-	// Simple UUID-like generation for now
-	// In production, use proper UUID library
-	return fmt.Sprintf("vc-%d", time.Now().UnixNano())
+	return fmt.Sprintf("vc-%s", uuid.New().String())
 }
 
 // generateWorkflowVCDocument creates a WorkflowVC document on-demand.
@@ -710,6 +832,10 @@ func (s *VCService) signWorkflowVC(vcDoc *types.WorkflowVCDocument, issuerIdenti
 		return "", fmt.Errorf("failed to decode private key seed: %w", err)
 	}
 
+	if len(privateKeySeed) != ed25519.SeedSize {
+		return "", fmt.Errorf("invalid private key seed length: got %d, want %d", len(privateKeySeed), ed25519.SeedSize)
+	}
+
 	privateKey := ed25519.NewKeyFromSeed(privateKeySeed)
 
 	// Sign the canonical representation
@@ -805,6 +931,14 @@ func (s *VCService) ListWorkflowVCs() ([]*types.WorkflowVC, error) {
 		return nil, fmt.Errorf("DID system is disabled")
 	}
 	return s.vcStorage.ListWorkflowVCs()
+}
+
+// ListAgentTagVCs returns all non-revoked agent tag VCs.
+func (s *VCService) ListAgentTagVCs() ([]*types.AgentTagVCRecord, error) {
+	if !s.config.Enabled {
+		return nil, fmt.Errorf("DID system is disabled")
+	}
+	return s.vcStorage.ListAgentTagVCs(context.Background())
 }
 
 // collectDIDResolutionBundle collects all unique DIDs from the VC chain and resolves their public keys.
@@ -1611,6 +1745,10 @@ func (s *VCService) verifyWorkflowVCSignature(vcDoc *types.WorkflowVCDocument, i
 	publicKeyBytes, err := base64.RawURLEncoding.DecodeString(xValue)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode public key: %w", err)
+	}
+
+	if len(publicKeyBytes) != ed25519.PublicKeySize {
+		return false, fmt.Errorf("invalid public key length: got %d, want %d", len(publicKeyBytes), ed25519.PublicKeySize)
 	}
 
 	publicKey := ed25519.PublicKey(publicKeyBytes)

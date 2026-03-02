@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -46,6 +47,12 @@ func APIKeyAuth(config AuthConfig) gin.HandlerFunc {
 			return
 		}
 
+		// Allow public DID document resolution (did:web spec requires public access)
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/did/document/") || strings.HasPrefix(c.Request.URL.Path, "/api/v1/did/resolve/") {
+			c.Next()
+			return
+		}
+
 		apiKey := ""
 
 		// Preferred: X-API-Key header
@@ -64,10 +71,35 @@ func APIKeyAuth(config AuthConfig) gin.HandlerFunc {
 			apiKey = c.Query("api_key")
 		}
 
-		if apiKey != config.APIKey {
+		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(config.APIKey)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":   "unauthorized",
 				"message": "invalid or missing API key",
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// AdminTokenAuth enforces a separate admin token for admin routes.
+// If adminToken is empty, the middleware is a no-op (falls back to global API key auth).
+// Admin tokens must be sent via the X-Admin-Token header only (not Bearer) to avoid
+// collision with the API key Bearer token namespace.
+func AdminTokenAuth(adminToken string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if adminToken == "" {
+			c.Next()
+			return
+		}
+
+		token := c.GetHeader("X-Admin-Token")
+
+		if subtle.ConstantTimeCompare([]byte(token), []byte(adminToken)) != 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":   "forbidden",
+				"message": "admin token required for this operation (use X-Admin-Token header)",
 			})
 			return
 		}

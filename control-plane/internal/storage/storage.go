@@ -105,11 +105,18 @@ type StorageProvider interface {
 	// Agent registry
 	RegisterAgent(ctx context.Context, agent *types.AgentNode) error
 	GetAgent(ctx context.Context, id string) (*types.AgentNode, error)
+	GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error)
+	DeleteAgentVersion(ctx context.Context, id string, version string) error
+	ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error)
 	ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error)
+	ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error)
+	ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error)
 	UpdateAgentHealth(ctx context.Context, id string, status types.HealthStatus) error
 	UpdateAgentHealthAtomic(ctx context.Context, id string, status types.HealthStatus, expectedLastHeartbeat *time.Time) error
-	UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error
+	UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error
 	UpdateAgentLifecycleStatus(ctx context.Context, id string, status types.AgentLifecycleStatus) error
+	UpdateAgentVersion(ctx context.Context, id string, version string) error
+	UpdateAgentTrafficWeight(ctx context.Context, id string, version string, weight int) error
 
 	// Configuration
 	SetConfig(ctx context.Context, key string, value interface{}) error
@@ -188,6 +195,29 @@ type StorageProvider interface {
 	GetDeadLetterQueue(ctx context.Context, limit, offset int) ([]types.ObservabilityDeadLetterEntry, error)
 	DeleteFromDeadLetterQueue(ctx context.Context, ids []int64) error
 	ClearDeadLetterQueue(ctx context.Context) error
+
+	// Access policy operations (tag-based authorization)
+	GetAccessPolicies(ctx context.Context) ([]*types.AccessPolicy, error)
+	GetAccessPolicyByID(ctx context.Context, id int64) (*types.AccessPolicy, error)
+	CreateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error
+	UpdateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error
+	DeleteAccessPolicy(ctx context.Context, id int64) error
+
+	// Agent Tag VC operations (tag-based PermissionVC)
+	StoreAgentTagVC(ctx context.Context, agentID, agentDID, vcID, vcDocument, signature string, issuedAt time.Time, expiresAt *time.Time) error
+	GetAgentTagVC(ctx context.Context, agentID string) (*types.AgentTagVCRecord, error)
+	ListAgentTagVCs(ctx context.Context) ([]*types.AgentTagVCRecord, error)
+	RevokeAgentTagVC(ctx context.Context, agentID string) error
+
+	// DID Document operations (did:web resolution)
+	StoreDIDDocument(ctx context.Context, record *types.DIDDocumentRecord) error
+	GetDIDDocument(ctx context.Context, did string) (*types.DIDDocumentRecord, error)
+	GetDIDDocumentByAgentID(ctx context.Context, agentID string) (*types.DIDDocumentRecord, error)
+	RevokeDIDDocument(ctx context.Context, did string) error
+	ListDIDDocuments(ctx context.Context) ([]*types.DIDDocumentRecord, error)
+
+	// Agent lifecycle queries (tag approval workflow)
+	ListAgentsByLifecycleStatus(ctx context.Context, status types.AgentLifecycleStatus) ([]*types.AgentNode, error)
 }
 
 // ComponentDIDRequest represents a component DID to be stored

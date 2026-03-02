@@ -75,7 +75,10 @@ func (ls *LocalStorage) getWorkflowExecutionByID(ctx context.Context, q DBTX, ex
 		       status, started_at, completed_at, duration_ms,
 		       state_version, last_event_sequence, active_children, pending_children,
 		       pending_terminal_status, status_reason, lease_owner, lease_expires_at,
-		       error_message, retry_count, workflow_name, workflow_tags, notes, created_at, updated_at
+		       error_message, retry_count,
+		       approval_request_id, approval_request_url, approval_status, approval_response,
+		       approval_requested_at, approval_responded_at, approval_callback_url, approval_expires_at,
+		       workflow_name, workflow_tags, notes, created_at, updated_at
 		FROM workflow_executions WHERE execution_id = ?`
 
 	row := q.QueryRowContext(ctx, query, executionID)
@@ -88,6 +91,8 @@ func (ls *LocalStorage) getWorkflowExecutionByID(ctx context.Context, q DBTX, ex
 	var statusReason sql.NullString
 	var leaseOwner sql.NullString
 	var leaseExpires sql.NullTime
+	var approvalRequestID, approvalRequestURL, approvalStatus, approvalResponse, approvalCallbackURL sql.NullString
+	var approvalRequestedAt, approvalRespondedAt, approvalExpiresAt sql.NullTime
 	err := row.Scan(
 		&execution.WorkflowID, &execution.ExecutionID, &execution.AgentFieldRequestID,
 		&runID, &execution.SessionID, &execution.ActorID, &execution.AgentNodeID,
@@ -98,7 +103,10 @@ func (ls *LocalStorage) getWorkflowExecutionByID(ctx context.Context, q DBTX, ex
 		&execution.StateVersion, &execution.LastEventSequence, &execution.ActiveChildren, &execution.PendingChildren,
 		&pendingTerminal, &statusReason,
 		&leaseOwner, &leaseExpires,
-		&execution.ErrorMessage, &execution.RetryCount, &execution.WorkflowName,
+		&execution.ErrorMessage, &execution.RetryCount,
+		&approvalRequestID, &approvalRequestURL, &approvalStatus, &approvalResponse,
+		&approvalRequestedAt, &approvalRespondedAt, &approvalCallbackURL, &approvalExpiresAt,
+		&execution.WorkflowName,
 		&workflowTagsJSON, &notesJSON, &execution.CreatedAt, &execution.UpdatedAt,
 	)
 
@@ -138,6 +146,33 @@ func (ls *LocalStorage) getWorkflowExecutionByID(ctx context.Context, q DBTX, ex
 	if leaseExpires.Valid {
 		t := leaseExpires.Time
 		execution.LeaseExpiresAt = &t
+	}
+	if approvalRequestID.Valid {
+		execution.ApprovalRequestID = &approvalRequestID.String
+	}
+	if approvalRequestURL.Valid {
+		execution.ApprovalRequestURL = &approvalRequestURL.String
+	}
+	if approvalStatus.Valid {
+		execution.ApprovalStatus = &approvalStatus.String
+	}
+	if approvalResponse.Valid {
+		execution.ApprovalResponse = &approvalResponse.String
+	}
+	if approvalRequestedAt.Valid {
+		t := approvalRequestedAt.Time
+		execution.ApprovalRequestedAt = &t
+	}
+	if approvalRespondedAt.Valid {
+		t := approvalRespondedAt.Time
+		execution.ApprovalRespondedAt = &t
+	}
+	if approvalCallbackURL.Valid {
+		execution.ApprovalCallbackURL = &approvalCallbackURL.String
+	}
+	if approvalExpiresAt.Valid {
+		t := approvalExpiresAt.Time
+		execution.ApprovalExpiresAt = &t
 	}
 
 	// Unmarshal workflow tags
@@ -875,7 +910,11 @@ func (ls *LocalStorage) createSchema(ctx context.Context) error {
 	}
 
 	if err := ls.setupWorkflowExecutionFTS(); err != nil {
-		return err
+		if strings.Contains(err.Error(), "no such module: fts5") {
+			log.Printf("FTS5 module not available, full-text search will be degraded")
+		} else {
+			return err
+		}
 	}
 
 	if err := ls.ensureSQLiteIndexes(); err != nil {
@@ -1047,6 +1086,7 @@ func (ls *LocalStorage) ensurePostgresIndexes(ctx context.Context) error {
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_parent_workflow_id ON workflow_executions(parent_workflow_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_root_workflow_id ON workflow_executions(root_workflow_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_executions_status ON workflow_executions(status)",
+		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_group_id ON agent_nodes(group_id)",
 	}
 
 	for _, stmt := range indexStatements {
@@ -1146,6 +1186,7 @@ func (ls *LocalStorage) ensureSQLiteIndexes() error {
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_team ON agent_nodes(team_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_health ON agent_nodes(health_status)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_lifecycle ON agent_nodes(lifecycle_status)",
+		"CREATE INDEX IF NOT EXISTS idx_agent_nodes_group_id ON agent_nodes(group_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_dids_agent_node ON agent_dids(agent_node_id)",
 		"CREATE INDEX IF NOT EXISTS idx_agent_dids_agentfield_server ON agent_dids(agentfield_server_id)",
 		"CREATE INDEX IF NOT EXISTS idx_component_dids_agent_did ON component_dids(agent_did)",
@@ -1259,7 +1300,41 @@ func (ls *LocalStorage) runPostgresMigrations(ctx context.Context) error {
                         applied_at TIMESTAMPTZ DEFAULT NOW(),
                         description TEXT
                 );`)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
+	}
+
+	migrations := []struct {
+		version     string
+		description string
+		sql         string
+	}{
+		{
+			version:     "015",
+			description: "Backfill group_id on agent_nodes with id",
+			sql:         `UPDATE agent_nodes SET group_id = id WHERE group_id = '' OR group_id IS NULL;`,
+		},
+	}
+
+	for _, m := range migrations {
+		var count int
+		err := ls.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, m.version).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("failed to check migration %s: %w", m.version, err)
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := ls.db.ExecContext(ctx, m.sql); err != nil {
+			return fmt.Errorf("failed to apply migration %s: %w", m.version, err)
+		}
+		if _, err := ls.db.ExecContext(ctx, `INSERT INTO schema_migrations (version, description) VALUES ($1, $2)`, m.version, m.description); err != nil {
+			return fmt.Errorf("failed to record migration %s: %w", m.version, err)
+		}
+		log.Printf("Applied postgres migration %s: %s", m.version, m.description)
+	}
+
+	return nil
 }
 
 // buildExecutionVCTableSQL returns the CREATE TABLE statement for execution VC storage.
@@ -1604,6 +1679,11 @@ func (ls *LocalStorage) runMigrations() error {
 			description: "Add document size column to workflow_vcs",
 			sql:         `ALTER TABLE workflow_vcs ADD COLUMN document_size_bytes INTEGER DEFAULT 0;`,
 		},
+		{
+			version:     "015",
+			description: "Backfill group_id on agent_nodes with id",
+			sql:         `UPDATE agent_nodes SET group_id = id WHERE group_id = '' OR group_id IS NULL;`,
+		},
 	}
 
 	// Apply each migration if not already applied
@@ -1630,6 +1710,8 @@ func (ls *LocalStorage) runMigrations() error {
 			// For ALTER TABLE operations, check if column already exists
 			if strings.Contains(err.Error(), "duplicate column name") {
 				log.Printf("Column already exists for migration %s, marking as applied", migration.version)
+			} else if strings.Contains(err.Error(), "no such module: fts5") {
+				log.Printf("FTS5 module not available, skipping migration %s (search will be degraded)", migration.version)
 			} else {
 				return fmt.Errorf("failed to apply migration %s: %w", migration.version, err)
 			}
@@ -2047,10 +2129,15 @@ const sqliteWorkflowExecutionInsertQuery = `INSERT INTO workflow_executions (
 	status, started_at, completed_at, duration_ms,
 	state_version, last_event_sequence, active_children, pending_children,
 	pending_terminal_status, status_reason, lease_owner, lease_expires_at,
-	error_message, retry_count, workflow_name, workflow_tags, notes, created_at, updated_at
+	error_message, retry_count,
+	approval_request_id, approval_request_url, approval_status, approval_response,
+	approval_requested_at, approval_responded_at, approval_callback_url, approval_expires_at,
+	workflow_name, workflow_tags, notes, created_at, updated_at
 ) VALUES (
 	?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-	?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+	?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+	?, ?, ?, ?, ?, ?, ?, ?,
+	?, ?, ?, ?, ?
 )`
 
 // executeWorkflowInsert performs the actual database insert/update operation
@@ -2087,7 +2174,11 @@ func (ls *LocalStorage) executeWorkflowInsert(ctx context.Context, q DBTX, execu
 				status = ?, completed_at = ?, duration_ms = ?,
 				state_version = ?, last_event_sequence = ?, active_children = ?, pending_children = ?,
 				pending_terminal_status = ?, status_reason = ?, lease_owner = ?, lease_expires_at = ?,
-				output_data = ?, output_size = ?, error_message = ?, notes = ?, updated_at = ?
+				output_data = ?, output_size = ?, error_message = ?,
+				approval_request_id = ?, approval_request_url = ?, approval_status = ?,
+				approval_response = ?, approval_requested_at = ?, approval_responded_at = ?,
+				approval_callback_url = ?, approval_expires_at = ?,
+				notes = ?, updated_at = ?
 			WHERE execution_id = ?`
 
 		_, err = q.ExecContext(ctx, updateQuery,
@@ -2095,6 +2186,9 @@ func (ls *LocalStorage) executeWorkflowInsert(ctx context.Context, q DBTX, execu
 			execution.StateVersion, execution.LastEventSequence, execution.ActiveChildren, execution.PendingChildren,
 			execution.PendingTerminalStatus, execution.StatusReason, execution.LeaseOwner, execution.LeaseExpiresAt,
 			execution.OutputData, execution.OutputSize, execution.ErrorMessage,
+			execution.ApprovalRequestID, execution.ApprovalRequestURL, execution.ApprovalStatus,
+			execution.ApprovalResponse, execution.ApprovalRequestedAt, execution.ApprovalRespondedAt,
+			execution.ApprovalCallbackURL, execution.ApprovalExpiresAt,
 			notesJSON, time.Now(), execution.ExecutionID)
 
 		if err != nil {
@@ -2137,7 +2231,11 @@ func (ls *LocalStorage) executeWorkflowInsert(ctx context.Context, q DBTX, execu
 		execution.Status, execution.StartedAt, execution.CompletedAt, execution.DurationMS,
 		execution.StateVersion, execution.LastEventSequence, execution.ActiveChildren, execution.PendingChildren,
 		execution.PendingTerminalStatus, execution.StatusReason, execution.LeaseOwner, execution.LeaseExpiresAt,
-		execution.ErrorMessage, execution.RetryCount, execution.WorkflowName,
+		execution.ErrorMessage, execution.RetryCount,
+		execution.ApprovalRequestID, execution.ApprovalRequestURL, execution.ApprovalStatus,
+		execution.ApprovalResponse, execution.ApprovalRequestedAt, execution.ApprovalRespondedAt,
+		execution.ApprovalCallbackURL, execution.ApprovalExpiresAt,
+		execution.WorkflowName,
 		workflowTagsJSON, notesJSON, execution.CreatedAt, execution.UpdatedAt,
 	)
 
@@ -2408,7 +2506,11 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 		workflow_executions.lease_owner, workflow_executions.lease_expires_at,
 		workflow_executions.error_message,
 			workflow_executions.retry_count, workflow_executions.workflow_name, workflow_executions.workflow_tags,
-			workflow_executions.notes, workflow_executions.created_at, workflow_executions.updated_at
+			workflow_executions.notes, workflow_executions.created_at, workflow_executions.updated_at,
+			workflow_executions.approval_request_id, workflow_executions.approval_request_url,
+			workflow_executions.approval_status, workflow_executions.approval_response,
+			workflow_executions.approval_requested_at, workflow_executions.approval_responded_at,
+			workflow_executions.approval_callback_url, workflow_executions.approval_expires_at
 		FROM workflow_executions`
 
 	var conditions []string
@@ -2454,6 +2556,10 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 	if filters.Status != nil {
 		conditions = append(conditions, "workflow_executions.status = ?")
 		args = append(args, *filters.Status)
+	}
+	if filters.ApprovalRequestID != nil {
+		conditions = append(conditions, "workflow_executions.approval_request_id = ?")
+		args = append(args, *filters.ApprovalRequestID)
 	}
 	if filters.StartTime != nil {
 		conditions = append(conditions, "workflow_executions.started_at >= ?")
@@ -2520,6 +2626,8 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 		var runID sql.NullString
 		var leaseOwner sql.NullString
 		var leaseExpires sql.NullTime
+		var approvalRequestID, approvalRequestURL, approvalStatus, approvalResponse, approvalCallbackURL sql.NullString
+		var approvalRequestedAt, approvalRespondedAt, approvalExpiresAt sql.NullTime
 
 		err := rows.Scan(
 			&execution.ID, &execution.WorkflowID, &execution.ExecutionID,
@@ -2535,6 +2643,10 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 			&execution.ErrorMessage, &execution.RetryCount,
 			&execution.WorkflowName, &workflowTagsJSON, &notesJSON, &execution.CreatedAt,
 			&execution.UpdatedAt,
+			&approvalRequestID, &approvalRequestURL,
+			&approvalStatus, &approvalResponse,
+			&approvalRequestedAt, &approvalRespondedAt,
+			&approvalCallbackURL, &approvalExpiresAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan workflow execution row: %w", err)
@@ -2566,6 +2678,33 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 		if leaseExpires.Valid {
 			t := leaseExpires.Time
 			execution.LeaseExpiresAt = &t
+		}
+		if approvalRequestID.Valid {
+			execution.ApprovalRequestID = &approvalRequestID.String
+		}
+		if approvalRequestURL.Valid {
+			execution.ApprovalRequestURL = &approvalRequestURL.String
+		}
+		if approvalStatus.Valid {
+			execution.ApprovalStatus = &approvalStatus.String
+		}
+		if approvalResponse.Valid {
+			execution.ApprovalResponse = &approvalResponse.String
+		}
+		if approvalRequestedAt.Valid {
+			t := approvalRequestedAt.Time
+			execution.ApprovalRequestedAt = &t
+		}
+		if approvalRespondedAt.Valid {
+			t := approvalRespondedAt.Time
+			execution.ApprovalRespondedAt = &t
+		}
+		if approvalCallbackURL.Valid {
+			execution.ApprovalCallbackURL = &approvalCallbackURL.String
+		}
+		if approvalExpiresAt.Valid {
+			t := approvalExpiresAt.Time
+			execution.ApprovalExpiresAt = &t
 		}
 
 		if len(workflowTagsJSON) > 0 {
@@ -3030,6 +3169,7 @@ func (ls *LocalStorage) populateWorkflowCleanupCounts(ctx context.Context, targe
 	result.DeletedRecords["workflow_executions"] = ls.countWorkflowExecutions(ctx, workflowIDs, runIDs)
 	result.DeletedRecords["workflow_execution_events"] = ls.countWorkflowExecutionEvents(ctx, workflowIDs, runIDs)
 	result.DeletedRecords["workflows"] = ls.countWorkflows(ctx, workflowIDs)
+	result.DeletedRecords["workflow_runs"] = ls.countWorkflowRuns(ctx, targets.primaryWorkflowID, workflowIDs, runIDs)
 }
 
 func (ls *LocalStorage) performWorkflowCleanup(ctx context.Context, tx DBTX, targets *workflowCleanupTargets) error {
@@ -4298,14 +4438,15 @@ func (ls *LocalStorage) RegisterAgent(ctx context.Context, agent *types.AgentNod
 func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent *types.AgentNode) error {
 	query := `
 		INSERT INTO agent_nodes (
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
-			registered_at, features, metadata
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
+			registered_at, features, metadata, proposed_tags, approved_tags
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id, version) DO UPDATE SET
+			group_id = excluded.group_id,
 			team_id = excluded.team_id,
 			base_url = excluded.base_url,
-			version = excluded.version,
+			traffic_weight = excluded.traffic_weight,
 			deployment_type = excluded.deployment_type,
 			invocation_url = excluded.invocation_url,
 			reasoners = excluded.reasoners,
@@ -4315,7 +4456,9 @@ func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent 
 			lifecycle_status = excluded.lifecycle_status,
 			last_heartbeat = excluded.last_heartbeat,
 			features = excluded.features,
-			metadata = excluded.metadata;`
+			metadata = excluded.metadata,
+			proposed_tags = excluded.proposed_tags,
+			approved_tags = excluded.approved_tags;`
 
 	reasonersJSON, err := json.Marshal(agent.Reasoners)
 	if err != nil {
@@ -4337,11 +4480,24 @@ func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent 
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent metadata: %w", err)
 	}
+	proposedTagsJSON, err := json.Marshal(agent.ProposedTags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal proposed tags: %w", err)
+	}
+	approvedTagsJSON, err := json.Marshal(agent.ApprovedTags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal approved tags: %w", err)
+	}
+
+	trafficWeight := agent.TrafficWeight
+	if trafficWeight == 0 {
+		trafficWeight = 100
+	}
 
 	_, err = q.ExecContext(ctx, query,
-		agent.ID, agent.TeamID, agent.BaseURL, agent.Version, agent.DeploymentType, agent.InvocationURL,
+		agent.ID, agent.Version, agent.GroupID, agent.TeamID, agent.BaseURL, trafficWeight, agent.DeploymentType, agent.InvocationURL,
 		reasonersJSON, skillsJSON, commConfigJSON, agent.HealthStatus, agent.LifecycleStatus,
-		agent.LastHeartbeat, agent.RegisteredAt, featuresJSON, metadataJSON,
+		agent.LastHeartbeat, agent.RegisteredAt, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON,
 	)
 
 	if err != nil {
@@ -4351,7 +4507,9 @@ func (ls *LocalStorage) executeRegisterAgent(ctx context.Context, q DBTX, agent 
 	return nil
 }
 
-// GetAgent retrieves an agent node record from SQLite by ID.
+// GetAgent retrieves the default (unversioned) agent node record by ID.
+// It filters for version = '' to return only the default agent.
+// Use GetAgentVersion for a specific version, or ListAgentVersions for all versions.
 func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNode, error) {
 	// Check context cancellation early
 	if err := ctx.Err(); err != nil {
@@ -4360,22 +4518,27 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 
 	query := `
 		SELECT
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
-			registered_at, features, metadata
-		FROM agent_nodes WHERE id = ?`
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE id = ?
+		ORDER BY CASE WHEN version = '' THEN 0 ELSE 1 END, version ASC
+		LIMIT 1`
 
 	row := ls.db.QueryRowContext(ctx, query, id)
 
 	agent := &types.AgentNode{}
 	var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
+	var proposedTagsJSON, approvedTagsJSON []byte
 	var healthStatusStr, lifecycleStatusStr string
 	var invocationURL sql.NullString
+	var lastHeartbeat, registeredAt sql.NullTime
 
 	err := row.Scan(
-		&agent.ID, &agent.TeamID, &agent.BaseURL, &agent.Version, &agent.DeploymentType, &invocationURL,
+		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
 		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-		&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
+		&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
+		&proposedTagsJSON, &approvedTagsJSON,
 	)
 
 	if err != nil {
@@ -4385,6 +4548,12 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 		return nil, fmt.Errorf("failed to get agent node with ID '%s': %w", id, err)
 	}
 
+	if lastHeartbeat.Valid {
+		agent.LastHeartbeat = lastHeartbeat.Time
+	}
+	if registeredAt.Valid {
+		agent.RegisteredAt = registeredAt.Time
+	}
 	agent.HealthStatus = types.HealthStatus(healthStatusStr)
 	agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
 	if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
@@ -4417,6 +4586,16 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 			return nil, fmt.Errorf("failed to unmarshal agent metadata: %w", err)
 		}
 	}
+	if len(proposedTagsJSON) > 0 {
+		if err := json.Unmarshal(proposedTagsJSON, &agent.ProposedTags); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal agent proposed tags: %w", err)
+		}
+	}
+	if len(approvedTagsJSON) > 0 {
+		if err := json.Unmarshal(approvedTagsJSON, &agent.ApprovedTags); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal agent approved tags: %w", err)
+		}
+	}
 	if strings.TrimSpace(agent.DeploymentType) == "" {
 		if agent.InvocationURL != nil && strings.TrimSpace(*agent.InvocationURL) != "" {
 			agent.DeploymentType = "serverless"
@@ -4436,39 +4615,225 @@ func (ls *LocalStorage) GetAgent(ctx context.Context, id string) (*types.AgentNo
 		}
 	}
 
+	// Reconstruct agent-level ProposedTags and ApprovedTags from per-component fields.
+	// These fields are not stored in dedicated columns but are derived from the
+	// reasoners/skills JSON blobs.
+	reconstructAgentLevelTags(agent)
+
 	return agent, nil
+}
+
+// GetAgentVersion retrieves a specific (id, version) agent node.
+func (ls *LocalStorage) GetAgentVersion(ctx context.Context, id string, version string) (*types.AgentNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get agent version: %w", err)
+	}
+
+	query := `
+		SELECT
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
+			communication_config, health_status, lifecycle_status, last_heartbeat,
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE id = ? AND version = ?`
+
+	row := ls.db.QueryRowContext(ctx, query, id, version)
+	return ls.scanAgentNode(row)
+}
+
+// DeleteAgentVersion deletes a specific agent version row from the agent_nodes table.
+func (ls *LocalStorage) DeleteAgentVersion(ctx context.Context, id string, version string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during delete agent version: %w", err)
+	}
+
+	_, err := ls.db.ExecContext(ctx, `DELETE FROM agent_nodes WHERE id = ? AND version = ?`, id, version)
+	if err != nil {
+		return fmt.Errorf("failed to delete agent version id='%s' version='%s': %w", id, version, err)
+	}
+	return nil
+}
+
+// ListAgentVersions returns all versioned agents with the given ID (version != '').
+func (ls *LocalStorage) ListAgentVersions(ctx context.Context, id string) ([]*types.AgentNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agent versions: %w", err)
+	}
+
+	query := `
+		SELECT
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
+			communication_config, health_status, lifecycle_status, last_heartbeat,
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE id = ? AND version != '' ORDER BY registered_at DESC`
+
+	rows, err := ls.db.QueryContext(ctx, query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agent versions for '%s': %w", id, err)
+	}
+	defer rows.Close()
+
+	return ls.scanAgentNodes(ctx, rows)
+}
+
+// scanAgentNode scans a single row into an AgentNode, applying post-processing.
+func (ls *LocalStorage) scanAgentNode(row *sql.Row) (*types.AgentNode, error) {
+	agent := &types.AgentNode{}
+	var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
+	var proposedTagsJSON, approvedTagsJSON []byte
+	var healthStatusStr, lifecycleStatusStr string
+	var invocationURL sql.NullString
+	var lastHeartbeat, registeredAt sql.NullTime
+
+	err := row.Scan(
+		&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
+		&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
+		&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
+		&proposedTagsJSON, &approvedTagsJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent node with ID '%s' version '%s' not found", agent.ID, agent.Version)
+		}
+		return nil, fmt.Errorf("failed to scan agent node: %w", err)
+	}
+
+	if lastHeartbeat.Valid {
+		agent.LastHeartbeat = lastHeartbeat.Time
+	}
+	if registeredAt.Valid {
+		agent.RegisteredAt = registeredAt.Time
+	}
+	ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
+		reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
+	return agent, nil
+}
+
+// scanAgentNodes scans multiple rows into AgentNode slices, applying post-processing.
+func (ls *LocalStorage) scanAgentNodes(ctx context.Context, rows *sql.Rows) ([]*types.AgentNode, error) {
+	agents := []*types.AgentNode{}
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled during agent list iteration: %w", err)
+		}
+
+		agent := &types.AgentNode{}
+		var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
+		var proposedTagsJSON, approvedTagsJSON []byte
+		var healthStatusStr, lifecycleStatusStr string
+		var invocationURL sql.NullString
+		var lastHeartbeat, registeredAt sql.NullTime
+
+		err := rows.Scan(
+			&agent.ID, &agent.Version, &agent.GroupID, &agent.TeamID, &agent.BaseURL, &agent.TrafficWeight, &agent.DeploymentType, &invocationURL,
+			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
+			&lastHeartbeat, &registeredAt, &featuresJSON, &metadataJSON,
+			&proposedTagsJSON, &approvedTagsJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
+		}
+
+		if lastHeartbeat.Valid {
+			agent.LastHeartbeat = lastHeartbeat.Time
+		}
+		if registeredAt.Valid {
+			agent.RegisteredAt = registeredAt.Time
+		}
+		ls.postProcessAgentNode(agent, healthStatusStr, lifecycleStatusStr, invocationURL,
+			reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON)
+		agents = append(agents, agent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error after listing agent nodes: %w", err)
+	}
+	return agents, nil
+}
+
+// postProcessAgentNode applies common post-processing to a scanned AgentNode.
+func (ls *LocalStorage) postProcessAgentNode(agent *types.AgentNode, healthStatusStr, lifecycleStatusStr string, invocationURL sql.NullString,
+	reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON, proposedTagsJSON, approvedTagsJSON []byte) {
+
+	agent.HealthStatus = types.HealthStatus(healthStatusStr)
+	agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
+	if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
+		url := strings.TrimSpace(invocationURL.String)
+		agent.InvocationURL = &url
+	}
+
+	if len(reasonersJSON) > 0 {
+		_ = json.Unmarshal(reasonersJSON, &agent.Reasoners)
+	}
+	if len(skillsJSON) > 0 {
+		_ = json.Unmarshal(skillsJSON, &agent.Skills)
+	}
+	if len(commConfigJSON) > 0 {
+		_ = json.Unmarshal(commConfigJSON, &agent.CommunicationConfig)
+	}
+	if len(featuresJSON) > 0 {
+		_ = json.Unmarshal(featuresJSON, &agent.Features)
+	}
+	if len(metadataJSON) > 0 {
+		_ = json.Unmarshal(metadataJSON, &agent.Metadata)
+	}
+	if len(proposedTagsJSON) > 0 {
+		_ = json.Unmarshal(proposedTagsJSON, &agent.ProposedTags)
+	}
+	if len(approvedTagsJSON) > 0 {
+		_ = json.Unmarshal(approvedTagsJSON, &agent.ApprovedTags)
+	}
+
+	if strings.TrimSpace(agent.DeploymentType) == "" {
+		if agent.InvocationURL != nil && strings.TrimSpace(*agent.InvocationURL) != "" {
+			agent.DeploymentType = "serverless"
+		} else if agent.Metadata.Custom != nil {
+			if v, ok := agent.Metadata.Custom["serverless"]; ok && fmt.Sprint(v) == "true" {
+				agent.DeploymentType = "serverless"
+			}
+		}
+		if strings.TrimSpace(agent.DeploymentType) == "" {
+			agent.DeploymentType = "long_running"
+		}
+	}
+	if agent.DeploymentType == "serverless" && (agent.InvocationURL == nil || strings.TrimSpace(*agent.InvocationURL) == "") {
+		if trimmed := strings.TrimSpace(agent.BaseURL); trimmed != "" {
+			execURL := strings.TrimSuffix(trimmed, "/") + "/execute"
+			agent.InvocationURL = &execURL
+		}
+	}
+
+	reconstructAgentLevelTags(agent)
 }
 
 // ListAgents retrieves agent node records from SQLite based on filters.
 func (ls *LocalStorage) ListAgents(ctx context.Context, filters types.AgentFilters) ([]*types.AgentNode, error) {
-	// Check context cancellation early
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled during list agents: %w", err)
 	}
-	// Build query with filters
+
 	query := `
 		SELECT
-			id, team_id, base_url, version, deployment_type, invocation_url, reasoners, skills,
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
 			communication_config, health_status, lifecycle_status, last_heartbeat,
-			registered_at, features, metadata
+			registered_at, features, metadata, proposed_tags, approved_tags
 		FROM agent_nodes`
 
 	var conditions []string
 	var args []interface{}
 
-	// Add health status filter
 	if filters.HealthStatus != nil {
 		conditions = append(conditions, "health_status = ?")
 		args = append(args, string(*filters.HealthStatus))
 	}
-
-	// Add team ID filter
 	if filters.TeamID != nil {
 		conditions = append(conditions, "team_id = ?")
 		args = append(args, *filters.TeamID)
 	}
+	if filters.GroupID != nil {
+		conditions = append(conditions, "group_id = ?")
+		args = append(args, *filters.GroupID)
+	}
 
-	// Add WHERE clause if there are conditions
 	if len(conditions) > 0 {
 		query += " WHERE " + conditions[0]
 		for i := 1; i < len(conditions); i++ {
@@ -4484,86 +4849,60 @@ func (ls *LocalStorage) ListAgents(ctx context.Context, filters types.AgentFilte
 	}
 	defer rows.Close()
 
-	agents := []*types.AgentNode{}
+	return ls.scanAgentNodes(ctx, rows)
+}
+
+// ListAgentsByGroup returns all agents belonging to a specific group.
+func (ls *LocalStorage) ListAgentsByGroup(ctx context.Context, groupID string) ([]*types.AgentNode, error) {
+	return ls.ListAgents(ctx, types.AgentFilters{GroupID: &groupID})
+}
+
+// ListAgentGroups returns distinct agent groups with summary info for a team.
+func (ls *LocalStorage) ListAgentGroups(ctx context.Context, teamID string) ([]types.AgentGroupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agent groups: %w", err)
+	}
+
+	var query string
+	if ls.mode == "postgres" {
+		query = `
+			SELECT group_id, team_id, COUNT(*) as node_count, STRING_AGG(DISTINCT version, ',') as versions
+			FROM agent_nodes
+			WHERE team_id = $1
+			GROUP BY group_id, team_id
+			ORDER BY group_id`
+	} else {
+		query = `
+			SELECT group_id, team_id, COUNT(*) as node_count, GROUP_CONCAT(DISTINCT version) as versions
+			FROM agent_nodes
+			WHERE team_id = ?
+			GROUP BY group_id, team_id
+			ORDER BY group_id`
+	}
+
+	rows, err := ls.db.QueryContext(ctx, query, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agent groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []types.AgentGroupSummary
 	for rows.Next() {
-		// Check context cancellation during iteration
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context cancelled during agent list iteration: %w", err)
+		var g types.AgentGroupSummary
+		var versionsStr sql.NullString
+		if err := rows.Scan(&g.GroupID, &g.TeamID, &g.NodeCount, &versionsStr); err != nil {
+			return nil, fmt.Errorf("failed to scan agent group row: %w", err)
 		}
-
-		agent := &types.AgentNode{}
-		var reasonersJSON, skillsJSON, commConfigJSON, featuresJSON, metadataJSON []byte
-		var healthStatusStr, lifecycleStatusStr string
-		var invocationURL sql.NullString
-
-		err := rows.Scan(
-			&agent.ID, &agent.TeamID, &agent.BaseURL, &agent.Version, &agent.DeploymentType, &invocationURL,
-			&reasonersJSON, &skillsJSON, &commConfigJSON, &healthStatusStr, &lifecycleStatusStr,
-			&agent.LastHeartbeat, &agent.RegisteredAt, &featuresJSON, &metadataJSON,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan agent node row: %w", err)
+		if versionsStr.Valid && versionsStr.String != "" {
+			g.Versions = strings.Split(versionsStr.String, ",")
 		}
-
-		agent.HealthStatus = types.HealthStatus(healthStatusStr)
-		agent.LifecycleStatus = types.AgentLifecycleStatus(lifecycleStatusStr)
-		if invocationURL.Valid && strings.TrimSpace(invocationURL.String) != "" {
-			url := strings.TrimSpace(invocationURL.String)
-			agent.InvocationURL = &url
-		}
-
-		if len(reasonersJSON) > 0 {
-			if err := json.Unmarshal(reasonersJSON, &agent.Reasoners); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent reasoners: %w", err)
-			}
-		}
-		if len(skillsJSON) > 0 {
-			if err := json.Unmarshal(skillsJSON, &agent.Skills); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent skills: %w", err)
-			}
-		}
-		if len(commConfigJSON) > 0 {
-			if err := json.Unmarshal(commConfigJSON, &agent.CommunicationConfig); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent communication config: %w", err)
-			}
-		}
-		if len(featuresJSON) > 0 {
-			if err := json.Unmarshal(featuresJSON, &agent.Features); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent features: %w", err)
-			}
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &agent.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal agent metadata: %w", err)
-			}
-		}
-		if strings.TrimSpace(agent.DeploymentType) == "" {
-			if agent.InvocationURL != nil && strings.TrimSpace(*agent.InvocationURL) != "" {
-				agent.DeploymentType = "serverless"
-			} else if agent.Metadata.Custom != nil {
-				if v, ok := agent.Metadata.Custom["serverless"]; ok && fmt.Sprint(v) == "true" {
-					agent.DeploymentType = "serverless"
-				}
-			}
-			if strings.TrimSpace(agent.DeploymentType) == "" {
-				agent.DeploymentType = "long_running"
-			}
-		}
-		if agent.DeploymentType == "serverless" && (agent.InvocationURL == nil || strings.TrimSpace(*agent.InvocationURL) == "") {
-			if trimmed := strings.TrimSpace(agent.BaseURL); trimmed != "" {
-				execURL := strings.TrimSuffix(trimmed, "/") + "/execute"
-				agent.InvocationURL = &execURL
-			}
-		}
-
-		agents = append(agents, agent)
+		groups = append(groups, g)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error after listing agent nodes: %w", err)
+		return nil, fmt.Errorf("error after listing agent groups: %w", err)
 	}
 
-	return agents, nil
+	return groups, nil
 }
 
 // UpdateAgentHealth updates the health status of an agent node in SQLite.
@@ -4661,25 +5000,22 @@ func (ls *LocalStorage) UpdateAgentHealthAtomic(ctx context.Context, id string, 
 }
 
 // UpdateAgentHeartbeat updates only the heartbeat timestamp of an agent node in SQLite.
-func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, heartbeatTime time.Time) error {
-	// Check context cancellation early
+// If version is empty, it updates the default (unversioned) agent.
+func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, version string, heartbeatTime time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled during update agent heartbeat: %w", err)
 	}
 
-	// Begin transaction for atomic operation
 	tx, err := ls.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for agent heartbeat update: %w", err)
 	}
 	defer rollbackTx(tx, "UpdateAgentHeartbeat:"+id)
 
-	// Execute the heartbeat update using the transaction
-	if err := ls.executeUpdateAgentHeartbeat(ctx, tx, id, heartbeatTime); err != nil {
+	if err := ls.executeUpdateAgentHeartbeat(ctx, tx, id, version, heartbeatTime); err != nil {
 		return err
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit agent heartbeat transaction: %w", err)
 	}
@@ -4688,16 +5024,15 @@ func (ls *LocalStorage) UpdateAgentHeartbeat(ctx context.Context, id string, hea
 }
 
 // executeUpdateAgentHeartbeat performs the actual heartbeat timestamp update using DBTX interface
-func (ls *LocalStorage) executeUpdateAgentHeartbeat(ctx context.Context, q DBTX, id string, heartbeatTime time.Time) error {
+func (ls *LocalStorage) executeUpdateAgentHeartbeat(ctx context.Context, q DBTX, id string, version string, heartbeatTime time.Time) error {
 	query := `
 		UPDATE agent_nodes
 		SET last_heartbeat = ?
-		WHERE id = ?;`
+		WHERE id = ? AND version = ?;`
 
-	// Store timestamp in UTC format with timezone info
-	_, err := q.ExecContext(ctx, query, heartbeatTime.UTC().Format(time.RFC3339Nano), id)
+	_, err := q.ExecContext(ctx, query, heartbeatTime.UTC().Format(time.RFC3339Nano), id, version)
 	if err != nil {
-		return fmt.Errorf("failed to update agent heartbeat for ID '%s': %w", id, err)
+		return fmt.Errorf("failed to update agent heartbeat for ID '%s' version '%s': %w", id, version, err)
 	}
 
 	return nil
@@ -4743,6 +5078,49 @@ func (ls *LocalStorage) executeUpdateAgentLifecycleStatus(ctx context.Context, q
 		return fmt.Errorf("failed to update agent lifecycle status for ID '%s': %w", id, err)
 	}
 
+	return nil
+}
+
+// UpdateAgentVersion updates only the version field for an agent node.
+func (ls *LocalStorage) UpdateAgentVersion(ctx context.Context, id string, version string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during update agent version: %w", err)
+	}
+
+	tx, err := ls.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for agent version update: %w", err)
+	}
+	defer rollbackTx(tx, "UpdateAgentVersion:"+id)
+
+	query := `UPDATE agent_nodes SET version = ? WHERE id = ?;`
+	if _, err := tx.ExecContext(ctx, query, version, id); err != nil {
+		return fmt.Errorf("failed to update agent version for ID '%s': %w", id, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit agent version transaction: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateAgentTrafficWeight sets the traffic_weight for a specific (id, version) pair.
+func (ls *LocalStorage) UpdateAgentTrafficWeight(ctx context.Context, id string, version string, weight int) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during update traffic weight: %w", err)
+	}
+
+	result, err := ls.db.ExecContext(ctx,
+		`UPDATE agent_nodes SET traffic_weight = ? WHERE id = ? AND version = ?`,
+		weight, id, version)
+	if err != nil {
+		return fmt.Errorf("failed to update traffic weight: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent (id=%s, version=%s) not found", id, version)
+	}
 	return nil
 }
 
@@ -7330,4 +7708,689 @@ func (ls *LocalStorage) ListExecutionWebhookEventsBatch(ctx context.Context, exe
 	}
 
 	return results, nil
+}
+
+// =============================================================================
+// DID Document Operations (did:web Resolution)
+// =============================================================================
+
+// StoreDIDDocument stores a DID document record.
+func (ls *LocalStorage) StoreDIDDocument(ctx context.Context, record *types.DIDDocumentRecord) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during store DID document: %w", err)
+	}
+
+	query := `
+		INSERT INTO did_documents (
+			did, agent_id, did_document, public_key_jwk, revoked_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(did) DO UPDATE SET
+			agent_id = excluded.agent_id,
+			did_document = excluded.did_document,
+			public_key_jwk = excluded.public_key_jwk,
+			updated_at = excluded.updated_at`
+
+	_, err := ls.db.ExecContext(ctx, query,
+		record.DID, record.AgentID, record.DIDDocument, record.PublicKeyJWK,
+		record.RevokedAt, record.CreatedAt, record.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to store DID document: %w", err)
+	}
+
+	return nil
+}
+
+// GetDIDDocument retrieves a DID document by its DID.
+func (ls *LocalStorage) GetDIDDocument(ctx context.Context, did string) (*types.DIDDocumentRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get DID document: %w", err)
+	}
+
+	query := `
+		SELECT did, agent_id, did_document, public_key_jwk, revoked_at, created_at, updated_at
+		FROM did_documents WHERE did = ?`
+
+	row := ls.db.QueryRowContext(ctx, query, did)
+
+	record := &types.DIDDocumentRecord{}
+	var revokedAt sql.NullTime
+
+	err := row.Scan(
+		&record.DID, &record.AgentID, &record.DIDDocument, &record.PublicKeyJWK,
+		&revokedAt, &record.CreatedAt, &record.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("DID document not found: %s", did)
+		}
+		return nil, fmt.Errorf("failed to get DID document: %w", err)
+	}
+
+	if revokedAt.Valid {
+		record.RevokedAt = &revokedAt.Time
+	}
+
+	return record, nil
+}
+
+// GetDIDDocumentByAgentID retrieves a DID document by agent ID.
+func (ls *LocalStorage) GetDIDDocumentByAgentID(ctx context.Context, agentID string) (*types.DIDDocumentRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get DID document by agent ID: %w", err)
+	}
+
+	query := `
+		SELECT did, agent_id, did_document, public_key_jwk, revoked_at, created_at, updated_at
+		FROM did_documents WHERE agent_id = ? AND revoked_at IS NULL
+		ORDER BY created_at DESC LIMIT 1`
+
+	row := ls.db.QueryRowContext(ctx, query, agentID)
+
+	record := &types.DIDDocumentRecord{}
+	var revokedAt sql.NullTime
+
+	err := row.Scan(
+		&record.DID, &record.AgentID, &record.DIDDocument, &record.PublicKeyJWK,
+		&revokedAt, &record.CreatedAt, &record.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("DID document not found for agent: %s", agentID)
+		}
+		return nil, fmt.Errorf("failed to get DID document by agent ID: %w", err)
+	}
+
+	if revokedAt.Valid {
+		record.RevokedAt = &revokedAt.Time
+	}
+
+	return record, nil
+}
+
+// RevokeDIDDocument revokes a DID document by setting its revoked_at timestamp.
+func (ls *LocalStorage) RevokeDIDDocument(ctx context.Context, did string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during revoke DID document: %w", err)
+	}
+
+	query := `UPDATE did_documents SET revoked_at = ?, updated_at = ? WHERE did = ?`
+
+	now := time.Now()
+	result, err := ls.db.ExecContext(ctx, query, now, now, did)
+	if err != nil {
+		return fmt.Errorf("failed to revoke DID document: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("DID document not found: %s", did)
+	}
+
+	return nil
+}
+
+// ListDIDDocuments lists all DID documents.
+func (ls *LocalStorage) ListDIDDocuments(ctx context.Context) ([]*types.DIDDocumentRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list DID documents: %w", err)
+	}
+
+	query := `
+		SELECT did, agent_id, did_document, public_key_jwk, revoked_at, created_at, updated_at
+		FROM did_documents ORDER BY created_at DESC`
+
+	rows, err := ls.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list DID documents: %w", err)
+	}
+	defer rows.Close()
+
+	var records []*types.DIDDocumentRecord
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled during scan: %w", err)
+		}
+
+		record := &types.DIDDocumentRecord{}
+		var revokedAt sql.NullTime
+
+		err := rows.Scan(
+			&record.DID, &record.AgentID, &record.DIDDocument, &record.PublicKeyJWK,
+			&revokedAt, &record.CreatedAt, &record.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan DID document: %w", err)
+		}
+
+		if revokedAt.Valid {
+			record.RevokedAt = &revokedAt.Time
+		}
+
+		records = append(records, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating DID documents: %w", err)
+	}
+
+	return records, nil
+}
+
+// ListAgentsByLifecycleStatus lists agents filtered by lifecycle status.
+func (ls *LocalStorage) ListAgentsByLifecycleStatus(ctx context.Context, status types.AgentLifecycleStatus) ([]*types.AgentNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agents by lifecycle status: %w", err)
+	}
+
+	query := `
+		SELECT
+			id, version, group_id, team_id, base_url, traffic_weight, deployment_type, invocation_url, reasoners, skills,
+			communication_config, health_status, lifecycle_status, last_heartbeat,
+			registered_at, features, metadata, proposed_tags, approved_tags
+		FROM agent_nodes WHERE lifecycle_status = ? ORDER BY registered_at DESC`
+
+	rows, err := ls.db.QueryContext(ctx, query, string(status))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents by lifecycle status: %w", err)
+	}
+	defer rows.Close()
+
+	return ls.scanAgentNodes(ctx, rows)
+}
+
+// reconstructAgentLevelTags ensures agent-level ProposedTags and ApprovedTags
+// are populated. If the dedicated DB columns were empty (e.g., on older records),
+// it reconstructs them from per-reasoner/per-skill fields as a fallback.
+func reconstructAgentLevelTags(agent *types.AgentNode) {
+	// Only reconstruct if DB columns were empty
+	if len(agent.ApprovedTags) == 0 {
+		seen := make(map[string]struct{})
+		for _, r := range agent.Reasoners {
+			for _, t := range r.ApprovedTags {
+				if _, exists := seen[t]; !exists {
+					seen[t] = struct{}{}
+					agent.ApprovedTags = append(agent.ApprovedTags, t)
+				}
+			}
+		}
+		for _, sk := range agent.Skills {
+			for _, t := range sk.ApprovedTags {
+				if _, exists := seen[t]; !exists {
+					seen[t] = struct{}{}
+					agent.ApprovedTags = append(agent.ApprovedTags, t)
+				}
+			}
+		}
+	}
+
+	if len(agent.ProposedTags) == 0 {
+		proposedSeen := make(map[string]struct{})
+		for _, r := range agent.Reasoners {
+			source := r.ProposedTags
+			if len(source) == 0 {
+				source = r.Tags
+			}
+			for _, t := range source {
+				if _, exists := proposedSeen[t]; !exists {
+					proposedSeen[t] = struct{}{}
+					agent.ProposedTags = append(agent.ProposedTags, t)
+				}
+			}
+		}
+		for _, sk := range agent.Skills {
+			source := sk.ProposedTags
+			if len(source) == 0 {
+				source = sk.Tags
+			}
+			for _, t := range source {
+				if _, exists := proposedSeen[t]; !exists {
+					proposedSeen[t] = struct{}{}
+					agent.ProposedTags = append(agent.ProposedTags, t)
+				}
+			}
+		}
+	}
+}
+
+// ============================================================================
+// Access Policy Storage
+// ============================================================================
+
+// GetAccessPolicies retrieves all enabled access policies, sorted by priority descending.
+func (ls *LocalStorage) GetAccessPolicies(ctx context.Context) ([]*types.AccessPolicy, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get access policies: %w", err)
+	}
+
+	query := `
+		SELECT id, name, caller_tags, target_tags, allow_functions, deny_functions,
+		       constraints, action, priority, enabled, description, created_at, updated_at
+		FROM access_policies WHERE enabled = true ORDER BY priority DESC, created_at DESC`
+
+	rows, err := ls.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get access policies: %w", err)
+	}
+	defer rows.Close()
+
+	var policies []*types.AccessPolicy
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled during scan: %w", err)
+		}
+
+		policy, err := scanAccessPolicy(rows)
+		if err != nil {
+			return nil, err
+		}
+		policies = append(policies, policy)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating access policies: %w", err)
+	}
+
+	return policies, nil
+}
+
+// GetAccessPolicyByID retrieves a single access policy by its ID.
+func (ls *LocalStorage) GetAccessPolicyByID(ctx context.Context, id int64) (*types.AccessPolicy, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get access policy: %w", err)
+	}
+
+	query := `
+		SELECT id, name, caller_tags, target_tags, allow_functions, deny_functions,
+		       constraints, action, priority, enabled, description, created_at, updated_at
+		FROM access_policies WHERE id = ?`
+
+	row := ls.db.QueryRowContext(ctx, query, id)
+
+	policy := &types.AccessPolicy{}
+	var callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON string
+	var description sql.NullString
+
+	err := row.Scan(
+		&policy.ID, &policy.Name, &callerTagsJSON, &targetTagsJSON,
+		&allowFuncsJSON, &denyFuncsJSON, &constraintsJSON,
+		&policy.Action, &policy.Priority, &policy.Enabled, &description,
+		&policy.CreatedAt, &policy.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("access policy with ID %d not found: %w", id, err)
+	}
+
+	if description.Valid {
+		policy.Description = &description.String
+	}
+	if err := unmarshalAccessPolicyJSON(policy, callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal access policy %d: %w", id, err)
+	}
+
+	return policy, nil
+}
+
+// CreateAccessPolicy creates a new access policy.
+func (ls *LocalStorage) CreateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error {
+	if ls.mode == "postgres" {
+		return ls.createAccessPolicyPostgres(ctx, policy)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during create access policy: %w", err)
+	}
+
+	callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON, err := marshalAccessPolicyJSON(policy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal access policy fields: %w", err)
+	}
+
+	query := `
+		INSERT INTO access_policies (
+			name, caller_tags, target_tags, allow_functions, deny_functions,
+			constraints, action, priority, enabled, description, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	result, err := ls.db.ExecContext(ctx, query,
+		policy.Name, callerTagsJSON, targetTagsJSON,
+		allowFuncsJSON, denyFuncsJSON, constraintsJSON,
+		policy.Action, policy.Priority, policy.Enabled, policy.Description,
+		policy.CreatedAt, policy.UpdatedAt,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			return fmt.Errorf("access policy with name %q already exists", policy.Name)
+		}
+		return fmt.Errorf("failed to create access policy: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err == nil {
+		policy.ID = id
+	}
+
+	return nil
+}
+
+// createAccessPolicyPostgres creates an access policy using PostgreSQL's RETURNING clause.
+func (ls *LocalStorage) createAccessPolicyPostgres(ctx context.Context, policy *types.AccessPolicy) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during create access policy: %w", err)
+	}
+
+	callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON, err := marshalAccessPolicyJSON(policy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal access policy fields: %w", err)
+	}
+
+	query := `
+		INSERT INTO access_policies (
+			name, caller_tags, target_tags, allow_functions, deny_functions,
+			constraints, action, priority, enabled, description, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id`
+
+	row := ls.db.DB.QueryRowContext(ctx, query,
+		policy.Name, callerTagsJSON, targetTagsJSON,
+		allowFuncsJSON, denyFuncsJSON, constraintsJSON,
+		policy.Action, policy.Priority, policy.Enabled, policy.Description,
+		policy.CreatedAt, policy.UpdatedAt,
+	)
+
+	if err := row.Scan(&policy.ID); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return fmt.Errorf("access policy with name %q already exists", policy.Name)
+		}
+		return fmt.Errorf("failed to create access policy: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateAccessPolicy updates an existing access policy.
+func (ls *LocalStorage) UpdateAccessPolicy(ctx context.Context, policy *types.AccessPolicy) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during update access policy: %w", err)
+	}
+
+	callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON, err := marshalAccessPolicyJSON(policy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal access policy fields: %w", err)
+	}
+
+	query := `
+		UPDATE access_policies SET
+			name = ?, caller_tags = ?, target_tags = ?, allow_functions = ?,
+			deny_functions = ?, constraints = ?, action = ?, priority = ?,
+			enabled = ?, description = ?, updated_at = ?
+		WHERE id = ?`
+
+	result, err := ls.db.ExecContext(ctx, query,
+		policy.Name, callerTagsJSON, targetTagsJSON,
+		allowFuncsJSON, denyFuncsJSON, constraintsJSON,
+		policy.Action, policy.Priority, policy.Enabled, policy.Description,
+		policy.UpdatedAt, policy.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update access policy: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("access policy with ID %d not found", policy.ID)
+	}
+
+	return nil
+}
+
+// DeleteAccessPolicy deletes an access policy by ID.
+func (ls *LocalStorage) DeleteAccessPolicy(ctx context.Context, id int64) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during delete access policy: %w", err)
+	}
+
+	query := `DELETE FROM access_policies WHERE id = ?`
+
+	result, err := ls.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete access policy: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("access policy with ID %d not found", id)
+	}
+
+	return nil
+}
+
+// scanAccessPolicy scans a row into an AccessPolicy struct.
+func scanAccessPolicy(rows *sql.Rows) (*types.AccessPolicy, error) {
+	policy := &types.AccessPolicy{}
+	var callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON string
+	var description sql.NullString
+
+	err := rows.Scan(
+		&policy.ID, &policy.Name, &callerTagsJSON, &targetTagsJSON,
+		&allowFuncsJSON, &denyFuncsJSON, &constraintsJSON,
+		&policy.Action, &policy.Priority, &policy.Enabled, &description,
+		&policy.CreatedAt, &policy.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan access policy: %w", err)
+	}
+
+	if description.Valid {
+		policy.Description = &description.String
+	}
+	if err := unmarshalAccessPolicyJSON(policy, callerTagsJSON, targetTagsJSON, allowFuncsJSON, denyFuncsJSON, constraintsJSON); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal access policy %d: %w", policy.ID, err)
+	}
+
+	return policy, nil
+}
+
+// unmarshalAccessPolicyJSON populates the JSON fields of an AccessPolicy.
+// Returns an error if any JSON field cannot be deserialized, preventing
+// corrupted data from silently producing empty policy rules.
+func unmarshalAccessPolicyJSON(policy *types.AccessPolicy, callerTags, targetTags, allowFuncs, denyFuncs, constraints string) error {
+	if callerTags != "" {
+		if err := json.Unmarshal([]byte(callerTags), &policy.CallerTags); err != nil {
+			return fmt.Errorf("failed to unmarshal caller_tags: %w", err)
+		}
+	}
+	if targetTags != "" {
+		if err := json.Unmarshal([]byte(targetTags), &policy.TargetTags); err != nil {
+			return fmt.Errorf("failed to unmarshal target_tags: %w", err)
+		}
+	}
+	if allowFuncs != "" {
+		if err := json.Unmarshal([]byte(allowFuncs), &policy.AllowFunctions); err != nil {
+			return fmt.Errorf("failed to unmarshal allow_functions: %w", err)
+		}
+	}
+	if denyFuncs != "" {
+		if err := json.Unmarshal([]byte(denyFuncs), &policy.DenyFunctions); err != nil {
+			return fmt.Errorf("failed to unmarshal deny_functions: %w", err)
+		}
+	}
+	if constraints != "" {
+		if err := json.Unmarshal([]byte(constraints), &policy.Constraints); err != nil {
+			return fmt.Errorf("failed to unmarshal constraints: %w", err)
+		}
+	}
+	return nil
+}
+
+// marshalAccessPolicyJSON serializes the JSON fields of an AccessPolicy for storage.
+func marshalAccessPolicyJSON(policy *types.AccessPolicy) (callerTags, targetTags, allowFuncs, denyFuncs, constraints string, err error) {
+	ct, err := json.Marshal(policy.CallerTags)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("caller_tags: %w", err)
+	}
+	tt, err := json.Marshal(policy.TargetTags)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("target_tags: %w", err)
+	}
+	af, err := json.Marshal(policy.AllowFunctions)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("allow_functions: %w", err)
+	}
+	df, err := json.Marshal(policy.DenyFunctions)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("deny_functions: %w", err)
+	}
+	cn, err := json.Marshal(policy.Constraints)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("constraints: %w", err)
+	}
+	return string(ct), string(tt), string(af), string(df), string(cn), nil
+}
+
+// ========== Agent Tag VC operations ==========
+
+// StoreAgentTagVC stores or replaces an agent's tag VC.
+func (ls *LocalStorage) StoreAgentTagVC(ctx context.Context, agentID, agentDID, vcID, vcDocument, signature string, issuedAt time.Time, expiresAt *time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during store agent tag VC: %w", err)
+	}
+
+	query := `
+		INSERT INTO agent_tag_vcs (agent_id, agent_did, vc_id, vc_document, signature, issued_at, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET
+			agent_did = excluded.agent_did,
+			vc_id = excluded.vc_id,
+			vc_document = excluded.vc_document,
+			signature = excluded.signature,
+			issued_at = excluded.issued_at,
+			expires_at = excluded.expires_at,
+			revoked_at = NULL,
+			updated_at = excluded.updated_at`
+
+	now := time.Now()
+	_, err := ls.db.ExecContext(ctx, query, agentID, agentDID, vcID, vcDocument, signature, issuedAt, expiresAt, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to store agent tag VC: %w", err)
+	}
+	return nil
+}
+
+// GetAgentTagVC retrieves an agent's tag VC record.
+func (ls *LocalStorage) GetAgentTagVC(ctx context.Context, agentID string) (*types.AgentTagVCRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during get agent tag VC: %w", err)
+	}
+
+	query := `
+		SELECT id, agent_id, agent_did, vc_id, vc_document, signature, issued_at, expires_at, revoked_at
+		FROM agent_tag_vcs WHERE agent_id = ?`
+
+	row := ls.db.QueryRowContext(ctx, query, agentID)
+
+	record := &types.AgentTagVCRecord{}
+	var expiresAt, revokedAt sql.NullTime
+	var signature sql.NullString
+
+	err := row.Scan(
+		&record.ID, &record.AgentID, &record.AgentDID, &record.VCID,
+		&record.VCDocument, &signature, &record.IssuedAt, &expiresAt, &revokedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent tag VC not found for agent %s", agentID)
+		}
+		return nil, fmt.Errorf("failed to get agent tag VC: %w", err)
+	}
+
+	if signature.Valid {
+		record.Signature = signature.String
+	}
+	if expiresAt.Valid {
+		record.ExpiresAt = &expiresAt.Time
+	}
+	if revokedAt.Valid {
+		record.RevokedAt = &revokedAt.Time
+	}
+
+	return record, nil
+}
+
+// ListAgentTagVCs returns all non-revoked agent tag VCs.
+func (ls *LocalStorage) ListAgentTagVCs(ctx context.Context) ([]*types.AgentTagVCRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled during list agent tag VCs: %w", err)
+	}
+
+	query := `
+		SELECT id, agent_id, agent_did, vc_id, vc_document, signature, issued_at, expires_at, revoked_at
+		FROM agent_tag_vcs WHERE revoked_at IS NULL`
+
+	rows, err := ls.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agent tag VCs: %w", err)
+	}
+	defer rows.Close()
+
+	var records []*types.AgentTagVCRecord
+	for rows.Next() {
+		record := &types.AgentTagVCRecord{}
+		var expiresAt, revokedAt sql.NullTime
+		var signature sql.NullString
+
+		if err := rows.Scan(
+			&record.ID, &record.AgentID, &record.AgentDID, &record.VCID,
+			&record.VCDocument, &signature, &record.IssuedAt, &expiresAt, &revokedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan agent tag VC: %w", err)
+		}
+
+		if signature.Valid {
+			record.Signature = signature.String
+		}
+		if expiresAt.Valid {
+			record.ExpiresAt = &expiresAt.Time
+		}
+		if revokedAt.Valid {
+			record.RevokedAt = &revokedAt.Time
+		}
+		records = append(records, record)
+	}
+
+	return records, rows.Err()
+}
+
+// RevokeAgentTagVC marks an agent's tag VC as revoked.
+func (ls *LocalStorage) RevokeAgentTagVC(ctx context.Context, agentID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during revoke agent tag VC: %w", err)
+	}
+
+	query := `UPDATE agent_tag_vcs SET revoked_at = ?, updated_at = ? WHERE agent_id = ? AND revoked_at IS NULL`
+
+	now := time.Now()
+	result, err := ls.db.ExecContext(ctx, query, now, now, agentID)
+	if err != nil {
+		return fmt.Errorf("failed to revoke agent tag VC: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no active agent tag VC found for agent %s", agentID)
+	}
+
+	return nil
 }

@@ -12,11 +12,27 @@ from typing import Any, Dict, Optional, List
 import time
 
 
+class ExecuteError(Exception):
+    """Error from a failed execution HTTP request with structured error details preserved."""
+
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        error_details: Optional[Dict[str, Any]] = None,
+    ):
+        self.status_code = status_code
+        self.status = status_code  # Compat with existing getattr(e, "status") checks
+        self.error_details = error_details
+        super().__init__(message)
+
+
 class ExecutionStatus(Enum):
     """Enumeration of possible execution statuses."""
 
     PENDING = "pending"
     QUEUED = "queued"
+    WAITING = "waiting"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -184,6 +200,7 @@ class ExecutionState:
         return self.status in {
             ExecutionStatus.PENDING,
             ExecutionStatus.QUEUED,
+            ExecutionStatus.WAITING,
             ExecutionStatus.RUNNING,
         }
 
@@ -230,7 +247,7 @@ class ExecutionState:
         # Update metrics based on status change
         current_time = time.time()
 
-        if old_status == ExecutionStatus.QUEUED and status == ExecutionStatus.RUNNING:
+        if old_status in {ExecutionStatus.PENDING, ExecutionStatus.QUEUED, ExecutionStatus.WAITING} and status == ExecutionStatus.RUNNING:
             self.metrics.start_time = current_time
         elif status in {
             ExecutionStatus.SUCCEEDED,

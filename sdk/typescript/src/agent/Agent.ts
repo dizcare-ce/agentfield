@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import type http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import axios, { AxiosInstance } from 'axios';
@@ -37,6 +38,7 @@ import type { DiscoveryOptions } from '../types/agent.js';
 import type { MCPToolRegistration } from '../types/mcp.js';
 import { MCPClientRegistry } from '../mcp/MCPClientRegistry.js';
 import { MCPToolRegistrar } from '../mcp/MCPToolRegistrar.js';
+import { LocalVerifier } from '../verification/LocalVerifier.js';
 
 class TargetNotFoundError extends Error {}
 
@@ -56,6 +58,8 @@ export class Agent {
   private readonly memoryWatchers: Array<{ pattern: string; handler: MemoryWatchHandler; scope?: string; scopeId?: string }> = [];
   private readonly mcpClientRegistry?: MCPClientRegistry;
   private readonly mcpToolRegistrar?: MCPToolRegistrar;
+  private readonly localVerifier?: LocalVerifier;
+  private readonly realtimeValidationFunctions = new Set<string>();
 
   constructor(config: AgentConfig) {
     const mcp = config.mcp
@@ -96,6 +100,16 @@ export class Agent {
       this.mcpToolRegistrar.registerServers(this.config.mcp.servers);
     }
 
+    // Initialize local verifier for decentralized verification
+    if (this.config.localVerification && this.config.agentFieldUrl) {
+      this.localVerifier = new LocalVerifier(
+        this.config.agentFieldUrl,
+        this.config.verificationRefreshInterval ?? 300,
+        300,
+        this.config.apiKey,
+      );
+    }
+
     this.registerDefaultRoutes();
   }
 
@@ -105,6 +119,9 @@ export class Agent {
     options?: ReasonerOptions
   ) {
     this.reasoners.register(name, handler, options);
+    if (options?.requireRealtimeValidation) {
+      this.realtimeValidationFunctions.add(name);
+    }
     return this;
   }
 
@@ -114,6 +131,9 @@ export class Agent {
     options?: SkillOptions
   ) {
     this.skills.register(name, handler, options);
+    if (options?.requireRealtimeValidation) {
+      this.realtimeValidationFunctions.add(name);
+    }
     return this;
   }
 
@@ -247,6 +267,19 @@ export class Agent {
     }
 
     await this.registerWithControlPlane();
+
+    // Perform a blocking initial refresh for local verification before accepting requests
+    if (this.localVerifier) {
+      try {
+        const ok = await this.localVerifier.refresh();
+        if (!ok) {
+          console.warn('[LocalVerifier] Initial refresh partially failed — some verification data may be stale');
+        }
+      } catch (err) {
+        console.warn('[LocalVerifier] Initial refresh failed:', err);
+      }
+    }
+
     const port = this.config.port ?? 8001;
     const host = this.config.host ?? '0.0.0.0';
     // First heartbeat marks the node as starting; subsequent interval sets ready.
@@ -411,6 +444,149 @@ export class Agent {
       res.json(this.skills.all().map((s) => s.name));
     });
 
+    // Local verification middleware for execution endpoints
+    if (this.localVerifier) {
+      const verifier = this.localVerifier;
+      const realtimeFunctions = this.realtimeValidationFunctions;
+
+      // Rate limiter for auth endpoints: max 30 attempts per identity per 60s window.
+      // Uses X-Caller-DID when present so agents behind shared NAT/gateway don't
+      // exhaust each other's quota. Falls back to IP when no DID is claimed.
+      const authRateLimiter = rateLimit({
+        windowMs: 60_000,
+        max: 30,
+        standardHeaders: true,
+        legacyHeaders: false,
+        keyGenerator: (req) => {
+          const callerDID = req.headers['x-caller-did'];
+          if (typeof callerDID === 'string' && callerDID.length > 0) {
+            return callerDID;
+          }
+          return req.ip ?? 'unknown';
+        },
+        message: { error: 'rate_limit_exceeded', message: 'Too many authentication attempts. Try again later.' },
+        skip: (req) => {
+          const path = req.path;
+          if (!path.startsWith('/reasoners/') && !path.startsWith('/skills/') &&
+              !path.startsWith('/execute') && !path.startsWith('/api/v1/reasoners/') &&
+              !path.startsWith('/api/v1/skills/')) {
+            return true;
+          }
+          const parts = path.replace(/^\/+/, '').split('/');
+          const funcName = parts[parts.length - 1] ?? '';
+          return realtimeFunctions.has(funcName);
+        },
+      });
+      this.app.use(authRateLimiter);
+
+      this.app.use(async (req, res, next) => {
+        const path = req.path;
+
+        // Only verify execution endpoints
+        if (!path.startsWith('/reasoners/') && !path.startsWith('/skills/') &&
+            !path.startsWith('/execute') && !path.startsWith('/api/v1/reasoners/') &&
+            !path.startsWith('/api/v1/skills/')) {
+          return next();
+        }
+
+        // Extract function name
+        const parts = path.replace(/^\/+/, '').split('/');
+        const funcName = parts[parts.length - 1] ?? '';
+
+        // Skip for realtime-validated functions
+        if (realtimeFunctions.has(funcName)) {
+          return next();
+        }
+
+        // Refresh cache if stale
+        if (verifier.needsRefresh) {
+          try {
+            await verifier.refresh();
+          } catch (err) {
+            console.warn('[LocalVerifier] Cache refresh failed:', err);
+          }
+        }
+
+        // Extract DID auth headers
+        const callerDid = req.headers['x-caller-did'] as string | undefined;
+        const signature = req.headers['x-did-signature'] as string | undefined;
+        const timestamp = req.headers['x-did-timestamp'] as string | undefined;
+        const nonce = req.headers['x-did-nonce'] as string | undefined;
+
+        // C4: Require DID authentication — fail closed when callerDid is missing
+        if (!callerDid) {
+          return res.status(401).json({
+            error: 'did_auth_required',
+            message: 'DID authentication required',
+          });
+        }
+
+        // Check revocation
+        if (verifier.checkRevocation(callerDid)) {
+          return res.status(403).json({
+            error: 'did_revoked',
+            message: `Caller DID ${callerDid} has been revoked`,
+          });
+        }
+
+        // Check registration — reject DIDs not registered with the control plane
+        if (!verifier.checkRegistration(callerDid)) {
+          return res.status(403).json({
+            error: 'did_not_registered',
+            message: `Caller DID ${callerDid} is not registered with the control plane`,
+          });
+        }
+
+        // C5: Require signature when callerDid is present
+        if (!signature) {
+          return res.status(401).json({
+            error: 'signature_required',
+            message: 'DID signature required',
+          });
+        }
+
+        // Verify signature
+        if (timestamp) {
+          const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+          const valid = await verifier.verifySignature(callerDid, signature, timestamp, body, nonce);
+          if (!valid) {
+            return res.status(401).json({
+              error: 'signature_invalid',
+              message: 'DID signature verification failed',
+            });
+          }
+        } else {
+          // Timestamp is required for signature verification
+          return res.status(401).json({
+            error: 'signature_invalid',
+            message: 'DID signature verification failed: missing timestamp',
+          });
+        }
+
+        // C6: Evaluate access policy after successful signature verification
+        // Caller tags cannot be resolved at agent-side middleware level (would require
+        // a control plane lookup). Pass empty array — policies that require specific
+        // caller tags will not match, which is correct fail-open behavior for
+        // agent-side verification. The control plane remains the primary policy
+        // enforcement point with full caller context.
+        const agentTags = this.config.tags ?? [];
+        const allowed = verifier.evaluatePolicy(
+          [],        // caller tags (not resolvable without control plane)
+          agentTags, // target tags (this agent's own tags)
+          funcName,
+          typeof req.body === 'object' && req.body !== null ? req.body : {},
+        );
+        if (!allowed) {
+          return res.status(403).json({
+            error: 'policy_denied',
+            message: 'Access denied by policy',
+          });
+        }
+
+        next();
+      });
+    }
+
     this.app.post('/api/v1/reasoners/*', (req, res) => this.executeReasoner(req, res, (req.params as any)[0]));
     this.app.post('/reasoners/:name', (req, res) => this.executeReasoner(req, res, req.params.name));
 
@@ -437,7 +613,11 @@ export class Agent {
       if (err instanceof TargetNotFoundError) {
         res.status(404).json({ error: err.message });
       } else {
-        res.status(500).json({ error: err?.message ?? 'Execution failed' });
+        const body: Record<string, any> = { error: err?.message ?? 'Execution failed' };
+        if (err?.responseData) body.error_details = err.responseData;
+        // Propagate upstream HTTP status (e.g. 403 from permission middleware)
+        const statusCode = (err?.status >= 400) ? err.status : 500;
+        res.status(statusCode).json(body);
       }
     }
   }
@@ -457,7 +637,11 @@ export class Agent {
       if (err instanceof TargetNotFoundError) {
         res.status(404).json({ error: err.message });
       } else {
-        res.status(500).json({ error: err?.message ?? 'Execution failed' });
+        const body: Record<string, any> = { error: err?.message ?? 'Execution failed' };
+        if (err?.responseData) body.error_details = err.responseData;
+        // Propagate upstream HTTP status (e.g. 403 from permission middleware)
+        const statusCode = (err?.status >= 400) ? err.status : 500;
+        res.status(statusCode).json(body);
       }
     }
   }
@@ -497,7 +681,11 @@ export class Agent {
       if (err instanceof TargetNotFoundError) {
         res.status(404).json({ error: err.message });
       } else {
-        res.status(500).json({ error: err?.message ?? 'Execution failed' });
+        const body: Record<string, any> = { error: err?.message ?? 'Execution failed' };
+        if (err?.responseData) body.error_details = err.responseData;
+        // Propagate upstream HTTP status (e.g. 403 from permission middleware)
+        const statusCode = (err?.status >= 400) ? err.status : 500;
+        res.status(statusCode).json(body);
       }
     }
   }
@@ -741,25 +929,33 @@ export class Agent {
   }
 
   private reasonerDefinitions() {
-    return this.reasoners.all().map((r) => ({
-      id: r.name,
-      input_schema: toJsonSchema(r.options?.inputSchema),
-      output_schema: toJsonSchema(r.options?.outputSchema),
-      memory_config: r.options?.memoryConfig ?? {
-        auto_inject: [] as string[],
-        memory_retention: '',
-        cache_results: false
-      },
-      tags: r.options?.tags ?? []
-    }));
+    return this.reasoners.all().map((r) => {
+      const tags = r.options?.tags ?? [];
+      return {
+        id: r.name,
+        input_schema: toJsonSchema(r.options?.inputSchema),
+        output_schema: toJsonSchema(r.options?.outputSchema),
+        memory_config: r.options?.memoryConfig ?? {
+          auto_inject: [] as string[],
+          memory_retention: '',
+          cache_results: false
+        },
+        tags,
+        proposed_tags: tags
+      };
+    });
   }
 
   private skillDefinitions() {
-    return this.skills.all().map((s) => ({
-      id: s.name,
-      input_schema: toJsonSchema(s.options?.inputSchema),
-      tags: s.options?.tags ?? []
-    }));
+    return this.skills.all().map((s) => {
+      const tags = s.options?.tags ?? [];
+      return {
+        id: s.name,
+        input_schema: toJsonSchema(s.options?.inputSchema),
+        tags,
+        proposed_tags: tags
+      };
+    });
   }
 
   private discoveryPayload(deploymentType: DeploymentType) {
@@ -855,7 +1051,12 @@ export class Agent {
         return result;
       } catch (err: any) {
         if (params.respond && params.res) {
-          params.res.status(500).json({ error: err?.message ?? 'Execution failed' });
+          const body: Record<string, any> = { error: err?.message ?? 'Execution failed' };
+          if (err?.responseData) body.error_details = err.responseData;
+          const statusCode = (err?.status >= 400)
+            ? err.status
+            : ((err?.statusCode >= 400) ? err.statusCode : 500);
+          params.res.status(statusCode).json(body);
           return;
         }
         throw err;
@@ -907,7 +1108,12 @@ export class Agent {
         return result;
       } catch (err: any) {
         if (params.respond && params.res) {
-          params.res.status(500).json({ error: err?.message ?? 'Execution failed' });
+          const body: Record<string, any> = { error: err?.message ?? 'Execution failed' };
+          if (err?.responseData) body.error_details = err.responseData;
+          const statusCode = (err?.status >= 400)
+            ? err.status
+            : ((err?.statusCode >= 400) ? err.statusCode : 500);
+          params.res.status(statusCode).json(body);
           return;
         }
         throw err;
@@ -927,15 +1133,26 @@ export class Agent {
       const publicUrl =
         this.config.publicUrl ?? `http://${hostForUrl ?? '127.0.0.1'}:${port}`;
 
-      await this.agentFieldClient.register({
+      const agentTags = this.config.tags ?? [];
+      const regResponse = await this.agentFieldClient.register({
         id: this.config.nodeId,
-        version: this.config.version,
+        version: this.config.version ?? '',
         base_url: publicUrl,
         public_url: publicUrl,
         deployment_type: this.config.deploymentType ?? 'long_running',
         reasoners,
-        skills
+        skills,
+        proposed_tags: agentTags,
+        tags: agentTags
       });
+
+      // Handle pending approval state: poll until approved
+      if (regResponse?.status === 'pending_approval') {
+        const pendingTags = regResponse.pending_tags ?? [];
+        console.log(`[AgentField] Node ${this.config.nodeId} registered but awaiting tag approval (pending tags: ${pendingTags.join(', ')})`);
+        await this.waitForApproval();
+        console.log(`[AgentField] Node ${this.config.nodeId} tag approval granted`);
+      }
 
       // Register with DID system if enabled
       if (this.config.didEnabled) {
@@ -945,6 +1162,12 @@ export class Agent {
             const summary = this.didManager.getIdentitySummary();
             console.log(`[DID] Agent registered with DID: ${summary.agentDid}`);
             console.log(`[DID] Reasoner DIDs: ${summary.reasonerCount}, Skill DIDs: ${summary.skillCount}`);
+
+            // Wire DID credentials to the HTTP client for request signing
+            const pkg = this.didManager.getIdentityPackage();
+            if (pkg?.agentDid?.did && pkg?.agentDid?.privateKeyJwk) {
+              this.agentFieldClient.setDIDCredentials(pkg.agentDid.did, pkg.agentDid.privateKeyJwk);
+            }
           }
         } catch (didErr) {
           if (!this.config.devMode) {
@@ -959,6 +1182,30 @@ export class Agent {
       }
       console.warn('Control plane registration failed (devMode=true), continuing locally', err);
     }
+  }
+
+  private async waitForApproval(): Promise<void> {
+    const pollInterval = 5000; // 5 seconds
+    const timeoutMs = 5 * 60 * 1000; // 5 minutes
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      try {
+        const node = await this.agentFieldClient.getNode(this.config.nodeId);
+        const status = node?.lifecycle_status;
+        if (status && status !== 'pending_approval') {
+          return;
+        }
+        console.log(`[AgentField] Node ${this.config.nodeId} still pending approval...`);
+      } catch (err) {
+        console.warn('[AgentField] Polling for approval status failed:', err);
+      }
+    }
+
+    throw new Error(
+      `[AgentField] Node ${this.config.nodeId} approval timed out after ${timeoutMs / 1000}s`
+    );
   }
 
   private startHeartbeat() {

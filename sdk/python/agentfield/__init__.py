@@ -38,6 +38,14 @@ from .media_providers import (
     get_provider,
     register_provider,
 )
+from .did_auth import (
+    DIDAuthenticator,
+    create_did_auth_headers,
+    sign_request,
+    HEADER_CALLER_DID,
+    HEADER_DID_SIGNATURE,
+    HEADER_DID_TIMESTAMP,
+)
 from .exceptions import (
     AgentFieldError,
     AgentFieldClientError,
@@ -46,6 +54,7 @@ from .exceptions import (
     RegistrationError,
     ValidationError,
 )
+from .client import ApprovalRequestResponse, ApprovalResult, ApprovalStatusResponse
 
 __all__ = [
     "Agent",
@@ -84,6 +93,17 @@ __all__ = [
     "OpenRouterProvider",
     "get_provider",
     "register_provider",
+    # DID authentication
+    "DIDAuthenticator",
+    "create_did_auth_headers",
+    "sign_request",
+    "HEADER_CALLER_DID",
+    "HEADER_DID_SIGNATURE",
+    "HEADER_DID_TIMESTAMP",
+    # Approval response types
+    "ApprovalRequestResponse",
+    "ApprovalResult",
+    "ApprovalStatusResponse",
     # Exceptions
     "AgentFieldError",
     "AgentFieldClientError",
@@ -93,4 +113,4 @@ __all__ = [
     "ValidationError",
 ]
 
-__version__ = "0.1.42"
+__version__ = "0.1.44-rc.2"

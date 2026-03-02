@@ -1290,7 +1290,7 @@ func TestIntegration_NoFlapping_HeartbeatsDuringTransientFailures(t *testing.T) 
 
 	// Register with health monitor and presence
 	hm.RegisterAgent(nodeID, "http://localhost:9999")
-	presenceManager.Touch(nodeID, time.Now())
+	presenceManager.Touch(nodeID, "", time.Now())
 
 	// --- Start all 3 services concurrently (like production) ---
 	go hm.Start()
@@ -1323,8 +1323,8 @@ func TestIntegration_NoFlapping_HeartbeatsDuringTransientFailures(t *testing.T) 
 		for i := 0; i < 30; i++ { // 30 heartbeats over ~3 seconds
 			<-ticker.C
 			readyStatus := types.AgentStatusReady
-			_ = statusManager.UpdateFromHeartbeat(ctx, nodeID, &readyStatus, nil)
-			presenceManager.Touch(nodeID, time.Now())
+			_ = statusManager.UpdateFromHeartbeat(ctx, nodeID, &readyStatus, nil, "")
+			presenceManager.Touch(nodeID, "", time.Now())
 
 			// Record current state
 			snap, err := statusManager.GetAgentStatusSnapshot(ctx, nodeID, nil)
@@ -1443,7 +1443,7 @@ func TestIntegration_ProperInactiveWhenHeartbeatsStop(t *testing.T) {
 
 	mockClient.setStatusResponse(nodeID, "running")
 	hm.RegisterAgent(nodeID, "http://localhost:9998")
-	presenceManager.Touch(nodeID, time.Now())
+	presenceManager.Touch(nodeID, "", time.Now())
 
 	// Start all services
 	go hm.Start()
@@ -1526,7 +1526,7 @@ func TestIntegration_RecoveryAfterGenuineOutage(t *testing.T) {
 
 	mockClient.setStatusResponse(nodeID, "running")
 	hm.RegisterAgent(nodeID, "http://localhost:9997")
-	presenceManager.Touch(nodeID, time.Now())
+	presenceManager.Touch(nodeID, "", time.Now())
 
 	// Start all services
 	go hm.Start()
@@ -1555,11 +1555,11 @@ func TestIntegration_RecoveryAfterGenuineOutage(t *testing.T) {
 
 	// Re-register with health monitor (agent would re-register on reconnect)
 	hm.RegisterAgent(nodeID, "http://localhost:9997")
-	presenceManager.Touch(nodeID, time.Now())
+	presenceManager.Touch(nodeID, "", time.Now())
 
 	// Send a heartbeat to signal recovery
 	readyStatus := types.AgentStatusReady
-	err = statusManager.UpdateFromHeartbeat(ctx, nodeID, &readyStatus, nil)
+	err = statusManager.UpdateFromHeartbeat(ctx, nodeID, &readyStatus, nil, "")
 	require.NoError(t, err)
 
 	// Wait for health check cycle + debounce

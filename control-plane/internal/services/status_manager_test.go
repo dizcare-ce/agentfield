@@ -522,7 +522,7 @@ func TestStatusManager_UpdateFromHeartbeat_NeverDropped(t *testing.T) {
 	// Now send a heartbeat IMMEDIATELY (within what used to be the 10s drop window).
 	// Previously this heartbeat would be silently ignored. Now it MUST be processed.
 	readyStatus := types.AgentStatusReady
-	err = sm.UpdateFromHeartbeat(ctx, "node-heartbeat-priority", &readyStatus, nil)
+	err = sm.UpdateFromHeartbeat(ctx, "node-heartbeat-priority", &readyStatus, nil, "")
 	require.NoError(t, err, "Heartbeat should never be dropped")
 
 	// Verify the heartbeat was processed — agent should no longer be inactive
@@ -569,4 +569,24 @@ func TestStatusManager_Reconciliation_UsesConfiguredThreshold(t *testing.T) {
 	}
 	assert.False(t, sm.needsReconciliation(inactiveAgent),
 		"Already inactive agent should not need reconciliation")
+
+	// Agent stuck in "starting" with stale heartbeat beyond MaxTransitionTime — SHOULD need reconciliation
+	stuckStartingAgent := &types.AgentNode{
+		ID:              "node-stuck-starting",
+		HealthStatus:    types.HealthStatusUnknown,
+		LifecycleStatus: types.AgentStatusStarting,
+		LastHeartbeat:   time.Now().Add(-3 * time.Minute),
+	}
+	assert.True(t, sm.needsReconciliation(stuckStartingAgent),
+		"Agent stuck in 'starting' beyond MaxTransitionTime should need reconciliation")
+
+	// Agent in "starting" with recent heartbeat — should NOT need reconciliation (still initializing)
+	freshStartingAgent := &types.AgentNode{
+		ID:              "node-fresh-starting",
+		HealthStatus:    types.HealthStatusUnknown,
+		LifecycleStatus: types.AgentStatusStarting,
+		LastHeartbeat:   time.Now().Add(-30 * time.Second),
+	}
+	assert.False(t, sm.needsReconciliation(freshStartingAgent),
+		"Agent in 'starting' with recent heartbeat should not need reconciliation yet")
 }

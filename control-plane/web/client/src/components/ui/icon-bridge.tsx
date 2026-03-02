@@ -5,6 +5,7 @@ import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowC
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUpRight";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
@@ -133,6 +134,7 @@ export const ArrowLeft = ArrowLeftIcon;
 export const ArrowDown = ArrowDownIcon;
 export const ArrowUp = ArrowUpIcon;
 export const ArrowUpDown = ArrowsDownUpIcon;
+export const ArrowRight = ArrowRightIcon;
 export const ArrowUpRight = ArrowUpRightIcon;
 export const ArrowCounterClockwise = ArrowCounterClockwiseIcon;
 export const ArrowSquareOut = ArrowSquareOutIcon;
