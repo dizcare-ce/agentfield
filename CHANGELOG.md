@@ -6,6 +6,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [Unreleased] - feat/connector
+
+### Added
+
+- **Multi-Versioning**: Deploy multiple versions of the same agent with weighted traffic routing. Agents are now stored with composite primary key `(id, version)`, enabling canary deployments, A/B testing, and blue-green rollouts. Includes `group_id` for logical grouping, `traffic_weight` (0–10000) per version, weighted round-robin selection, and `X-Routed-Version` response header. New storage methods: `GetAgentVersion`, `ListAgentVersions`, `ListAgentGroups`, `ListAgentsByGroup`, `UpdateAgentTrafficWeight`, `DeleteAgentVersion`. (9db17be, 9ae4e62, 3d6a50b)
+
+- **VC-Based Authorization System**: Complete Verifiable Credential authorization with W3C DID identity, Ed25519 request signing, tag-based access policies, and admin approval workflows. Agents get `did:web` identities with keypairs derived from master seed. Request signing uses 4 headers (`X-Caller-DID`, `X-DID-Signature`, `X-DID-Timestamp`, `X-DID-Nonce`). Includes DID auth middleware, permission check middleware with auto-request-on-deny, admin API for approve/reject/revoke, and comprehensive integration test suite (1754+ lines). (0cde0b1, 0106624)
+
+- **Connector Subsystem**: External management API with token-based authentication and capability-based access control. Provides `/connector/*` REST endpoints for managing reasoners, versions, traffic weights, and agent groups. Supports scoped capabilities (`reasoners:read`, `versions:write`, `restart`, etc.) for CI/CD and orchestration platform integration. (3d6a50b, 9ae4e62)
+
+- **Authorization Admin UI**: Unified tabbed authorization page with Access Rules tab (ALLOW/DENY policies with color-coded borders), Agent Tags tab (manage and approve agent tags), approval dialogs with policy impact preview, and revocation support. (4ac437f)
+
+- **Agent-to-Agent Direct Verification**: SDK `LocalVerifier` modules that cache policies, revocation lists, registered DIDs, and admin public key from the control plane. Enables offline signature verification without round-tripping. Added `/api/v1/registered-dids` endpoint. Supports nonce-based signatures and `did:key` public key resolution. (d89eb23)
+
+- **SDK DID Auth Modules**:
+  - Go: `client/did_auth.go` (authenticator), `did/did_client.go` (DID client), `did/did_manager.go` (key manager), `did/vc_generator.go` (VC generation), `agent/verification.go` (LocalVerifier)
+  - Python: `did_auth.py` (Ed25519 signing), `verification.py` (LocalVerifier with async refresh)
+  - TypeScript: Expanded `LocalVerifier.ts` (registered DID caching, nonce-aware verification)
+
+- **SDK Version Propagation**: All three SDKs (Go, Python, TypeScript) now include `version` in heartbeat and shutdown payloads for multi-versioning support.
+
+- **Multi-Version Examples**: New examples for all three SDKs demonstrating versioned agent registration (`examples/ts-node-examples/multi-version/`, `examples/go_agent_nodes/cmd/multi_version/`, `examples/python_agent_nodes/multi_version/`)
+
+- **Permission Test Examples**: Caller + protected target examples for all three SDKs (`examples/python_agent_nodes/permission_agent_a/`, `examples/go_agent_nodes/cmd/permission_caller/`, etc.)
+
+- **Rate Limiting**: Added `express-rate-limit` to DID auth middleware on execution endpoints for TypeScript SDK. (6ffe576, 5cdfdf8)
+
+- **`ExecuteError` Type**: All three SDKs now surface execution errors with status code and `error_details` propagation. (c5e5556)
+
+### Fixed
+
+- **Agent health status flapping** (#169): Three independent health systems (HealthMonitor, StatusManager, PresenceManager) fought each other. Now requires 3 consecutive failures before marking inactive, reduced heartbeat DB cache from 8s to 2s. (e74ed99)
+
+- **Memory websocket blocking startup** (#165): websockets v14+ renamed `additional_headers` to `extra_headers`, and blocking reconnect prevented uvicorn from starting. Added 5s timeout and backgrounded reconnect. (4a63bec)
+
+- **Python SDK hardcoded version** (#166): Registration payload hardcoded version to "1.0.0" and omitted agent metadata. Now passes actual values. (35d2685)
+
+- **Async execution polling missing auth headers** (#180): `_poll_single_execution` and `_batch_poll_executions` did not include auth headers, causing 401 errors. (26692de)
+
+- **Re-approval deadlock**: Re-approval only triggered for empty status, not revoked/rejected. Also fixed empty `caller_agent_id` and error propagation (200 → 502 for agent-to-agent failures). (c5e5556)
+
+- **Permissions/versioning flow**: Removed `DenyAnonymous` (broke backward compat), preserved approved tags during re-registration, cleaned stale empty-version DB rows. (f9d9dcf)
+
+- **UI workflow delete 404** (#174): Cleanup route was not registered. (ee47f56)
+
+- **Workflow cleanup orphaned summaries** (#177): Deletion left behind orphaned run summaries. (ab2ce92)
+
+- **Missing DeleteAgentVersion stub**: CI failure from missing interface method and postgres migration on fresh DBs. (4f7fe7a)
+
+- **Reasoner name mismatch**: Python SDK used `func_name` instead of `reasoner_id` for endpoint path. (f427b9b)
+
+- **Reasoner path normalization**: Added execution status guards for `waiting` state, approval expiration, execution event streaming. (f7a4a4d)
+
+- **Duplicate `countWorkflowRuns`**: Removed duplicate method from rebase. (27455d7)
+
+- **Pydantic formatting**: Fixed AI response formatting in Python SDK. (6a09ce0)
+
+### Changed
+
+- Database schema uses composite primary key `(id, version)` for agent nodes (migration 015)
+- `AgentNode` type includes new fields: `GroupID`, `TrafficWeight`
+- `StorageProvider` interface expanded with version-aware methods
+- Discovery response includes `GroupID` in `AgentCapability`
+
 ## [0.1.42-rc.3] - 2026-02-24
 
 
