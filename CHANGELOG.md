@@ -70,6 +70,135 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `StorageProvider` interface expanded with version-aware methods
 - Discovery response includes `GroupID` in `AgentCapability`
 
+## [0.1.42] - 2026-02-27
+
+
+### Fixed
+
+- Fix(release): add [skip ci] to version bump commit to prevent infinite loop (#194)
+
+The release workflow pushes a version bump commit to main, which
+triggers another release workflow run, creating an infinite loop.
+Adding [skip ci] to the commit message prevents the pushed commit
+from triggering any workflows.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ff0a88f)
+
+## [0.1.42-rc.18] - 2026-02-27
+
+## [0.1.42-rc.17] - 2026-02-27
+
+## [0.1.42-rc.16] - 2026-02-27
+
+## [0.1.42-rc.15] - 2026-02-27
+
+## [0.1.42-rc.14] - 2026-02-27
+
+## [0.1.42-rc.13] - 2026-02-27
+
+## [0.1.42-rc.12] - 2026-02-27
+
+## [0.1.42-rc.11] - 2026-02-27
+
+## [0.1.42-rc.10] - 2026-02-27
+
+## [0.1.42-rc.9] - 2026-02-27
+
+## [0.1.42-rc.8] - 2026-02-27
+
+## [0.1.42-rc.7] - 2026-02-27
+
+## [0.1.42-rc.6] - 2026-02-27
+
+## [0.1.42-rc.5] - 2026-02-27
+
+
+### Chores
+
+- Chore: remove redundant CLA assistant workflow (#192)
+
+The contributor-assistant/github-action workflow requires a PAT to
+store signatures in the remote .github repo, which is not configured.
+The hosted cla-assistant.io integration (license/cla) is already
+active and working, making this workflow redundant.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (aedd982)
+
+- Chore: add CLA assistant workflow (abd1d79)
+
+- Chore: add CODEOWNERS with AbirAbbas as default reviewer (0ea7a8c)
+
+
+
+### Fixed
+
+- Fix(release): use deploy key to bypass branch protection on push (#193)
+
+The release workflow pushes version bump commits directly to main,
+which is blocked by the new branch ruleset requiring PRs. Use a
+deploy key (which is in the ruleset bypass list) instead of the
+default GITHUB_TOKEN.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (11d0889)
+
+
+
+### Other
+
+- Set up vitest testing infrastructure, with sample test cases for status badge component (#191)
+
+* Set up vitest testing infrastructure, with sample test cases for status badge component
+
+* Reversed IDE formatting from computer to prevent large diff in changelog.md
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (0c5147f)
+
+## [Unreleased]
+
+### Testing
+
+- Test(web-ui): set up vitest testing infrastructure (#103)
+
+Add unit testing infrastructure to the Web UI (`control-plane/web/client/`),
+which previously had zero test coverage.
+
+- Install vitest, @testing-library/react, @testing-library/jest-dom,
+  @testing-library/user-event, @vitest/coverage-v8, and jsdom as devDependencies
+- Add `vitest.config.ts` with jsdom environment, `@` path alias, and v8 coverage provider
+- Add `src/test/setup.ts` to extend vitest with jest-dom matchers
+- Add `src/test/components/status/StatusBadge.test.tsx` with comprehensive tests:
+    - All `AgentState`, `HealthStatus`, and `LifecycleStatus` values via `it.each`
+    - Priority ordering between `state`, `healthStatus`, and `lifecycleStatus` props
+    - `showIcon` behaviour and `size` prop smoke tests
+    - `status` prop (AgentStatus object): `status.state`, `showHealthScore` percentage
+      display, `state_transition` arrow label, and `animate-pulse` during transitions
+    - Dedicated `AgentStateBadge`, `HealthStatusBadge`, `LifecycleStatusBadge` exports
+    - `getHealthScoreColor` utility — boundary tests across all four score tiers
+    - `getHealthScoreBadgeVariant` utility — returns correct badge variant per tier
+- Add `test`, `test:watch`, and `test:coverage` scripts to package.json
+- Wire `npm run test` into `scripts/test-all.sh` alongside the existing lint step
+
+## [0.1.42-rc.4] - 2026-02-27
+
+
+### Chores
+
+- Chore(web-ui): remove dead filter components (#190)
+
+Remove 9 unused files that are not imported anywhere in the app.
+The Executions page uses PageHeader with FilterSelect dropdowns,
+not these legacy toggle-button filter components.
+
+Removed files:
+- ExecutionFilters.tsx, ExecutionsList.tsx, QuickFilters.tsx
+- SearchWithFilters.tsx, SuggestedFilters.tsx, FilterTag.tsx
+- hooks/useFilterState.ts, utils/filterUtils.ts, types/filters.ts
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (ef8efe8)
+
 ## [0.1.42-rc.3] - 2026-02-24
 
 
