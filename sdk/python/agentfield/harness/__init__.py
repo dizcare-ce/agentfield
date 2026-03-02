@@ -1,4 +1,5 @@
 from agentfield.harness._result import HarnessResult, Metrics, RawResult
+from agentfield.harness._cli import extract_final_text, parse_jsonl, run_cli
 from agentfield.harness._runner import HarnessRunner
 from agentfield.harness._schema import (
     LARGE_SCHEMA_TOKEN_THRESHOLD,
@@ -28,6 +29,9 @@ __all__ = [
     "HarnessProvider",
     "HarnessRunner",
     "build_provider",
+    "run_cli",
+    "parse_jsonl",
+    "extract_final_text",
     "OUTPUT_FILENAME",
     "SCHEMA_FILENAME",
     "LARGE_SCHEMA_TOKEN_THRESHOLD",

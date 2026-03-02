@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+
 import pytest
 from pydantic import ValidationError
 
@@ -39,11 +41,12 @@ def test_build_provider_raises_for_unknown_provider():
         build_provider(cfg)
 
 
-def test_build_provider_raises_not_implemented_for_supported_provider():
-    cfg = HarnessConfig(provider="claude-code")
+def test_build_provider_returns_claude_provider_for_claude_code():
+    from agentfield.harness.providers.claude import ClaudeCodeProvider
 
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
-        build_provider(cfg)
+    cfg = HarnessConfig(provider="claude-code")
+    provider = build_provider(cfg)
+    assert isinstance(provider, ClaudeCodeProvider)
 
 
 def test_harness_result_defaults_and_text_property():

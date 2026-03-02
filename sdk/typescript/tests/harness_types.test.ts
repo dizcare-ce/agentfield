@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { buildProvider } from '../src/harness/providers/factory.js';
+import { CodexProvider } from '../src/harness/providers/codex.js';
 import {
   createHarnessResult,
   createMetrics,
@@ -62,9 +63,10 @@ describe('harness types', () => {
     expect(() => buildProvider(badConfig)).toThrow(/Unknown harness provider/);
   });
 
-  it('buildProvider throws for known but unimplemented provider', () => {
+  it('buildProvider returns codex provider', () => {
     const config: HarnessConfig = { provider: 'codex' };
 
-    expect(() => buildProvider(config)).toThrow(/not yet implemented/);
+    const provider = buildProvider(config);
+    expect(provider).toBeInstanceOf(CodexProvider);
   });
 });
