@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from typing import List
 
 import pytest
 from pydantic import BaseModel
@@ -51,7 +52,7 @@ class CodeReviewResponse(BaseModel):
 
     summary: str
     score: int
-    suggestions: list[str]
+    suggestions: List[str]
 
 
 # ────────────────────────────────────────────────────────────────────────
