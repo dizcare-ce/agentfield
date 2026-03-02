@@ -18,3 +18,4 @@ export {
 } from './schema.js';
 export type { HarnessProvider } from './providers/base.js';
 export { buildProvider, SUPPORTED_PROVIDERS } from './providers/factory.js';
+export { HarnessRunner } from './runner.js';

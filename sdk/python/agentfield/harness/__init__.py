@@ -1,4 +1,5 @@
 from agentfield.harness._result import HarnessResult, Metrics, RawResult
+from agentfield.harness._runner import HarnessRunner
 from agentfield.harness._schema import (
     LARGE_SCHEMA_TOKEN_THRESHOLD,
     OUTPUT_FILENAME,
@@ -25,6 +26,7 @@ __all__ = [
     "RawResult",
     "Metrics",
     "HarnessProvider",
+    "HarnessRunner",
     "build_provider",
     "OUTPUT_FILENAME",
     "SCHEMA_FILENAME",

@@ -22,11 +22,18 @@ export interface HarnessOptions {
   model?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  maxRetries?: number;
+  initialDelay?: number;
+  maxDelay?: number;
+  backoffFactor?: number;
   tools?: string[];
   permissionMode?: string;
   systemPrompt?: string;
   env?: Record<string, string>;
   cwd?: string;
+  codexBin?: string;
+  geminiBin?: string;
+  opencodeBin?: string;
   schema?: unknown;
 }
 
