@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,11 +11,33 @@ import (
 	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
+	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type reasonerTestStorage struct {
+	storage.StorageProvider
+	agent      *types.AgentNode
+	executions []*types.WorkflowExecution
+}
+
+func (s *reasonerTestStorage) GetAgent(ctx context.Context, id string) (*types.AgentNode, error) {
+	if s.agent != nil && s.agent.ID == id {
+		return s.agent, nil
+	}
+	return nil, nil
+}
+
+func (s *reasonerTestStorage) StoreWorkflowExecution(ctx context.Context, execution *types.WorkflowExecution) error {
+	if execution != nil {
+		copy := *execution
+		s.executions = append(s.executions, &copy)
+	}
+	return nil
+}
 
 // TestExecuteHandler_EmptyInput verifies that calling the execute endpoint with
 // an empty input object ({"input":{}}) succeeds instead of returning 400.
@@ -26,6 +49,7 @@ func TestExecuteHandler_EmptyInput(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		defer r.Body.Close()
+		require.JSONEq(t, `{}`, string(body))
 
 		// Agent receives the (empty) input and returns success
 		var payload map[string]interface{}
@@ -69,6 +93,11 @@ func TestExecuteHandler_NilInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		defer r.Body.Close()
+		require.JSONEq(t, `{}`, string(body))
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
@@ -166,4 +195,94 @@ func TestExecuteRequest_BindingStillRequiresJSON(t *testing.T) {
 	var req ExecuteRequest
 	err := c.ShouldBindJSON(&req)
 	require.Error(t, err, "invalid JSON should still be rejected")
+}
+
+func TestExecuteReasonerHandler_EmptyAndNilInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty input object", body: `{"input":{}}`},
+		{name: "nil input object", body: `{}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/reasoners/ping", r.URL.Path)
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				defer r.Body.Close()
+				require.JSONEq(t, `{}`, string(body))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer agentServer.Close()
+
+			store := &reasonerTestStorage{agent: &types.AgentNode{
+				ID:        "node-1",
+				BaseURL:   agentServer.URL,
+				Reasoners: []types.ReasonerDefinition{{ID: "ping"}},
+			}}
+
+			router := gin.New()
+			router.POST("/reasoners/:reasoner_id", ExecuteReasonerHandler(store))
+
+			req := httptest.NewRequest(http.MethodPost, "/reasoners/node-1.ping", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.NotEmpty(t, store.executions)
+			require.JSONEq(t, `{}`, string(store.executions[0].InputData))
+		})
+	}
+}
+
+func TestExecuteSkillHandler_EmptyAndNilInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty input object", body: `{"input":{}}`},
+		{name: "nil input object", body: `{}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/skills/list_items", r.URL.Path)
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				defer r.Body.Close()
+				require.JSONEq(t, `{}`, string(body))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer agentServer.Close()
+
+			store := &reasonerTestStorage{agent: &types.AgentNode{
+				ID:      "node-1",
+				BaseURL: agentServer.URL,
+				Skills:  []types.SkillDefinition{{ID: "list_items"}},
+			}}
+
+			router := gin.New()
+			router.POST("/skills/:skill_id", ExecuteSkillHandler(store))
+
+			req := httptest.NewRequest(http.MethodPost, "/skills/node-1.list_items", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.NotEmpty(t, store.executions)
+			require.JSONEq(t, `{}`, string(store.executions[0].InputData))
+		})
+	}
 }
