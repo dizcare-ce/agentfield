@@ -24,6 +24,12 @@ def build_provider(config: "HarnessConfig") -> "HarnessProvider":
         from agentfield.harness.providers.codex import CodexProvider
 
         return CodexProvider(bin_path=getattr(config, "codex_bin", "codex"))
-    raise NotImplementedError(
-        f"Provider {provider_name!r} is not yet implemented. Install the corresponding provider package."
-    )
+    if provider_name == "gemini":
+        from agentfield.harness.providers.gemini import GeminiProvider
+
+        return GeminiProvider(bin_path=getattr(config, "gemini_bin", "gemini"))
+    if provider_name == "opencode":
+        from agentfield.harness.providers.opencode import OpenCodeProvider
+
+        return OpenCodeProvider(bin_path=getattr(config, "opencode_bin", "opencode"))
+    raise NotImplementedError(f"Provider {provider_name!r} is not yet implemented.")

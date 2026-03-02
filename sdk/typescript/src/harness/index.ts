@@ -20,4 +20,6 @@ export {
 export type { HarnessProvider } from './providers/base.js';
 export { buildProvider, SUPPORTED_PROVIDERS } from './providers/factory.js';
 export { CodexProvider } from './providers/codex.js';
+export { GeminiProvider } from './providers/gemini.js';
+export { OpenCodeProvider } from './providers/opencode.js';
 export { HarnessRunner } from './runner.js';
