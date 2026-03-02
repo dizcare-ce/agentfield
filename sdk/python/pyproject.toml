@@ -52,6 +52,12 @@ include = ["agentfield*"]
 exclude = ["tests*", "examples*"]
 
 [project.optional-dependencies]
+harness-claude = [
+    "claude-agent-sdk>=0.1",
+]
+harness = [
+    "claude-agent-sdk>=0.1",
+]
 dev = [
     "pytest>=7.4,<9",
     "pytest-asyncio>=0.21,<0.24",
