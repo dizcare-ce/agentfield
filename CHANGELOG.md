@@ -6,6 +6,115 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.45-rc.4] - 2026-03-05
+
+
+### Added
+
+- Feat(harness): OpenCode support with schema retry, error preservation, and project_dir routing (#220)
+
+* feat(harness): add schema output diagnosis and enhanced follow-up prompts
+
+Add diagnose_output_failure() that classifies validation failures into
+specific categories: file missing, empty, invalid JSON, or schema mismatch
+with field-level diff. Enhance build_followup_prompt() to include schema
+file references and explicit rewrite instructions for the retry loop.
+
+* feat(harness): add schema validation retry loop with session continuity
+
+Replace single-shot _handle_schema_output() with _handle_schema_with_retry()
+that retries up to schema_max_retries times (default 2) when JSON validation
+fails. Each retry:
+  - Diagnoses the specific failure via diagnose_output_failure()
+  - Sends a follow-up prompt to the agent with error context
+  - For Claude: passes resume=session_id to continue the conversation
+  - For CLI providers: fresh call with the follow-up prompt
+  - Accumulates cost, turns, and messages across all attempts
+
+This activates the previously dead-code build_followup_prompt() from _schema.py
+and adds resume_session_id support to the Claude Code provider.
+
+* test(harness): add complex JSON schema debug test script
+
+Standalone script exercising the harness with 5 escalating schema levels:
+  - simple (2 fields), medium (lists + optionals), complex (13 nested fields),
+    deeply_nested (recursive TreeNode), massive (>4K tokens, file-based path)
+Tested live with both claude-code and codex providers — all levels pass.
+Includes manual retry test mode (--retry-test) to exercise the new retry loop.
+
+* feat(harness): add opencode provider with project_dir routing
+
+- Rewrite opencode.py: auto-managed serve+attach pattern to bypass
+  opencode v1.2.10-v1.2.16 'Session not found' bug
+- Add project_dir field to HarnessConfig (types.py) so coding agents
+  explore the target repo instead of a temp working directory
+- Add output file placement inside project_dir (runner) so sandboxed
+  Write tool can reach the output JSON
+- Pass server_url to OpenCodeProvider via factory
+- Clean up debug prints from runner and claude provider
+- Verified working with openrouter/moonshotai/kimi-k2.5 model
+
+* fix(harness): update opencode provider tests for serve+attach pattern
+
+Tests now pass server_url to skip auto-serve lifecycle in CI where
+opencode binary is not installed. Asserts updated to match --attach
+command structure.
+
+* fix(harness): use direct opencode run for auto-approve permissions
+
+opencode run --attach loses auto-approve because the serve process
+treats attached sessions as interactive, causing permission prompts
+to hang forever when the model tries to write files.
+
+* fix(harness): align opencode tests with direct run (no --attach)
+
+* fix(harness): crash-safe retry with FailureType classification
+
+- Add FailureType enum (NONE, CRASH, TIMEOUT, API_ERROR, SCHEMA, NO_OUTPUT)
+  to RawResult and HarnessResult for intelligent retry decisions
+- Fix returncode masking in run_cli: preserve negative signal values
+- Add strip_ansi() to clean ANSI escape codes from stderr
+- Crash-aware retry in _handle_schema_with_retry: retryable failures
+  (CRASH, NO_OUTPUT) get full prompt re-send instead of immediate bail
+- build_followup_prompt now accepts optional schema param, inlines schema
+  JSON, removed poisonous empty-array hint that caused flat schema failures
+- Exponential backoff between schema retries (0.5s base, 5s max)
+- Apply same crash classification pattern to opencode, codex, gemini providers
+- Update opencode provider test for XDG_DATA_HOME env injection
+
+* fix(harness): remove double-close bug and dead serve code
+
+- write_schema_file: remove try/except that double-closed fd after
+  os.fdopen() already took ownership (caused EBADF on write failure)
+- opencode.py: remove ~100 lines of unused serve+attach machinery
+  (_ensure_serve, _cleanup_serve, _find_free_port, class-level
+  singleton state) — execute() uses direct `opencode run` and never
+  called any of it
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (909038b)
+
+- Feat(readme): replace text examples table with visual showcase cards (#216)
+
+Add 3-column visual 'Built With AgentField' section with premium
+editorial images for Autonomous Engineering Team, Deep Research Engine,
+and Reactive MongoDB Intelligence. Moved higher in README (after
+'What is AgentField?') for better visibility. Removed old text-only
+Production Examples table. (b9add36)
+
+
+
+### Chores
+
+- Chore(readme): remove redundant horizontal rules
+
+GitHub already renders ## headings with visual separation.
+The 11 --- rules created double-spacing that made the README choppy. (48baf65)
+
 ## [0.1.45-rc.3] - 2026-03-04
 
 
