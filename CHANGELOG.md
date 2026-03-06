@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.47-rc.3] - 2026-03-06
+
+
+### Other
+
+- Revert "fix: include API key in note() request headers"
+
+This reverts commit 94725ff34008e2fad19d778ec12470c213753168. (8091824)
+
 ## [0.1.47-rc.2] - 2026-03-06
 
 
