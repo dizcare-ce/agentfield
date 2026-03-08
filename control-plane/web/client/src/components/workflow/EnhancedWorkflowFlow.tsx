@@ -1,11 +1,14 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { GitBranch, Search, X, Scan, LocateFixed, Loader2 } from "@/components/ui/icon-bridge";
+import { GitBranch, X, Loader2 } from "@/components/ui/icon-bridge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { WorkflowDAGViewer } from "../WorkflowDAGViewer";
-import type { WorkflowDAGControls, WorkflowDAGResponse } from "../WorkflowDAG";
+import type { WorkflowDAGControls, WorkflowDAGResponse, LayoutInfo } from "../WorkflowDAG";
 import { Badge } from "../ui/badge";
 import type { WorkflowSummary, WorkflowTimelineNode } from "../../types/workflows";
+import { GraphToolbar } from "../WorkflowDAG/GraphToolbar";
+
+type ViewMode = 'standard' | 'performance' | 'debug';
 
 interface EnhancedWorkflowFlowProps {
   workflow: WorkflowSummary;
@@ -15,9 +18,9 @@ interface EnhancedWorkflowFlowProps {
   error?: string | null;
   selectedNodeIds: string[];
   onNodeSelection: (nodeIds: string[], replace?: boolean) => void;
-  viewMode: 'standard' | 'performance' | 'debug';
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   focusMode: boolean;
-  isFullscreen: boolean;
   onFocusModeChange?: (enabled: boolean) => void;
 }
 
@@ -30,11 +33,14 @@ export function EnhancedWorkflowFlow({
   selectedNodeIds,
   onNodeSelection,
   viewMode,
+  onViewModeChange,
   focusMode,
+  onFocusModeChange,
 }: EnhancedWorkflowFlowProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [searchSummary, setSearchSummary] = useState<{ total: number; firstMatchId?: string }>({ total: 0 });
+  const [layoutInfo, setLayoutInfo] = useState<LayoutInfo | null>(null);
   const dagControlsRef = useRef<WorkflowDAGControls | null>(null);
   const pendingSearchFocusRef = useRef(false);
 
@@ -71,17 +77,21 @@ export function EnhancedWorkflowFlow({
     pendingSearchFocusRef.current = false;
   }, []);
 
-  const handleFitView = useCallback(() => {
-    dagControlsRef.current?.fitToView({ padding: 0.2 });
+  const handleSmartCenter = useCallback(() => {
+    if (safeSelectedNodeIds.length > 0) {
+      dagControlsRef.current?.focusOnNodes(safeSelectedNodeIds, { padding: 0.3 });
+    } else {
+      dagControlsRef.current?.fitToView({ padding: 0.2 });
+    }
+  }, [safeSelectedNodeIds]);
+
+  const handleLayoutChange = useCallback((layout: Parameters<WorkflowDAGControls['changeLayout']>[0]) => {
+    dagControlsRef.current?.changeLayout(layout);
   }, []);
 
-  const handleCenterSelection = useCallback(() => {
-    if (!safeSelectedNodeIds.length) {
-      handleFitView();
-      return;
-    }
-    dagControlsRef.current?.focusOnNodes(safeSelectedNodeIds, { padding: 0.3 });
-  }, [handleFitView, safeSelectedNodeIds]);
+  const handleLayoutInfoChange = useCallback((info: LayoutInfo) => {
+    setLayoutInfo(info);
+  }, []);
 
   useEffect(() => {
     if (focusMode && safeSelectedNodeIds.length > 0) {
@@ -137,7 +147,6 @@ export function EnhancedWorkflowFlow({
 
   return (
     <div className="flex h-full min-h-0 flex-col relative">
-      {/* Floating Search Bar */}
       {showSearch && (
         <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg p-2">
           <Input
@@ -166,67 +175,39 @@ export function EnhancedWorkflowFlow({
         </div>
       )}
 
-      {/* Floating Action Buttons - Bottom Right */}
-      <div className="absolute bottom-6 right-6 z-10 flex flex-col gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleSearchToggle}
-          className="h-10 w-10 p-0 shadow-lg"
-          title="Search nodes"
-        >
-          <Search className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleCenterSelection}
-          disabled={!dagControlsRef.current}
-          className="h-10 w-10 p-0 shadow-lg"
-          title="Center selection"
-        >
-          <LocateFixed className="w-4 h-4" />
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleFitView}
-          disabled={!dagControlsRef.current}
-          className="h-10 w-10 p-0 shadow-lg"
-          title="Fit view"
-        >
-          <Scan className="w-4 h-4" />
-        </Button>
-      </div>
-
-      {/* Status Indicators - Top Left (below search if present) */}
-      {(isRefreshing || selectedNodeIds.length > 0 || focusMode || viewMode !== 'standard') && (
-        <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-sm px-3 py-2" style={{ marginTop: showSearch ? '60px' : '0' }}>
-          {isRefreshing && hasDagContent && (
-            <span className="flex items-center gap-2 text-body-small">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Updating
-            </span>
-          )}
-          {viewMode !== 'standard' && (
-            <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/30 text-xs">
-              {viewMode === 'performance' ? 'Performance' : 'Debug'}
-            </Badge>
-          )}
-          {focusMode && (
-            <Badge variant="secondary" className="text-xs">
-              Focus {safeSelectedNodeIds.length > 0 ? `(${safeSelectedNodeIds.length})` : ''}
-            </Badge>
-          )}
-          {selectedNodeIds.length > 0 && !focusMode && (
-            <span className="text-body-small">
-              {selectedNodeIds.length} selected
-            </span>
-          )}
+      {/* Status Indicators - Top Right */}
+      {isRefreshing && hasDagContent && (
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-sm px-3 py-2">
+          <span className="flex items-center gap-2 text-body-small">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Updating
+          </span>
         </div>
       )}
 
-      {/* Main Flow Area */}
+      {/* Unified Toolbar - Bottom Right */}
+      {layoutInfo && (
+        <div className="absolute bottom-6 right-6 z-10">
+          <GraphToolbar
+            availableLayouts={layoutInfo.availableLayouts}
+            currentLayout={layoutInfo.currentLayout}
+            onLayoutChange={handleLayoutChange}
+            isSlowLayout={layoutInfo.isSlowLayout}
+            isLargeGraph={layoutInfo.isLargeGraph}
+            isApplyingLayout={layoutInfo.isApplyingLayout}
+            viewMode={viewMode}
+            onViewModeChange={onViewModeChange}
+            focusMode={focusMode}
+            onFocusModeChange={onFocusModeChange}
+            onSearchToggle={handleSearchToggle}
+            showSearch={showSearch}
+            onSmartCenter={handleSmartCenter}
+            hasSelection={safeSelectedNodeIds.length > 0}
+            controlsReady={!!dagControlsRef.current}
+          />
+        </div>
+      )}
+
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <WorkflowDAGViewer
           workflowId={workflow.workflow_id}
@@ -242,6 +223,7 @@ export function EnhancedWorkflowFlow({
           onReady={handleRegisterControls}
           onSearchResultsChange={handleSearchSummaryUpdate}
           viewMode={viewMode}
+          onLayoutInfoChange={handleLayoutInfoChange}
         />
       </div>
     </div>

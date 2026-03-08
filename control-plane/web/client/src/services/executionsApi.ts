@@ -41,6 +41,29 @@ async function fetchWrapper<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface CancelExecutionResponse {
+  execution_id: string;
+  previous_status: string;
+  status: string;
+  reason?: string;
+  cancelled_at: string;
+}
+
+export interface PauseExecutionResponse {
+  execution_id: string;
+  previous_status: string;
+  status: string;
+  reason?: string;
+  paused_at: string;
+}
+
+export interface ResumeExecutionResponse {
+  execution_id: string;
+  previous_status: string;
+  status: string;
+  resumed_at: string;
+}
+
 // Transform backend ExecutionSummary to frontend format
 function transformExecutionSummary(backendExecution: any): ExecutionSummary {
   return {
@@ -117,18 +140,6 @@ function transformExecutionDetailsResponse(raw: any): WorkflowExecution {
       error_message: event.error_message ?? null,
       created_at: event.created_at ?? raw.updated_at ?? raw.created_at,
     } as ExecutionWebhookEvent;
-  });
-
-  // Debug logging to understand what the API is returning
-  console.log('Raw API response for execution:', raw.execution_id, {
-    input_data: raw.input_data,
-    output_data: raw.output_data,
-    input_uri: raw.input_uri,
-    result_uri: raw.result_uri,
-    input_size: raw.input_size,
-    output_size: raw.output_size,
-    // Log all keys to see what's available
-    keys: Object.keys(raw)
   });
 
   // Handle input_data more carefully - check for different possible field names
@@ -259,6 +270,44 @@ export async function retryExecutionWebhook(
   await fetchWrapper<unknown>(`/executions/${executionId}/webhook/retry`, {
     method: "POST",
   });
+}
+
+export async function cancelExecution(
+  executionId: string,
+  reason?: string,
+): Promise<CancelExecutionResponse> {
+  return fetchWrapper<CancelExecutionResponse>(
+    `/executions/${executionId}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason || "" }),
+    },
+  );
+}
+
+export async function pauseExecution(
+  executionId: string,
+  reason?: string,
+): Promise<PauseExecutionResponse> {
+  return fetchWrapper<PauseExecutionResponse>(`/executions/${executionId}/pause`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason || "" }),
+  });
+}
+
+export async function resumeExecution(
+  executionId: string,
+): Promise<ResumeExecutionResponse> {
+  return fetchWrapper<ResumeExecutionResponse>(
+    `/executions/${executionId}/resume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 // Get execution statistics
