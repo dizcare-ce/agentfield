@@ -33,7 +33,7 @@ import { RevokeDialog } from "./RevokeDialog";
 import { formatRelativeTime } from "../../utils/dateFormat";
 
 const GRID_TEMPLATE =
-  "minmax(120px,2fr) minmax(100px,1.5fr) minmax(100px,1.5fr) 86px 120px 160px";
+  "minmax(120px,2fr) minmax(100px,1.5fr) minmax(100px,1.5fr) 86px 120px 200px";
 
 const MAX_VISIBLE_TAGS = 2;
 
