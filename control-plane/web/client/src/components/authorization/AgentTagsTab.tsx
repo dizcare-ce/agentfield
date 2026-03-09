@@ -33,7 +33,7 @@ import { RevokeDialog } from "./RevokeDialog";
 import { formatRelativeTime } from "../../utils/dateFormat";
 
 const GRID_TEMPLATE =
-  "minmax(120px,2fr) minmax(100px,1.5fr) minmax(100px,1.5fr) 90px 130px 150px";
+  "minmax(120px,2fr) minmax(100px,1.5fr) minmax(100px,1.5fr) 86px 120px 160px";
 
 const MAX_VISIBLE_TAGS = 2;
 
@@ -338,7 +338,7 @@ export function AgentTagsTab({
       render: (item: AgentTagSummary) => (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="text-xs text-muted-foreground cursor-default">
+            <span className="text-xs text-muted-foreground cursor-default whitespace-nowrap">
               {formatRelativeTime(item.registered_at)}
             </span>
           </TooltipTrigger>
@@ -350,14 +350,14 @@ export function AgentTagsTab({
     },
     {
       key: "actions",
-      header: "",
+      header: "Actions",
       sortable: false,
       align: "right" as const,
       render: (item: AgentTagSummary) => {
         const status = getTagStatus(item);
         if (status === "pending_approval") {
           return (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 whitespace-nowrap">
               <Button
                 variant="ghost"
                 size="sm"
