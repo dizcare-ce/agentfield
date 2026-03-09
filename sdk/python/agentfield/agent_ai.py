@@ -14,7 +14,7 @@ from agentfield.agent_utils import AgentUtils
 from agentfield.logger import log_debug, log_error, log_warn
 from agentfield.rate_limiter import StatelessRateLimiter
 from httpx import HTTPStatusError
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 # Lazy loading for heavy LLM libraries to reduce memory footprint
 # These are only imported when AI features are actually used
@@ -615,7 +615,7 @@ class AgentAI:
                 try:
                     json_data = json.loads(str(multimodal_response.text))
                     return schema(**json_data)
-                except (json.JSONDecodeError, ValueError) as parse_error:
+                except (json.JSONDecodeError, ValueError, ValidationError) as parse_error:
                     log_error(f"Failed to parse JSON response: {parse_error}")
                     log_debug(f"Raw response: {multimodal_response.text}")
                     json_match = re.search(
@@ -625,7 +625,7 @@ class AgentAI:
                         try:
                             json_data = json.loads(json_match.group())
                             return schema(**json_data)
-                        except (json.JSONDecodeError, ValueError):
+                        except (json.JSONDecodeError, ValueError, ValidationError):
                             pass
                     raise ValueError(
                         f"Could not parse structured response: {multimodal_response.text}"
