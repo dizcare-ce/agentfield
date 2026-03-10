@@ -8,6 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// maxConfigBodySize is the maximum allowed size for a config body (1 MB).
+// Prevents DoS via unbounded request body reads.
+const maxConfigBodySize = 1 << 20 // 1 MB
+
 // ConfigReloadFunc is called to reload configuration from the database.
 type ConfigReloadFunc func() error
 
@@ -67,13 +71,20 @@ func (h *ConfigStorageHandlers) GetConfig(c *gin.Context) {
 func (h *ConfigStorageHandlers) SetConfig(c *gin.Context) {
 	key := c.Param("key")
 
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxConfigBodySize+1))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
 	if len(body) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "request body is empty"})
+		return
+	}
+	if len(body) > maxConfigBodySize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": "config body exceeds maximum size",
+			"max":   maxConfigBodySize,
+		})
 		return
 	}
 

@@ -5183,7 +5183,7 @@ func (ls *LocalStorage) GetConfig(ctx context.Context, key string) (*ConfigEntry
 	err := row.Scan(&entry.Key, &entry.Value, &entry.Version,
 		&entry.CreatedBy, &entry.UpdatedBy, &entry.CreatedAt, &entry.UpdatedAt)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get config %q: %w", key, err)

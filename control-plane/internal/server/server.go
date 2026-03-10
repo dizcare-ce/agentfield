@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/config"
@@ -79,6 +80,7 @@ type AgentFieldServer struct {
 	adminGRPCPort          int
 	webhookDispatcher      services.WebhookDispatcher
 	observabilityForwarder services.ObservabilityForwarder
+	configMu               sync.RWMutex
 }
 
 // NewAgentFieldServer creates a new instance of the AgentFieldServer.
@@ -432,11 +434,15 @@ func NewAgentFieldServer(cfg *config.Config) (*AgentFieldServer, error) {
 
 // configReloadFn returns a function that reloads config from the database,
 // or nil if AGENTFIELD_CONFIG_SOURCE is not set to "db".
+// The returned function acquires configMu to prevent data races with
+// concurrent readers of s.config.
 func (s *AgentFieldServer) configReloadFn() handlers.ConfigReloadFunc {
 	if src := os.Getenv("AGENTFIELD_CONFIG_SOURCE"); src != "db" {
 		return nil
 	}
 	return func() error {
+		s.configMu.Lock()
+		defer s.configMu.Unlock()
 		return overlayDBConfig(s.config, s.storage)
 	}
 }
