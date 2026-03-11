@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.52-rc.1] - 2026-03-11
+
+
+### Fixed
+
+- Fix: use status snapshot for node status endpoints to prevent flickering (#259)
+
+GetNodeStatusHandler and BulkNodeStatusHandler were performing live HTTP
+health checks on every call (1s cache for active agents). With the UI
+polling every 3s, a single transient network failure in Railway would
+immediately return "offline", causing agent status to flicker. Now uses
+GetAgentStatusSnapshot which returns the stored status managed by the
+background HealthMonitor (which has proper 3-consecutive-failure
+debouncing and heartbeat gating). The explicit POST .../status/refresh
+endpoint remains available for on-demand live checks.
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (584b995)
+
 ## [0.1.51] - 2026-03-11
 
 ## [0.1.51-rc.2] - 2026-03-11
