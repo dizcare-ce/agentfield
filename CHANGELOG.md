@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.51-rc.2] - 2026-03-11
+
+
+### Fixed
+
+- Fix: wire ApplyEnvOverrides into server startup (#258)
+
+* fix: wire ApplyEnvOverrides into server startup for Railway deployments
+
+The applyEnvOverrides function (handling short env var names like
+AGENTFIELD_CONNECTOR_ENABLED) was never called from the actual server
+startup path. main.go uses Viper for config loading, but Viper's
+AutomaticEnv only matches keys it already knows about from config files.
+On Railway (no config file), ALL connector env vars were silently ignored,
+causing connector routes to never be registered.
+
+Export ApplyEnvOverrides and call it after Viper unmarshal so env vars
+like AGENTFIELD_CONNECTOR_ENABLED, AGENTFIELD_CONNECTOR_TOKEN, and
+capability flags (AGENTFIELD_CONNECTOR_CAP_*) work on file-less deploys.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+* feat: add connector status routes for list_nodes and get_node_status
+
+The connector's status handler was calling /api/v1/nodes (a regular API
+endpoint requiring API key auth) instead of connector-scoped routes.
+Added /api/v1/connector/nodes and /api/v1/connector/nodes/:id/status
+routes gated by status_read capability, matching the pattern used by
+other connector domains.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com> (c731519)
+
 ## [0.1.51-rc.1] - 2026-03-11
 
 
