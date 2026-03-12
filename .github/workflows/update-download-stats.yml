@@ -71,8 +71,21 @@ jobs:
             const npmDownloads = npmData.downloads || 0;
             console.log('NPM downloads:', npmDownloads);
 
+            // Fetch Docker Hub stats
+            const dockerRes = await fetch(
+              'https://hub.docker.com/v2/repositories/agentfield/control-plane/'
+            );
+            let dockerDownloads = 0;
+            if (!dockerRes.ok) {
+              console.error('Docker Hub API error:', dockerRes.status);
+            } else {
+              const dockerData = await dockerRes.json();
+              dockerDownloads = dockerData.pull_count || 0;
+            }
+            console.log('Docker downloads:', dockerDownloads);
+
             // Calculate total
-            const total = githubDownloads + pypiDownloads + npmDownloads;
+            const total = githubDownloads + pypiDownloads + npmDownloads + dockerDownloads;
             console.log('Total downloads:', total);
 
             // Format number (e.g., 12500 -> "12.5k")
@@ -96,7 +109,8 @@ jobs:
               sources: {
                 github: githubDownloads,
                 pypi: pypiDownloads,
-                npm: npmDownloads
+                npm: npmDownloads,
+                docker: dockerDownloads
               },
               lastUpdated: new Date().toISOString()
             };
