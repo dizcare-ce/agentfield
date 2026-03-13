@@ -930,6 +930,8 @@ func parseTimeString(value string) (time.Time, error) {
 }
 
 // MarkStaleExecutions updates executions stuck in non-terminal states beyond the provided timeout.
+// Staleness is determined by updated_at (last activity) rather than started_at, so legitimately
+// long-running executions that are still making progress are not incorrectly timed out.
 func (ls *LocalStorage) MarkStaleExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, nil
@@ -945,8 +947,8 @@ func (ls *LocalStorage) MarkStaleExecutions(ctx context.Context, staleAfter time
 		SELECT execution_id, started_at
 		FROM executions
 		WHERE status IN ('running', 'pending', 'queued')
-		  AND started_at <= ?
-		ORDER BY started_at ASC
+		  AND updated_at <= ?
+		ORDER BY updated_at ASC
 		LIMIT ?`, cutoff, limit)
 	if err != nil {
 		return 0, fmt.Errorf("query stale executions: %w", err)
@@ -990,7 +992,7 @@ func (ls *LocalStorage) MarkStaleExecutions(ctx context.Context, staleAfter time
 	defer updateStmt.Close()
 
 	now := time.Now().UTC()
-	timeoutMessage := "execution timed out"
+	timeoutMessage := "execution timed out (no activity)"
 
 	updated := 0
 	for _, rec := range stale {
@@ -1027,6 +1029,111 @@ func (ls *LocalStorage) MarkStaleExecutions(ctx context.Context, staleAfter time
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit stale execution transaction: %w", err)
+	}
+
+	return updated, nil
+}
+
+// MarkStaleWorkflowExecutions updates workflow executions stuck in non-terminal states
+// when their updated_at timestamp exceeds the staleAfter threshold. This catches orphaned
+// child executions whose parent failed without cascading cancellation.
+func (ls *LocalStorage) MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("context cancelled before marking stale workflow executions: %w", err)
+	}
+
+	cutoff := time.Now().UTC().Add(-staleAfter)
+
+	db := ls.requireSQLDB()
+	rows, err := db.QueryContext(ctx, `
+		SELECT execution_id, started_at
+		FROM workflow_executions
+		WHERE status IN ('running', 'pending', 'queued', 'waiting')
+		  AND updated_at <= ?
+		ORDER BY updated_at ASC
+		LIMIT ?`, cutoff, limit)
+	if err != nil {
+		return 0, fmt.Errorf("query stale workflow executions: %w", err)
+	}
+	defer rows.Close()
+
+	type staleRecord struct {
+		id        string
+		startedAt time.Time
+	}
+
+	var stale []staleRecord
+	for rows.Next() {
+		var rec staleRecord
+		if err := rows.Scan(&rec.id, &rec.startedAt); err != nil {
+			return 0, fmt.Errorf("scan stale workflow execution: %w", err)
+		}
+		stale = append(stale, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate stale workflow executions: %w", err)
+	}
+
+	if len(stale) == 0 {
+		return 0, nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin stale workflow execution transaction: %w", err)
+	}
+	defer rollbackTx(tx, "MarkStaleWorkflowExecutions")
+
+	updateStmt, err := tx.PrepareContext(ctx, `
+		UPDATE workflow_executions
+		SET status = ?, error_message = ?, completed_at = ?, duration_ms = ?, updated_at = ?
+		WHERE execution_id = ? AND status IN ('running', 'pending', 'queued', 'waiting')`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare stale workflow execution update: %w", err)
+	}
+	defer updateStmt.Close()
+
+	now := time.Now().UTC()
+	timeoutMessage := "execution timed out (no activity)"
+
+	updated := 0
+	for _, rec := range stale {
+		duration := now.Sub(rec.startedAt)
+		if duration < 0 {
+			duration = 0
+		}
+		durationMS := int(duration.Milliseconds())
+		if durationMS < 0 {
+			durationMS = 0
+		}
+
+		result, err := updateStmt.ExecContext(
+			ctx,
+			types.ExecutionStatusTimeout,
+			timeoutMessage,
+			now,
+			durationMS,
+			now,
+			rec.id,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("update stale workflow execution %s: %w", rec.id, err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("rows affected for workflow execution %s: %w", rec.id, err)
+		}
+		if rowsAffected > 0 {
+			updated++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit stale workflow execution transaction: %w", err)
 	}
 
 	return updated, nil

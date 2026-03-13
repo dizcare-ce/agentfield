@@ -75,6 +75,7 @@ type StorageProvider interface {
 	// Execution cleanup operations
 	CleanupOldExecutions(ctx context.Context, retentionPeriod time.Duration, batchSize int) (int, error)
 	MarkStaleExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error)
+	MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error)
 
 	// Workflow cleanup operations - deletes all data related to a workflow ID
 	CleanupWorkflow(ctx context.Context, workflowID string, dryRun bool) (*types.WorkflowCleanupResult, error)

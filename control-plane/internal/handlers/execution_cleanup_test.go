@@ -42,6 +42,9 @@ type cleanupStoreMock struct {
 
 	markStaleCalls     []markStaleCall
 	markStaleResponses []cleanupResponse
+
+	markStaleWfCalls     []markStaleCall
+	markStaleWfResponses []cleanupResponse
 }
 
 func (m *cleanupStoreMock) CleanupOldExecutions(ctx context.Context, retentionPeriod time.Duration, batchSize int) (int, error) {
@@ -95,6 +98,33 @@ func (m *cleanupStoreMock) getMarkStaleCalls() []markStaleCall {
 
 	out := make([]markStaleCall, len(m.markStaleCalls))
 	copy(out, m.markStaleCalls)
+	return out
+}
+
+func (m *cleanupStoreMock) MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	callIndex := len(m.markStaleWfCalls)
+	m.markStaleWfCalls = append(m.markStaleWfCalls, markStaleCall{
+		ctx:        ctx,
+		staleAfter: staleAfter,
+		limit:      limit,
+	})
+
+	if callIndex < len(m.markStaleWfResponses) {
+		return m.markStaleWfResponses[callIndex].count, m.markStaleWfResponses[callIndex].err
+	}
+
+	return 0, nil
+}
+
+func (m *cleanupStoreMock) getMarkStaleWfCalls() []markStaleCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]markStaleCall, len(m.markStaleWfCalls))
+	copy(out, m.markStaleWfCalls)
 	return out
 }
 
@@ -440,6 +470,66 @@ func TestExecutionCleanupService_PerformCleanup_StopsWhenContextIsCancelled(t *t
 
 	if !strings.Contains(logBuffer.String(), "Execution cleanup cancelled") {
 		t.Fatalf("expected cancellation log to be present, got logs: %s", logBuffer.String())
+	}
+}
+
+func TestExecutionCleanupService_PerformCleanup_MarksStaleWorkflowExecutions(t *testing.T) {
+	logBuffer := setupExecutionCleanupTestLogger(t)
+	store := &cleanupStoreMock{
+		markStaleResponses:   []cleanupResponse{{count: 1}},
+		markStaleWfResponses: []cleanupResponse{{count: 3}},
+		cleanupResponses:     []cleanupResponse{{count: 0}},
+	}
+
+	cfg := testExecutionCleanupConfig(10)
+	service := NewExecutionCleanupService(store, cfg)
+	service.performCleanup(context.Background())
+
+	markCalls := store.getMarkStaleCalls()
+	if len(markCalls) != 1 {
+		t.Fatalf("expected 1 mark stale call, got %d", len(markCalls))
+	}
+
+	wfCalls := store.getMarkStaleWfCalls()
+	if len(wfCalls) != 1 {
+		t.Fatalf("expected 1 mark stale workflow call, got %d", len(wfCalls))
+	}
+	if wfCalls[0].staleAfter != cfg.StaleExecutionTimeout {
+		t.Fatalf("expected stale timeout %v, got %v", cfg.StaleExecutionTimeout, wfCalls[0].staleAfter)
+	}
+	if wfCalls[0].limit != cfg.BatchSize {
+		t.Fatalf("expected batch size %d, got %d", cfg.BatchSize, wfCalls[0].limit)
+	}
+
+	logs := logBuffer.String()
+	if !strings.Contains(logs, "marked stale executions as timed out") {
+		t.Fatalf("expected stale execution log, got logs: %s", logs)
+	}
+	if !strings.Contains(logs, "marked stale workflow executions as timed out") {
+		t.Fatalf("expected stale workflow execution log, got logs: %s", logs)
+	}
+}
+
+func TestExecutionCleanupService_PerformCleanup_ContinuesWhenMarkStaleWorkflowFails(t *testing.T) {
+	logBuffer := setupExecutionCleanupTestLogger(t)
+	store := &cleanupStoreMock{
+		markStaleResponses:   []cleanupResponse{{count: 0}},
+		markStaleWfResponses: []cleanupResponse{{err: errors.New("workflow stale failed")}},
+		cleanupResponses:     []cleanupResponse{{count: 0}},
+	}
+
+	cfg := testExecutionCleanupConfig(5)
+	service := NewExecutionCleanupService(store, cfg)
+	service.performCleanup(context.Background())
+
+	// Cleanup should still proceed despite workflow stale-marking failure
+	if len(store.getCleanupCalls()) != 1 {
+		t.Fatalf("expected cleanup to continue after workflow stale-marking failure")
+	}
+
+	logs := logBuffer.String()
+	if !strings.Contains(logs, "failed to mark stale workflow executions as timed out") {
+		t.Fatalf("expected workflow stale-mark failure log, got logs: %s", logs)
 	}
 }
 

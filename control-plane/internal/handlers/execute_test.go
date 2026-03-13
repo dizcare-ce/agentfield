@@ -50,6 +50,11 @@ func (m *MockStorageProvider) MarkStaleExecutions(ctx context.Context, staleAfte
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockStorageProvider) MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
+	args := m.Called(ctx, staleAfter, limit)
+	return args.Int(0), args.Error(1)
+}
+
 // Add other required methods as no-ops for the interface
 func (m *MockStorageProvider) Initialize(ctx context.Context, config interface{}) error { return nil }
 func (m *MockStorageProvider) Close(ctx context.Context) error                          { return nil }

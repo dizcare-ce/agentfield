@@ -141,6 +141,16 @@ func (ecs *ExecutionCleanupService) performCleanup(ctx context.Context) {
 				Dur("stale_timeout", ecs.config.StaleExecutionTimeout).
 				Msg("marked stale executions as timed out")
 		}
+
+		wfTimedOut, err := ecs.storage.MarkStaleWorkflowExecutions(cleanupCtx, ecs.config.StaleExecutionTimeout, ecs.config.BatchSize)
+		if err != nil {
+			logger.Logger.Error().Err(err).Msg("failed to mark stale workflow executions as timed out")
+		} else if wfTimedOut > 0 {
+			logger.Logger.Debug().
+				Int("timed_out", wfTimedOut).
+				Dur("stale_timeout", ecs.config.StaleExecutionTimeout).
+				Msg("marked stale workflow executions as timed out")
+		}
 	}
 
 	for {

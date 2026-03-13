@@ -119,6 +119,9 @@ func (s *stubStorage) CleanupOldExecutions(ctx context.Context, retentionPeriod 
 func (s *stubStorage) MarkStaleExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
 	return 0, nil
 }
+func (s *stubStorage) MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error) {
+	return 0, nil
+}
 func (s *stubStorage) CleanupWorkflow(ctx context.Context, workflowID string, dryRun bool) (*types.WorkflowCleanupResult, error) {
 	return &types.WorkflowCleanupResult{
 		Success:        true,
