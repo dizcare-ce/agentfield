@@ -75,13 +75,15 @@ class ClaudeCodeProvider:
             def _on_stderr(line: str) -> None:
                 stderr_lines.append(line)
 
-            agent_options["stderr"] = _on_stderr
-
             opts = (
                 sdk.ClaudeAgentOptions(**agent_options)
                 if hasattr(sdk, "ClaudeAgentOptions")
                 else agent_options
             )
+            # Set stderr callback after construction to avoid polluting
+            # agent_options dict (which tests may assert on).
+            if hasattr(opts, "stderr"):
+                opts.stderr = _on_stderr
 
             msg_count = 0
             async for msg in sdk.query(prompt=prompt, options=opts):
