@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.57-rc.3] - 2026-03-15
+
+
+### Other
+
+- Revert "feat(harness): parse real cost from opencode JSON output (#269)" (#270)
+
+This reverts commit b1a023dded6f03ea76487fa416aa077f17889429. (7377a72)
+
 ## [0.1.57-rc.2] - 2026-03-15
 
 
