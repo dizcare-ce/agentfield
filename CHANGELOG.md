@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.59-rc.2] - 2026-03-16
+
+
+### Performance
+
+- Perf(executions): skip payload columns in all list and aggregate queries (#274)
+
+All execution list, stats, and aggregate endpoints were fetching
+input_payload and result_payload for every row. With ~1.1 MB average
+payload size in pr-af, common endpoints were transferring hundreds of
+MB per request:
+
+- GetEnhancedExecutionsHandler (100 items × 1.1 MB = 110 MB) — main
+  /ui/executions page; ExcludePayloads safe, EnhancedExecution has no
+  payload fields
+- GetExecutionStatsHandler (1000 rows × 1.1 MB = 1.1 GB) — only uses
+  status and duration counts
+- GetExecutionTimelineHandler (50k rows × 1.1 MB) — only uses timing
+  and status per hour; 5-min cached
+- GetRecentActivityHandler (20 rows) — no payload fields in response
+- ListExecutionsHandler (up to 100 rows) — InputSize/OutputSize shows
+  0 in agent-scoped list (acceptable vs. 110 MB transfer)
+- GetExecutionsSummaryHandler (up to 100 rows) — same
+- GetWorkflowRunDetailHandler (up to 10k rows per run) — BuildWorkflowDAG
+  uses only IDs, status, timing
+
+Detail endpoints (GetExecutionDetailsGlobalHandler,
+GetExecutionDetailsHandler) are intentionally unchanged — they
+legitimately need the full payload for the IO viewer tab.
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com> (b523755)
+
 ## [0.1.59-rc.1] - 2026-03-16
 
 
