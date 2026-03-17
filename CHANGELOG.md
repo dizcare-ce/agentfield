@@ -6,6 +6,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.60-rc.1] - 2026-03-17
+
+
+### Added
+
+- Feat: Agentic API Layer — Smart 404, Discovery, Query, Knowledge Base (#283)
+
+* feat: add agentic API layer — smart 404, discovery, query, KB
+
+Transform the control plane from a pure orchestration server into a
+knowledge-serving platform for AI agent consumers.
+
+Phase 1: API Catalog + Smart 404
+- In-memory registry of all 80+ endpoints with metadata
+- Fuzzy matching via Levenshtein + segment overlap scoring
+- Auth-aware filtering (public/api_key/admin/connector)
+- Smart 404 replaces useless error with endpoint suggestions
+
+Phase 2: Operator + Autonomous Endpoints
+- GET /agentic/discover — search endpoints by keyword/group/method
+- POST /agentic/query — unified query for runs/executions/agents/workflows/sessions
+- GET /agentic/run/:id — complete run overview with DAG, agents, notes
+- GET /agentic/agent/:id/summary — agent info + 24h metrics
+- POST /agentic/batch — up to 20 concurrent operations
+- GET /agentic/status — system health overview
+
+Phase 3: Knowledge Base API (public, no auth)
+- 40 articles across 6 topics compiled into binary
+- GET /agentic/kb/topics — list topics
+- GET /agentic/kb/articles — search/filter articles
+- GET /agentic/kb/articles/:id — full article content
+- GET /agentic/kb/guide — goal-oriented reading path
+
+Closes #275 #276 #277 #278 #279 #280
+Epic: #282
+
+* test: add functional tests for agentic API layer
+
+3 test suites, covering:
+
+- API Catalog (16 tests): register, search, fuzzy matching, auth filtering,
+  levenshtein distance, default entries validation
+- Knowledge Base (15 tests): CRUD, topic listing, search by topic/SDK/difficulty/
+  keyword, guide generation, default content validation
+- Agentic Handlers (20 tests): discover, smart 404, KB topics/articles/guide,
+  batch operations, response envelope, auth level extraction, helpers
+
+All tests use httptest + gin test mode — no external dependencies.
+
+* feat: enrich 401 and 404 responses with discovery hints
+
+- 401 now includes a `help` block pointing agents to:
+  - KB endpoints (public, no auth)
+  - API discovery (requires auth)
+  - Live agent discovery via /discovery/capabilities
+  - Auth instructions (X-API-Key, Bearer, query param)
+
+- Smart 404 `help` block now references:
+  - /agentic/discover — search API endpoints
+  - /discovery/capabilities — list running agents and reasoners
+  - /agentic/kb/topics — knowledge base
+  - /agentic/kb/guide — goal-oriented learning path
+
+- Discover response includes `see_also` pointing to
+  /discovery/capabilities (live agents) and KB
+
+An unauthenticated agent now gets immediate actionable guidance
+instead of a dead-end error.
+
+* fix: update auth middleware test for enriched 401 response
+
+The 401 response now includes a `help` object (map[string]string)
+alongside the string fields. The test was unmarshaling into
+map[string]string which fails on nested objects.
+
+Changed to map[string]interface{} and added assertion that `help`
+field is present in the 401 response. (ee32d1b)
+
 ## [0.1.59] - 2026-03-16
 
 ## [0.1.59-rc.2] - 2026-03-16
