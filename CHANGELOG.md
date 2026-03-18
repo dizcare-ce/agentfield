@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.60-rc.3] - 2026-03-18
+
+
+### Fixed
+
+- Fix: capture Claude Agent SDK response by checking subtype='success' (#286)
+
+The Claude Code provider checked for type=='result' to extract the response
+text, but the Claude Agent SDK sends the final message with subtype=='success'
+(no type field). This caused HarnessResult.result to always be None.
+
+Fixes #252
+
+Co-authored-by: Claude <noreply@anthropic.com> (a698c32)
+
 ## [0.1.60-rc.2] - 2026-03-18
 
 
