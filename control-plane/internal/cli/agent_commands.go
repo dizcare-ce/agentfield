@@ -41,9 +41,27 @@ func NewAgentCommand() *cobra.Command {
 		Long:  "Machine-friendly CLI wrapper around /api/v1/agentic endpoints.",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			agentOutput(agentHelpData())
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				agentOutput(agentHelpData())
+				return nil
+			}
+			available := []string{}
+			for _, sub := range cmd.Commands() {
+				if !sub.Hidden && sub.Name() != "help" && sub.Name() != "completion" {
+					available = append(available, sub.Name())
+				}
+			}
+			agentError(
+				"unknown_command",
+				fmt.Sprintf("unknown agent subcommand: %s", args[0]),
+				fmt.Sprintf("Available commands: %s. Run 'af agent help' for full structured reference.", strings.Join(available, ", ")),
+			)
+			return nil
 		},
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	cmd.AddCommand(newAgentStatusCmd())

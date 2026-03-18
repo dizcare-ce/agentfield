@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -134,6 +135,20 @@ AI Agent? Run "af agent help" for structured JSON output optimized for programma
 }
 
 const AgentHint = `AI Agent? Run "af agent help" for structured JSON output.`
+
+// AgentHintJSON returns a structured JSON hint on stderr for agents that ran a wrong root command.
+func AgentHintJSON(errMsg string) string {
+	hint := map[string]interface{}{
+		"ok": false,
+		"error": map[string]string{
+			"code":    "invalid_command",
+			"message": errMsg,
+			"hint":    `Use "af agent <subcommand>" for machine-friendly JSON output. Run "af agent help" for the full command reference.`,
+		},
+	}
+	b, _ := json.Marshal(hint)
+	return string(b)
+}
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {

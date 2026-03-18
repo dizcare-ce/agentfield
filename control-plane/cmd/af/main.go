@@ -39,7 +39,7 @@ func main() {
 
 	rootCmd := cli.NewRootCommand(runServer, versionInfo)
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, cli.AgentHint)
+		fmt.Fprintln(os.Stderr, cli.AgentHintJSON(err.Error()))
 		logger.Logger.Error().Err(err).Msg("Error executing root command")
 		os.Exit(1)
 	}
