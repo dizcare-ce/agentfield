@@ -24,6 +24,10 @@ var (
 	forceVCExecution bool
 	storageModeFlag  string
 	postgresURLFlag  string
+	serverURL        string
+	apiKey           string
+	outputFormat     string
+	requestTimeout   int
 )
 
 // NewRootCommand creates and returns the root Cobra command for the AgentField CLI.
@@ -75,6 +79,10 @@ func NewRootCommand(runServerFunc func(cmd *cobra.Command, args []string), versi
 	RootCmd.PersistentFlags().BoolVar(&forceVCExecution, "vc-execution", false, "Force-enable generating verifiable credentials for executions")
 	RootCmd.PersistentFlags().StringVar(&storageModeFlag, "storage-mode", "", "Override the storage backend (local or postgres)")
 	RootCmd.PersistentFlags().StringVar(&postgresURLFlag, "postgres-url", "", "PostgreSQL connection URL or DSN (implies --storage-mode=postgres)")
+	RootCmd.PersistentFlags().StringVarP(&serverURL, "server", "s", "", "Control plane URL (env: AGENTFIELD_SERVER, default: http://localhost:8080)")
+	RootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for authenticated endpoints (env: AGENTFIELD_API_KEY)")
+	RootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "json", "Output format: json, compact")
+	RootCmd.PersistentFlags().IntVarP(&requestTimeout, "timeout", "t", 30, "Request timeout in seconds")
 
 	cobra.OnInitialize(initConfig)
 
@@ -109,6 +117,7 @@ func NewRootCommand(runServerFunc func(cmd *cobra.Command, args []string), versi
 
 	// Add version command
 	RootCmd.AddCommand(NewVersionCommand(versionInfo))
+	RootCmd.AddCommand(NewAgentCommand())
 
 	// Add the server command
 	serverCmd := &cobra.Command{
@@ -161,4 +170,32 @@ func GetBackendOnlyFlag() bool {
 
 func GetPortFlag() int {
 	return portFlag
+}
+
+func GetServerURL() string {
+	if serverURL != "" {
+		return serverURL
+	}
+	if env := os.Getenv("AGENTFIELD_SERVER"); env != "" {
+		return env
+	}
+	if env := os.Getenv("AGENTFIELD_SERVER_URL"); env != "" {
+		return env
+	}
+	return "http://localhost:8080"
+}
+
+func GetAPIKey() string {
+	if apiKey != "" {
+		return apiKey
+	}
+	return os.Getenv("AGENTFIELD_API_KEY")
+}
+
+func GetOutputFormat() string {
+	return outputFormat
+}
+
+func GetRequestTimeout() int {
+	return requestTimeout
 }
