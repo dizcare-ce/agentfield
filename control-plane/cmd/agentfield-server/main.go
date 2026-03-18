@@ -52,9 +52,9 @@ func main() {
 
 	rootCmd := cli.NewRootCommand(runServer, versionInfo) // Initialize RootCmd and add subcommands
 
-	// Execute the root command
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, cli.AgentHint)
 		os.Exit(1)
 	}
 }

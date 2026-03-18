@@ -36,7 +36,9 @@ func NewRootCommand(runServerFunc func(cmd *cobra.Command, args []string), versi
 		Use:     "af",
 		Aliases: []string{"agentfield"},
 		Short:   "AgentField AI Agent Platform",
-		Long:    `AgentField is a comprehensive AI agent platform for building, managing, and deploying AI agent capabilities.`,
+		Long: `AgentField is a comprehensive AI agent platform for building, managing, and deploying AI agent capabilities.
+
+AI Agent? Run "af agent help" for structured JSON output optimized for programmatic use.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Initialize logging based on verbose flag
 			logger.InitLogger(verbose)
@@ -130,6 +132,8 @@ func NewRootCommand(runServerFunc func(cmd *cobra.Command, args []string), versi
 
 	return RootCmd
 }
+
+const AgentHint = `AI Agent? Run "af agent help" for structured JSON output.`
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
