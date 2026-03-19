@@ -1301,28 +1301,47 @@ func (s *AgentFieldServer) setupRoutes() {
 
 		// Workflow endpoints will be reintroduced once the simplified execution pipeline lands.
 
-		// Memory endpoints
-		agentAPI.POST("/memory/set", handlers.SetMemoryHandler(s.storage))
-		agentAPI.POST("/memory/get", handlers.GetMemoryHandler(s.storage))
-		agentAPI.POST("/memory/delete", handlers.DeleteMemoryHandler(s.storage))
-		agentAPI.GET("/memory/list", handlers.ListMemoryHandler(s.storage))
+		// Memory endpoints - apply permission middleware when authorization is enabled
+		memoryGroup := agentAPI.Group("/memory")
+		{
+			// Apply memory permission middleware if authorization is enabled
+			if s.config.Features.DID.Authorization.Enabled && s.accessPolicyService != nil && s.didWebService != nil {
+				memPermConfig := middleware.MemoryPermissionConfig{
+					Enabled:               true,
+					EnforceScopeOwnership: true,
+				}
+				memoryGroup.Use(middleware.MemoryPermissionMiddleware(
+					s.accessPolicyService,
+					s.storage,
+					s.didWebService,
+					memPermConfig,
+				))
+				logger.Logger.Info().Msg("Memory permission middleware enabled on memory endpoints")
+			}
 
-		// Vector Memory endpoints (RESTful)
-		agentAPI.POST("/memory/vector", handlers.SetVectorHandler(s.storage))
-		agentAPI.GET("/memory/vector/:key", handlers.GetVectorHandler(s.storage))
-		agentAPI.POST("/memory/vector/search", handlers.SimilaritySearchHandler(s.storage))
-		agentAPI.DELETE("/memory/vector/:key", handlers.DeleteVectorHandler(s.storage))
+			// Key-value memory endpoints
+			memoryGroup.POST("/set", handlers.SetMemoryHandler(s.storage))
+			memoryGroup.POST("/get", handlers.GetMemoryHandler(s.storage))
+			memoryGroup.POST("/delete", handlers.DeleteMemoryHandler(s.storage))
+			memoryGroup.GET("/list", handlers.ListMemoryHandler(s.storage))
 
-		// Legacy Vector Memory endpoints (for backward compatibility)
-		agentAPI.POST("/memory/vector/set", handlers.SetVectorHandler(s.storage))
-		agentAPI.POST("/memory/vector/delete", handlers.DeleteVectorHandler(s.storage))
-		agentAPI.DELETE("/memory/vector/namespace", handlers.DeleteNamespaceVectorsHandler(s.storage))
+			// Vector Memory endpoints (RESTful)
+			memoryGroup.POST("/vector", handlers.SetVectorHandler(s.storage))
+			memoryGroup.GET("/vector/:key", handlers.GetVectorHandler(s.storage))
+			memoryGroup.POST("/vector/search", handlers.SimilaritySearchHandler(s.storage))
+			memoryGroup.DELETE("/vector/:key", handlers.DeleteVectorHandler(s.storage))
 
-		// Memory events endpoints
-		memoryEventsHandler := handlers.NewMemoryEventsHandler(s.storage)
-		agentAPI.GET("/memory/events/ws", memoryEventsHandler.WebSocketHandler)
-		agentAPI.GET("/memory/events/sse", memoryEventsHandler.SSEHandler)
-		agentAPI.GET("/memory/events/history", handlers.GetEventHistoryHandler(s.storage))
+			// Legacy Vector Memory endpoints (for backward compatibility)
+			memoryGroup.POST("/vector/set", handlers.SetVectorHandler(s.storage))
+			memoryGroup.POST("/vector/delete", handlers.DeleteVectorHandler(s.storage))
+			memoryGroup.DELETE("/vector/namespace", handlers.DeleteNamespaceVectorsHandler(s.storage))
+
+			// Memory events endpoints
+			memoryEventsHandler := handlers.NewMemoryEventsHandler(s.storage)
+			memoryGroup.GET("/events/ws", memoryEventsHandler.WebSocketHandler)
+			memoryGroup.GET("/events/sse", memoryEventsHandler.SSEHandler)
+			memoryGroup.GET("/events/history", handlers.GetEventHistoryHandler(s.storage))
+		}
 
 		// DID/VC endpoints - use service-backed handlers if DID is enabled
 		logger.Logger.Debug().
