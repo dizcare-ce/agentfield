@@ -1,5 +1,5 @@
 export interface HarnessConfig {
-  provider: 'claude-code' | 'codex' | 'gemini' | 'opencode';
+  provider: 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'cursor';
   model?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
@@ -15,6 +15,9 @@ export interface HarnessConfig {
   codexBin?: string;
   geminiBin?: string;
   opencodeBin?: string;
+  opencodeServer?: string;
+  cursorBin?: string;
+  cursorServer?: string;
 }
 
 export interface HarnessOptions {
@@ -34,6 +37,9 @@ export interface HarnessOptions {
   codexBin?: string;
   geminiBin?: string;
   opencodeBin?: string;
+  opencodeServer?: string;
+  cursorBin?: string;
+  cursorServer?: string;
   schema?: unknown;
   sessionId?: string;
 }
