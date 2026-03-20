@@ -189,6 +189,16 @@ export class Agent {
     return runner;
   }
 
+  /**
+   * Dispatch a task to an external coding agent and return structured results.
+   *
+   * Works like \`.ai()\` but delegates to a coding agent that can read, write, and edit
+   * files with optional schema-constrained output.
+   *
+   * @param prompt Task description for the coding agent.
+   * @param options Per-call option overrides for the harness runner (schema, model, provider, etc.).
+   * @returns HarnessResult with \`.result\` (text), \`.parsed\` (validated schema), and \`.text\` property.
+   */
   async harness(prompt: string, options?: HarnessOptions): Promise<HarnessResult> {
     const runner = await this.getHarnessRunner();
     return runner.run(prompt, options ?? {});

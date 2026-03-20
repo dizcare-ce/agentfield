@@ -29,10 +29,13 @@ class CursorProvider(HarnessProvider):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            text=True,
         )
 
-        stdout, stderr = await process.communicate(input=prompt)
+        stdout_bytes, stderr_bytes = await process.communicate(
+            input=prompt.encode("utf-8")
+        )
+        stdout = stdout_bytes.decode("utf-8") if stdout_bytes else ""
+        stderr = stderr_bytes.decode("utf-8") if stderr_bytes else ""
         return_code = process.returncode
 
         if return_code != 0:
@@ -60,25 +63,7 @@ class CursorProvider(HarnessProvider):
             logger.warning("Cursor output is not valid JSON. Stdout: %s", stdout)
             return RawResult(
                 result=stdout,
-                is_error=False,  # Consider if non-JSON output should be an error
+                is_error=False,
                 failure_type=FailureType.NONE,
                 returncode=return_code,
             )
-
-        # Assume cursor outputs JSON to stdout
-        try:
-            parsed_output = json.loads(stdout)
-            return {
-                "stdout": stdout,
-                "stderr": stderr,
-                "code": return_code,
-                "result": parsed_output,
-            }
-        except json.JSONDecodeError:
-            logger.warning("Cursor output is not valid JSON. Stdout: %s", stdout)
-            return {
-                "stdout": stdout,
-                "stderr": stderr,
-                "code": return_code,
-                "result": stdout,  # Return raw stdout if not JSON
-            }

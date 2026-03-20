@@ -31,8 +31,10 @@ async def test_cursor_provider_execute_success_json(mock_subprocess_exec):
     mock_process = AsyncMock()
     mock_process.returncode = 0
     mock_process.communicate.return_value = (
-        json.dumps({"messages": [{"role": "assistant", "content": "success"}]}),
-        "",
+        json.dumps({"messages": [{"role": "assistant", "content": "success"}]}).encode(
+            "utf-8"
+        ),
+        b"",
     )
     mock_subprocess_exec.return_value = mock_process
 
@@ -47,9 +49,8 @@ async def test_cursor_provider_execute_success_json(mock_subprocess_exec):
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        text=True,
     )
-    mock_process.communicate.assert_called_once_with(input=prompt)
+    mock_process.communicate.assert_called_once_with(input=prompt.encode("utf-8"))
     assert isinstance(result, RawResult)
     assert result.returncode == 0
     assert result.is_error is False
@@ -62,7 +63,7 @@ async def test_cursor_provider_execute_success_json(mock_subprocess_exec):
 async def test_cursor_provider_execute_success_text(mock_subprocess_exec):
     mock_process = AsyncMock()
     mock_process.returncode = 0
-    mock_process.communicate.return_value = ("plain text output", "")
+    mock_process.communicate.return_value = (b"plain text output", b"")
     mock_subprocess_exec.return_value = mock_process
 
     provider = CursorProvider()
@@ -82,7 +83,7 @@ async def test_cursor_provider_execute_success_text(mock_subprocess_exec):
 async def test_cursor_provider_execute_failure(mock_subprocess_exec):
     mock_process = AsyncMock()
     mock_process.returncode = 1
-    mock_process.communicate.return_value = ("", "error output")
+    mock_process.communicate.return_value = (b"", b"error output")
     mock_subprocess_exec.return_value = mock_process
 
     provider = CursorProvider()
@@ -102,7 +103,10 @@ async def test_cursor_provider_execute_failure(mock_subprocess_exec):
 async def test_cursor_provider_execute_with_server_url(mock_subprocess_exec):
     mock_process = AsyncMock()
     mock_process.returncode = 0
-    mock_process.communicate.return_value = (json.dumps({"messages": []}), "")
+    mock_process.communicate.return_value = (
+        json.dumps({"messages": []}).encode("utf-8"),
+        b"",
+    )
     mock_subprocess_exec.return_value = mock_process
 
     provider = CursorProvider(server_url="http://localhost:9000")
@@ -118,5 +122,4 @@ async def test_cursor_provider_execute_with_server_url(mock_subprocess_exec):
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        text=True,
     )

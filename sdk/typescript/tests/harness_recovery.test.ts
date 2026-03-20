@@ -171,6 +171,36 @@ describe('harness schema recovery (4-layer)', () => {
     expect(result.sessionId).toBe('s5');
   });
 
+  it('Skips Layer 3 if no sessionId is available', async () => {
+    const cwd = makeTempDir();
+    const provider = new RecoveryMockProvider([
+      (dir) => {
+        fs.writeFileSync(getOutputPath(dir), 'bad', 'utf8');
+        return createRawResult({
+          result: 'no session here',
+          metrics: createMetrics({ numTurns: 1, totalCostUsd: 0.1, sessionId: '' }),
+        });
+      },
+      (dir) => {
+        fs.writeFileSync(getOutputPath(dir), JSON.stringify({ name: 'recovered', count: 10 }), 'utf8');
+        return createRawResult({
+          result: 'retry success',
+          metrics: createMetrics({ numTurns: 2, totalCostUsd: 0.2, sessionId: 's-retry' }),
+        });
+      }
+    ]);
+    vi.spyOn(factory, 'buildProvider').mockResolvedValue(provider);
+
+    const runner = new HarnessRunner();
+    const result = await runner.run('prompt', { provider: 'codex', schema, cwd });
+
+    expect(result.isError).toBe(false);
+    expect(result.parsed).toEqual({ name: 'recovered', count: 10 });
+    expect(provider.callCount).toBe(2); // Initial + Retry (Layer 4)
+    expect(provider.prompts[1]).toContain('prompt'); // Should be the original prompt (Layer 4)
+    expect(result.numTurns).toBe(3);
+  });
+
   it('Fails completely if all 4 layers fail', async () => {
     const cwd = makeTempDir();
     const provider = new RecoveryMockProvider([
