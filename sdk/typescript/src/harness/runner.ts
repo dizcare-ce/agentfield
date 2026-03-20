@@ -1,4 +1,4 @@
-import { buildPromptSuffix, cleanupTempFiles, getOutputPath, parseAndValidate } from './schema.js';
+import { buildPromptSuffix, cleanupTempFiles, getOutputPath, parseAndValidate, buildFollowupPrompt } from './schema.js';
 import { buildProvider } from './providers/factory.js';
 import type { HarnessProvider } from './providers/base.js';
 import { createHarnessResult, createRawResult, type HarnessConfig, type HarnessOptions, type RawResult } from './types.js';
@@ -50,7 +50,7 @@ export class HarnessRunner {
       const raw = await this.executeWithRetry(provider, effectivePrompt, resolved);
 
       if (schema !== undefined) {
-        return this.handleSchemaOutput(raw, schema, cwd, startTime);
+        return await this.handleSchemaOutput(provider, effectivePrompt, resolved, raw, schema, cwd, startTime);
       }
 
       return createHarnessResult({
@@ -152,9 +152,17 @@ export class HarnessRunner {
     return createRawResult({ isError: true, errorMessage: 'Max retries exceeded' });
   }
 
-  public handleSchemaOutput(raw: RawResult, schema: unknown, cwd: string, startTime: number) {
+  public async handleSchemaOutput(
+    provider: HarnessProvider,
+    prompt: string,
+    options: RunnerOptions,
+    raw: RawResult,
+    schema: unknown,
+    cwd: string,
+    startTime: number
+  ) {
     const outputPath = getOutputPath(cwd);
-    const parsed = parseAndValidate(outputPath, schema);
+    let parsed = parseAndValidate(outputPath, schema);
 
     if (parsed !== null) {
       return createHarnessResult({
@@ -169,15 +177,66 @@ export class HarnessRunner {
       });
     }
 
+    let totalCostUsd = raw.metrics.totalCostUsd ?? 0;
+    let totalTurns = raw.metrics.numTurns;
+    const messages = [...raw.messages];
+    let latestRaw = raw;
+
+    if (latestRaw.metrics.sessionId) {
+      const followUpPrompt = buildFollowupPrompt('Invalid JSON or schema validation failed.', cwd);
+      const followUpOptions = { ...options, sessionId: latestRaw.metrics.sessionId };
+      const followUpRaw = await this.executeWithRetry(provider, followUpPrompt, followUpOptions);
+      
+      totalCostUsd += followUpRaw.metrics.totalCostUsd ?? 0;
+      totalTurns += followUpRaw.metrics.numTurns;
+      messages.push(...followUpRaw.messages);
+      latestRaw = followUpRaw;
+
+      parsed = parseAndValidate(outputPath, schema);
+      if (parsed !== null) {
+        return createHarnessResult({
+          result: latestRaw.result,
+          parsed,
+          isError: false,
+          costUsd: totalCostUsd,
+          numTurns: totalTurns,
+          durationMs: Date.now() - startTime,
+          sessionId: latestRaw.metrics.sessionId,
+          messages,
+        });
+      }
+    }
+
+    const retryRaw = await this.executeWithRetry(provider, prompt, options);
+    
+    totalCostUsd += retryRaw.metrics.totalCostUsd ?? 0;
+    totalTurns += retryRaw.metrics.numTurns;
+    messages.push(...retryRaw.messages);
+    latestRaw = retryRaw;
+
+    parsed = parseAndValidate(outputPath, schema);
+    if (parsed !== null) {
+      return createHarnessResult({
+        result: latestRaw.result,
+        parsed,
+        isError: false,
+        costUsd: totalCostUsd,
+        numTurns: totalTurns,
+        durationMs: Date.now() - startTime,
+        sessionId: latestRaw.metrics.sessionId,
+        messages,
+      });
+    }
+
     return createHarnessResult({
-      result: raw.result,
+      result: latestRaw.result,
       isError: true,
-      errorMessage: 'Schema validation failed after parse and cosmetic repair attempts.',
-      costUsd: raw.metrics.totalCostUsd,
-      numTurns: raw.metrics.numTurns,
+      errorMessage: 'Schema validation failed after parse, cosmetic repair, follow-up prompt, and full retry.',
+      costUsd: totalCostUsd,
+      numTurns: totalTurns,
       durationMs: Date.now() - startTime,
-      sessionId: raw.metrics.sessionId,
-      messages: raw.messages,
+      sessionId: latestRaw.metrics.sessionId,
+      messages,
     });
   }
 

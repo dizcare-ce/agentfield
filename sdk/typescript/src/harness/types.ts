@@ -35,6 +35,7 @@ export interface HarnessOptions {
   geminiBin?: string;
   opencodeBin?: string;
   schema?: unknown;
+  sessionId?: string;
 }
 
 export interface Metrics {
