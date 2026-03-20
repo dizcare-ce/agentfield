@@ -3,11 +3,11 @@ import type { RawResult } from '../types.js';
 import { createRawResult, createMetrics } from '../types.js';
 import { runCli, estimateCliCost } from '../cli.js';
 
-export class OpenCodeProvider implements HarnessProvider {
+export class CursorProvider implements HarnessProvider {
   private readonly bin: string;
   private readonly serverUrl?: string;
 
-  constructor(binPath = 'opencode', serverUrl?: string) {
+  constructor(binPath = 'cursor', serverUrl?: string) {
     this.bin = binPath;
     this.serverUrl = serverUrl;
   }
@@ -60,7 +60,7 @@ export class OpenCodeProvider implements HarnessProvider {
       if (msg.includes('ENOENT')) {
         return createRawResult({
           isError: true,
-          errorMessage: `OpenCode binary not found at '${this.bin}'. Install: https://github.com/opencode-ai/opencode`,
+          errorMessage: `Cursor binary not found at '${this.bin}'. Install: https://cursor.sh`,
           metrics: createMetrics({ durationApiMs: Date.now() - startApi }),
         });
       }

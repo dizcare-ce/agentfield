@@ -28,6 +28,9 @@ type RunnerOptions = Omit<HarnessOptions, 'schema'> & {
   codexBin?: string;
   geminiBin?: string;
   opencodeBin?: string;
+  opencodeServer?: string;
+  cursorBin?: string;
+  cursorServer?: string;
 };
 
 export class HarnessRunner {
@@ -90,6 +93,9 @@ export class HarnessRunner {
         'codexBin',
         'geminiBin',
         'opencodeBin',
+        'opencodeServer',
+        'cursorBin',
+        'cursorServer',
       ] as const) {
         const value = config[key];
         if (value !== undefined && value !== null) {

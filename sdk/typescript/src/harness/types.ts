@@ -15,7 +15,9 @@ export interface HarnessConfig {
   codexBin?: string;
   geminiBin?: string;
   opencodeBin?: string;
+  opencodeServer?: string;
   cursorCliBin?: string;
+  cursorServer?: string;
 }
 
 export interface HarnessOptions {
@@ -35,7 +37,9 @@ export interface HarnessOptions {
   codexBin?: string;
   geminiBin?: string;
   opencodeBin?: string;
+  opencodeServer?: string;
   cursorCliBin?: string;
+  cursorServer?: string;
   schema?: unknown;
   sessionId?: string;
 }
