@@ -55,5 +55,7 @@ reports/
 # Docker
 .docker/
 
-# Typescript
-.env
+
+# AgentField specific
+.worktrees/
+.artifacts/

@@ -330,6 +330,25 @@ class HarnessConfig(BaseModel):
         default=None,
         description=(
             "URL of a running ``opencode serve`` instance "
+            '("e.g. "http://127.0.0.1:4096"). When set, the opencode provider '
+            "uses ``--attach`` mode which avoids the standalone session bug. "
+            "Falls back to OPENCODE_SERVER env var."
+        ),
+    )
+    cursor_bin: str = Field(default="cursor", description="Path to cursor binary.")
+    cursor_server: Optional[str] = Field(
+        default=None,
+        description=(
+            "URL of a running ``cursor serve`` instance "
+            '("e.g. "http://127.0.0.1:4096"). When set, the cursor provider '
+            "uses ``--attach`` mode which avoids the standalone session bug. "
+            "Falls back to CURSOR_SERVER env var."
+        ),
+    )
+    opencode_server: Optional[str] = Field(
+        default=None,
+        description=(
+            "URL of a running ``opencode serve`` instance "
             '(e.g. "http://127.0.0.1:4096"). When set, the opencode provider '
             "uses ``--attach`` mode which avoids the standalone session bug. "
             "Falls back to OPENCODE_SERVER env var."
