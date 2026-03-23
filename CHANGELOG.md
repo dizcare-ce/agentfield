@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.61-rc.1] - 2026-03-23
+
+
+### Added
+
+- Feat(typescript sdk): Add history() method for querying past memory events (#300)
+
+* feat(typescript sdk): Add history() method for querying past memory events
+
+Signed-off-by: Roberto Robles <ro-robles@pm.me>
+
+* fix(typescript sdk): handle null response in history() when no events match
+
+The server returns `null` instead of `[]` for empty result sets, causing
+a TypeError when callers access the return value. Use nullish coalescing
+to always return an array.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Signed-off-by: Roberto Robles <ro-robles@pm.me>
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (fc69fee)
+
+
+
+### Chores
+
+- Chore: update GitHub README hero banner and tagline
+
+Replace old "Kubernetes for AI Agents" banner with new developer-focused
+banner showing real AgentField code with selective highlighting. Update
+tagline to "Build and scale AI agents like APIs. Deploy, observe, and prove." (d9a28e2)
+
+
+
+### Documentation
+
+- Docs: rewrite README - tighter structure, full feature showcase, new architecture diagram
+
+- Restructured from 492 to ~290 lines with conversion-optimized flow
+- New hero code example: claims processor showing app.ai(), app.pause(), app.call(), versioning, tags
+- Quick Start moved above examples for action-first flow
+- Added 90+ feature showcase in collapsible section with categorized tables
+- New wide 16:9 architecture diagram with three-zone layout (Your Services / The AI Backend / Agent Fleet)
+- Added features strip image as visual CTA for capabilities section
+- Repositioned Govern section as IAM for AI agents
+- All agentfield.ai links now have UTM tracking (utm_source=github-readme&utm_medium=referral)
+- Added SDK links (Python, Go, TypeScript, REST API) to header nav
+- Replaced em dashes with regular dashes throughout
+- Added canary deployments, agent discovery, HITL, connector API, memory events to feature list
+- Honest "Is AgentField for you?" scoping section
+- Quick start verified end-to-end in fresh Docker container (b161913)
+
+
+
+### Other
+
+- Refine language in README for clarity and emphasis (#296) (5b4ca62)
+
 ## [0.1.60] - 2026-03-19
 
 ## [0.1.60-rc.4] - 2026-03-19
