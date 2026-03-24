@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.63-rc.1] - 2026-03-24
+
+
+### Added
+
+- Feat: add community project submission issue template (5434573)
+
+
+
+### Fixed
+
+- Fix: update all website links to match new site URL structure (#303)
+
+The website was reorganized from flat paths to Learn/Build/Reference
+sections. This updates all agentfield.ai links across the repo to
+use canonical URLs instead of relying on redirects (or 404ing).
+
+Key path changes:
+- /docs → /docs/learn
+- /docs/core-concepts/* → /docs/build/{execution,coordination,governance}/*
+- /api/*-sdk/* → /docs/reference/sdks/*
+- /guides/deployment/* → /docs/reference/deploy
+- /blog/posts/* → /blog/*
+- /examples/* → /docs/learn/examples
+- agentfield.dev → agentfield.ai (typo fix)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (134b3db)
+
 ## [0.1.62] - 2026-03-23
 
 ## [0.1.62-rc.1] - 2026-03-23
