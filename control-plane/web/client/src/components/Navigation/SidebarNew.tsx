@@ -107,7 +107,7 @@ export function SidebarNew({ sections }: SidebarNewProps) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Documentation">
-              <a href="https://agentfield.ai/docs" target="_blank" rel="noopener noreferrer">
+              <a href="https://agentfield.ai/docs/learn" target="_blank" rel="noopener noreferrer">
                 <Icon name="documentation" size={15} className="text-muted-foreground" />
                 <span>Documentation</span>
               </a>
