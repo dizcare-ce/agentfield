@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.63-rc.8] - 2026-03-30
+
+
+### Other
+
+- Added type annotations to Agent.__init__ (#315) (abf5bfb)
+
 ## [0.1.63-rc.7] - 2026-03-30
 
 
