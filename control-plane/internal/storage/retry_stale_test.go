@@ -56,6 +56,18 @@ func TestRetryStaleWorkflowExecutions(t *testing.T) {
 	}
 	err := ls.StoreWorkflowExecution(ctx, staleExec)
 	require.NoError(t, err)
+	require.NoError(t, ls.CreateExecutionRecord(ctx, &types.Execution{
+		ExecutionID:  "exec-retry-1",
+		RunID:        "run-retry-1",
+		AgentNodeID:  "agent-1",
+		ReasonerID:   "reason-1",
+		NodeID:       "agent-1",
+		Status:       "running",
+		StartedAt:    now.Add(-2 * time.Hour),
+		CreatedAt:    now.Add(-2 * time.Hour),
+		UpdatedAt:    now.Add(-2 * time.Hour),
+		InputPayload: json.RawMessage(`{}`),
+	}))
 
 	// Create a stale execution that already exhausted retries
 	exhaustedExec := &types.WorkflowExecution{
@@ -107,6 +119,11 @@ func TestRetryStaleWorkflowExecutions(t *testing.T) {
 	assert.Equal(t, "pending", retried.Status)
 	assert.Equal(t, 1, retried.RetryCount)
 	assert.Nil(t, retried.CompletedAt)
+
+	executionRecord, err := ls.GetExecutionRecord(ctx, "exec-retry-1")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", executionRecord.Status)
+	assert.Nil(t, executionRecord.CompletedAt)
 
 	// Verify exhausted execution was NOT retried
 	exhausted, err := ls.GetWorkflowExecution(ctx, "exec-exhausted")

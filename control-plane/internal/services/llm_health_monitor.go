@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,19 +23,19 @@ const (
 
 // LLMEndpointStatus represents the health status of a single LLM endpoint.
 type LLMEndpointStatus struct {
-	Name               string       `json:"name"`
-	URL                string       `json:"url"`
-	CircuitState       CircuitState `json:"circuit_state"`
-	Healthy            bool         `json:"healthy"`
-	LastChecked        time.Time    `json:"last_checked"`
-	LastSuccess        time.Time    `json:"last_success,omitempty"`
-	LastError          string       `json:"last_error,omitempty"`
-	ConsecutiveFailures int         `json:"consecutive_failures"`
-	TotalChecks        int64        `json:"total_checks"`
-	TotalFailures      int64        `json:"total_failures"`
+	Name                string       `json:"name"`
+	URL                 string       `json:"url"`
+	CircuitState        CircuitState `json:"circuit_state"`
+	Healthy             bool         `json:"healthy"`
+	LastChecked         time.Time    `json:"last_checked"`
+	LastSuccess         time.Time    `json:"last_success,omitempty"`
+	LastError           string       `json:"last_error,omitempty"`
+	ConsecutiveFailures int          `json:"consecutive_failures"`
+	TotalChecks         int64        `json:"total_checks"`
+	TotalFailures       int64        `json:"total_failures"`
 	// Circuit breaker internals
-	circuitOpenedAt    time.Time
-	halfOpenSuccesses  int
+	circuitOpenedAt   time.Time
+	halfOpenSuccesses int
 }
 
 // LLMHealthMonitor monitors LLM backend health using circuit breaker pattern.
@@ -68,8 +69,9 @@ func NewLLMHealthMonitor(cfg config.LLMHealthConfig, uiService *UIService) *LLMH
 
 	endpoints := make(map[string]*LLMEndpointStatus)
 	for _, ep := range cfg.Endpoints {
-		endpoints[ep.Name] = &LLMEndpointStatus{
-			Name:         ep.Name,
+		name := normalizeLLMEndpointName(ep.Name)
+		endpoints[name] = &LLMEndpointStatus{
+			Name:         name,
 			URL:          ep.URL,
 			CircuitState: CircuitClosed,
 			Healthy:      true, // Assume healthy until proven otherwise
@@ -77,12 +79,27 @@ func NewLLMHealthMonitor(cfg config.LLMHealthConfig, uiService *UIService) *LLMH
 	}
 
 	return &LLMHealthMonitor{
-		config:    cfg,
+		config:     cfg,
 		httpClient: &http.Client{Timeout: cfg.CheckTimeout},
-		endpoints: endpoints,
-		stopCh:    make(chan struct{}),
-		uiService: uiService,
+		endpoints:  endpoints,
+		stopCh:     make(chan struct{}),
+		uiService:  uiService,
 	}
+}
+
+// Enabled reports whether monitoring is active.
+func (m *LLMHealthMonitor) Enabled() bool {
+	return m != nil && m.config.Enabled
+}
+
+// EndpointCount returns the number of configured endpoints.
+func (m *LLMHealthMonitor) EndpointCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.endpoints)
 }
 
 // Start begins the health monitoring loop.
@@ -132,7 +149,7 @@ func (m *LLMHealthMonitor) IsEndpointHealthy(name string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	ep, ok := m.endpoints[name]
+	ep, ok := m.endpoints[normalizeLLMEndpointName(name)]
 	if !ok {
 		return true // Unknown endpoint — fail-open
 	}
@@ -175,7 +192,7 @@ func (m *LLMHealthMonitor) GetStatus(name string) (*LLMEndpointStatus, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	ep, ok := m.endpoints[name]
+	ep, ok := m.endpoints[normalizeLLMEndpointName(name)]
 	if !ok {
 		return nil, false
 	}
@@ -191,7 +208,7 @@ func (m *LLMHealthMonitor) checkAllEndpoints() {
 
 func (m *LLMHealthMonitor) checkEndpoint(epCfg config.LLMEndpoint) {
 	m.mu.Lock()
-	ep, ok := m.endpoints[epCfg.Name]
+	ep, ok := m.endpoints[normalizeLLMEndpointName(epCfg.Name)]
 	if !ok {
 		m.mu.Unlock()
 		return
@@ -241,6 +258,10 @@ func (m *LLMHealthMonitor) checkEndpoint(epCfg config.LLMEndpoint) {
 			Str("last_error", ep.LastError).
 			Msg("LLM circuit breaker state changed")
 	}
+}
+
+func normalizeLLMEndpointName(name string) string {
+	return strings.TrimSpace(strings.ToLower(name))
 }
 
 func (m *LLMHealthMonitor) handleSuccess(ep *LLMEndpointStatus) {

@@ -222,7 +222,7 @@ func (c *executionController) handleSync(ctx *gin.Context) {
 	}
 
 	// Check LLM health and per-agent concurrency limits before proceeding
-	if err := CheckExecutionPreconditions(plan.target.NodeID); err != nil {
+	if err := CheckExecutionPreconditions(plan.target.NodeID, plan.llmEndpoint); err != nil {
 		_ = c.failExecution(reqCtx, plan, err, 0, nil)
 		writeExecutionError(ctx, err)
 		return
@@ -364,7 +364,7 @@ func (c *executionController) handleAsync(ctx *gin.Context) {
 	}
 
 	// Check LLM health and per-agent concurrency limits before proceeding
-	if err := CheckExecutionPreconditions(plan.target.NodeID); err != nil {
+	if err := CheckExecutionPreconditions(plan.target.NodeID, plan.llmEndpoint); err != nil {
 		_ = c.failExecution(reqCtx, plan, err, 0, nil)
 		writeExecutionError(ctx, err)
 		return
@@ -953,6 +953,7 @@ type preparedExecution struct {
 	agent             *types.AgentNode
 	target            *parsedTarget
 	targetType        string
+	llmEndpoint       string
 	webhookRegistered bool
 	webhookError      *string
 	// DID context forwarded to the target agent.
@@ -1130,12 +1131,24 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 		agent:             agent,
 		target:            target,
 		targetType:        targetType,
+		llmEndpoint:       extractRequestedLLMEndpoint(req),
 		webhookRegistered: webhookRegistered,
 		webhookError:      webhookError,
 		callerDID:         middleware.GetVerifiedCallerDID(ginCtx),
 		targetDID:         middleware.GetTargetDID(ginCtx),
 		routedVersion:     routedVersion,
 	}, nil
+}
+
+func extractRequestedLLMEndpoint(req ExecuteRequest) string {
+	for _, key := range []string{"llm_endpoint", "llm_backend", "backend", "provider", "model_provider"} {
+		if value, ok := req.Context[key]; ok {
+			if endpoint := strings.TrimSpace(fmt.Sprint(value)); endpoint != "" {
+				return endpoint
+			}
+		}
+	}
+	return ""
 }
 
 func (c *executionController) callAgent(ctx context.Context, plan *preparedExecution) ([]byte, time.Duration, bool, error) {

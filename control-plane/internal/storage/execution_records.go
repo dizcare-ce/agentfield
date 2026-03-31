@@ -1152,7 +1152,8 @@ func (ls *LocalStorage) MarkStaleWorkflowExecutions(ctx context.Context, staleAf
 }
 
 // RetryStaleWorkflowExecutions finds stale workflow executions that haven't exceeded
-// maxRetries and resets them to "pending" with incremented retry_count.
+// maxRetries and resets both workflow_executions and executions back to "pending"
+// so the paired records stay in sync for the retry path.
 func (ls *LocalStorage) RetryStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, maxRetries int, limit int) ([]string, error) {
 	if limit <= 0 || maxRetries <= 0 {
 		return nil, nil
@@ -1202,7 +1203,7 @@ func (ls *LocalStorage) RetryStaleWorkflowExecutions(ctx context.Context, staleA
 	now := time.Now().UTC()
 	retryReason := "auto-retry after stale timeout"
 
-	stmt, err := tx.PrepareContext(ctx, `
+	workflowStmt, err := tx.PrepareContext(ctx, `
 		UPDATE workflow_executions
 		SET status = 'pending',
 		    retry_count = retry_count + 1,
@@ -1213,18 +1214,39 @@ func (ls *LocalStorage) RetryStaleWorkflowExecutions(ctx context.Context, staleA
 	if err != nil {
 		return nil, fmt.Errorf("prepare retry statement: %w", err)
 	}
-	defer stmt.Close()
+	defer workflowStmt.Close()
+
+	executionStmt, err := tx.PrepareContext(ctx, `
+		UPDATE executions
+		SET status = 'pending',
+		    error_message = ?,
+		    completed_at = NULL,
+		    duration_ms = NULL,
+		    updated_at = ?
+		WHERE execution_id = ? AND status IN ('running', 'pending', 'queued')`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare execution retry statement: %w", err)
+	}
+	defer executionStmt.Close()
 
 	var retried []string
 	for _, id := range ids {
-		result, err := stmt.ExecContext(ctx, retryReason, now, id)
+		result, err := workflowStmt.ExecContext(ctx, retryReason, now, id)
 		if err != nil {
 			return retried, fmt.Errorf("retry workflow execution %s: %w", id, err)
 		}
-		affected, _ := result.RowsAffected()
-		if affected > 0 {
-			retried = append(retried, id)
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return retried, fmt.Errorf("rows affected for workflow execution %s: %w", id, err)
 		}
+		if affected == 0 {
+			continue
+		}
+
+		if _, err := executionStmt.ExecContext(ctx, retryReason, now, id); err != nil {
+			return retried, fmt.Errorf("retry execution %s: %w", id, err)
+		}
+		retried = append(retried, id)
 	}
 
 	if err := tx.Commit(); err != nil {

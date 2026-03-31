@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,31 +37,12 @@ func GetLLMHealthMonitor() *services.LLMHealthMonitor {
 // - Agent has not exceeded its concurrent execution limit
 //
 // Returns nil if all checks pass, or an error describing the blocking condition.
-func CheckExecutionPreconditions(agentNodeID string) error {
+func CheckExecutionPreconditions(agentNodeID, llmEndpoint string) error {
 	// Check LLM health
 	monitor := GetLLMHealthMonitor()
-	if monitor != nil && !monitor.IsAnyEndpointHealthy() {
-		statuses := monitor.GetAllStatuses()
-		if len(statuses) > 0 {
-			lastErr := ""
-			for _, s := range statuses {
-				if s.LastError != "" {
-					lastErr = s.LastError
-					break
-				}
-			}
-			if lastErr != "" {
-				return &executionPreconditionError{
-					code:     503,
-					message:  "LLM backend unavailable: " + lastErr,
-					category: ErrorCategoryLLMUnavailable,
-				}
-			}
-		}
-		return &executionPreconditionError{
-			code:     503,
-			message:  "all configured LLM backends are unavailable",
-			category: ErrorCategoryLLMUnavailable,
+	if monitor != nil {
+		if err := checkLLMEndpointHealth(monitor, llmEndpoint); err != nil {
+			return err
 		}
 	}
 
@@ -76,6 +59,59 @@ func CheckExecutionPreconditions(agentNodeID string) error {
 	return nil
 }
 
+func checkLLMEndpointHealth(monitor *services.LLMHealthMonitor, llmEndpoint string) error {
+	if monitor == nil || !monitor.Enabled() || monitor.EndpointCount() == 0 {
+		return nil
+	}
+
+	llmEndpoint = strings.TrimSpace(llmEndpoint)
+	if llmEndpoint != "" {
+		if status, ok := monitor.GetStatus(llmEndpoint); ok {
+			if status.CircuitState != services.CircuitOpen {
+				return nil
+			}
+			return newLLMUnavailableError(fmt.Sprintf("LLM backend %q unavailable", status.Name), status.LastError)
+		}
+	}
+
+	statuses := monitor.GetAllStatuses()
+	if monitor.EndpointCount() == 1 {
+		if unavailable := firstUnavailableEndpoint(statuses); unavailable != nil {
+			return newLLMUnavailableError(fmt.Sprintf("LLM backend %q unavailable", unavailable.Name), unavailable.LastError)
+		}
+		return nil
+	}
+
+	if unavailable := firstUnavailableEndpoint(statuses); unavailable != nil {
+		return newLLMUnavailableError(
+			fmt.Sprintf("LLM backend health is degraded and request backend could not be determined (endpoint %q unavailable)", unavailable.Name),
+			unavailable.LastError,
+		)
+	}
+
+	return nil
+}
+
+func firstUnavailableEndpoint(statuses []services.LLMEndpointStatus) *services.LLMEndpointStatus {
+	for i := range statuses {
+		if statuses[i].CircuitState == services.CircuitOpen {
+			return &statuses[i]
+		}
+	}
+	return nil
+}
+
+func newLLMUnavailableError(message, lastErr string) error {
+	if strings.TrimSpace(lastErr) != "" {
+		message += ": " + lastErr
+	}
+	return &executionPreconditionError{
+		code:     503,
+		message:  message,
+		category: ErrorCategoryLLMUnavailable,
+	}
+}
+
 // ReleaseExecutionSlot releases the concurrency slot for the given agent.
 // Safe to call even if concurrency limiting is disabled.
 func ReleaseExecutionSlot(agentNodeID string) {
@@ -87,13 +123,13 @@ func ReleaseExecutionSlot(agentNodeID string) {
 type ErrorCategory string
 
 const (
-	ErrorCategoryLLMUnavailable  ErrorCategory = "llm_unavailable"
+	ErrorCategoryLLMUnavailable   ErrorCategory = "llm_unavailable"
 	ErrorCategoryConcurrencyLimit ErrorCategory = "concurrency_limit"
-	ErrorCategoryAgentTimeout    ErrorCategory = "agent_timeout"
-	ErrorCategoryAgentError      ErrorCategory = "agent_error"
+	ErrorCategoryAgentTimeout     ErrorCategory = "agent_timeout"
+	ErrorCategoryAgentError       ErrorCategory = "agent_error"
 	ErrorCategoryAgentUnreachable ErrorCategory = "agent_unreachable"
-	ErrorCategoryBadResponse     ErrorCategory = "bad_response"
-	ErrorCategoryInternal        ErrorCategory = "internal_error"
+	ErrorCategoryBadResponse      ErrorCategory = "bad_response"
+	ErrorCategoryInternal         ErrorCategory = "internal_error"
 )
 
 // executionPreconditionError carries both an HTTP status code and message.
