@@ -221,6 +221,14 @@ func (c *executionController) handleSync(ctx *gin.Context) {
 		return
 	}
 
+	// Check LLM health and per-agent concurrency limits before proceeding
+	if err := CheckExecutionPreconditions(plan.target.NodeID, plan.llmEndpoint); err != nil {
+		_ = c.failExecution(reqCtx, plan, err, 0, nil)
+		writeExecutionError(ctx, err)
+		return
+	}
+	defer ReleaseExecutionSlot(plan.target.NodeID)
+
 	// Emit execution started event with full reasoner context
 	c.publishExecutionStartedEvent(plan)
 
@@ -355,6 +363,14 @@ func (c *executionController) handleAsync(ctx *gin.Context) {
 		return
 	}
 
+	// Check LLM health and per-agent concurrency limits before proceeding
+	if err := CheckExecutionPreconditions(plan.target.NodeID, plan.llmEndpoint); err != nil {
+		_ = c.failExecution(reqCtx, plan, err, 0, nil)
+		writeExecutionError(ctx, err)
+		return
+	}
+	// Note: slot is released in asyncExecutionJob.process() after completion
+
 	// Emit execution started event with full reasoner context
 	c.publishExecutionStartedEvent(plan)
 
@@ -365,6 +381,7 @@ func (c *executionController) handleAsync(ctx *gin.Context) {
 	}
 
 	if ok := pool.submit(job); !ok {
+		ReleaseExecutionSlot(plan.target.NodeID) // Release since process() won't run
 		queueErr := errors.New("async execution queue is full; retry later")
 		if updateErr := c.failExecution(reqCtx, plan, queueErr, 0, nil); updateErr != nil {
 			logger.Logger.Error().
@@ -375,7 +392,7 @@ func (c *executionController) handleAsync(ctx *gin.Context) {
 		logger.Logger.Warn().
 			Str("execution_id", plan.exec.ExecutionID).
 			Msg("async execution rejected due to queue saturation")
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": queueErr.Error()})
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": queueErr.Error(), "error_category": "concurrency_limit"})
 		return
 	}
 
@@ -936,6 +953,7 @@ type preparedExecution struct {
 	agent             *types.AgentNode
 	target            *parsedTarget
 	targetType        string
+	llmEndpoint       string
 	webhookRegistered bool
 	webhookError      *string
 	// DID context forwarded to the target agent.
@@ -1113,6 +1131,7 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 		agent:             agent,
 		target:            target,
 		targetType:        targetType,
+		llmEndpoint:       extractRequestedLLMEndpoint(req),
 		webhookRegistered: webhookRegistered,
 		webhookError:      webhookError,
 		callerDID:         middleware.GetVerifiedCallerDID(ginCtx),
@@ -1121,8 +1140,28 @@ func (c *executionController) prepareExecution(ctx context.Context, ginCtx *gin.
 	}, nil
 }
 
+func extractRequestedLLMEndpoint(req ExecuteRequest) string {
+	for _, key := range []string{"llm_endpoint", "llm_backend", "backend", "provider", "model_provider"} {
+		if value, ok := req.Context[key]; ok {
+			if endpoint := strings.TrimSpace(fmt.Sprint(value)); endpoint != "" {
+				return endpoint
+			}
+		}
+	}
+	return ""
+}
+
 func (c *executionController) callAgent(ctx context.Context, plan *preparedExecution) ([]byte, time.Duration, bool, error) {
 	start := time.Now()
+
+	if plan.target != nil && plan.exec != nil {
+		PublishExecutionLog(plan.exec.ExecutionID, plan.exec.RunID, plan.target.NodeID,
+			"info", "calling agent", map[string]interface{}{
+				"agent":    plan.target.NodeID,
+				"reasoner": plan.target.TargetName,
+				"base_url": plan.agent.BaseURL,
+			})
+	}
 
 	// Check execution state before calling agent.
 	currentExec, err := c.store.GetExecutionRecord(ctx, plan.exec.ExecutionID)
@@ -1207,6 +1246,13 @@ func (c *executionController) callAgent(ctx context.Context, plan *preparedExecu
 }
 
 func (c *executionController) completeExecution(ctx context.Context, plan *preparedExecution, result []byte, elapsed time.Duration) error {
+	if plan.target != nil && plan.exec != nil {
+		PublishExecutionLog(plan.exec.ExecutionID, plan.exec.RunID, plan.target.NodeID,
+			"info", "execution completed", map[string]interface{}{
+				"duration_ms": elapsed.Milliseconds(),
+			})
+	}
+
 	resultURI := c.savePayload(ctx, result)
 
 	var lastErr error
@@ -1273,6 +1319,18 @@ func (c *executionController) completeExecution(ctx context.Context, plan *prepa
 }
 
 func (c *executionController) failExecution(ctx context.Context, plan *preparedExecution, callErr error, elapsed time.Duration, result []byte) error {
+	// Classify the error for user-facing diagnostics
+	category := classifyExecutionError(callErr)
+
+	if plan.target != nil && plan.exec != nil {
+		PublishExecutionLog(plan.exec.ExecutionID, plan.exec.RunID, plan.target.NodeID,
+			"error", "execution failed", map[string]interface{}{
+				"error":          callErr.Error(),
+				"error_category": string(category),
+				"duration_ms":    elapsed.Milliseconds(),
+			})
+	}
+
 	errMsg := callErr.Error()
 	resultURI := c.savePayload(ctx, result)
 	var lastErr error
@@ -1295,6 +1353,8 @@ func (c *executionController) failExecution(ctx context.Context, plan *preparedE
 			now := time.Now().UTC()
 			current.Status = types.ExecutionStatusFailed
 			current.ErrorMessage = &errMsg
+			categoryStr := string(category)
+			current.StatusReason = &categoryStr
 			current.CompletedAt = pointerTime(now)
 			duration := elapsed.Milliseconds()
 			current.DurationMS = &duration
@@ -1838,15 +1898,17 @@ func (e *callError) Error() string {
 
 func writeExecutionError(ctx *gin.Context, err error) {
 	if err == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "unknown error"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "unknown error", "error_category": string(ErrorCategoryInternal)})
 		return
 	}
 
 	var ce *callError
 	if errors.As(err, &ce) {
+		category := classifyCallError(ce, err)
 		response := gin.H{
-			"error":  ce.message,
-			"status": "failed",
+			"error":          ce.message,
+			"error_category": string(category),
+			"status":         "failed",
 		}
 		// Preserve structured error data from the agent's response body.
 		if len(ce.body) > 0 {
@@ -1865,7 +1927,91 @@ func writeExecutionError(ctx *gin.Context, err error) {
 		return
 	}
 
-	ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var pe *executionPreconditionError
+	if errors.As(err, &pe) {
+		ctx.JSON(pe.HTTPStatusCode(), gin.H{
+			"error":          pe.Error(),
+			"error_category": string(pe.Category()),
+		})
+		return
+	}
+
+	// Classify untyped errors (timeouts, connection failures, etc.)
+	category := classifyRawError(err)
+	httpStatus := http.StatusBadRequest
+	if category == ErrorCategoryAgentTimeout || category == ErrorCategoryAgentUnreachable {
+		httpStatus = http.StatusGatewayTimeout
+	}
+	ctx.JSON(httpStatus, gin.H{
+		"error":          err.Error(),
+		"error_category": string(category),
+	})
+}
+
+// classifyExecutionError determines the error category from any execution error.
+func classifyExecutionError(err error) ErrorCategory {
+	if err == nil {
+		return ErrorCategoryInternal
+	}
+
+	var ce *callError
+	if errors.As(err, &ce) {
+		return classifyCallError(ce, err)
+	}
+
+	var pe *executionPreconditionError
+	if errors.As(err, &pe) {
+		return pe.Category()
+	}
+
+	return classifyRawError(err)
+}
+
+// classifyCallError determines the error category for an agent call error.
+func classifyCallError(ce *callError, original error) ErrorCategory {
+	if ce.statusCode >= 500 {
+		return ErrorCategoryAgentError
+	}
+	if ce.statusCode == 408 {
+		return ErrorCategoryAgentTimeout
+	}
+	// Check if the body is valid JSON — if not, it's a bad response
+	if len(ce.body) > 0 {
+		var js json.RawMessage
+		if json.Unmarshal(ce.body, &js) != nil {
+			return ErrorCategoryBadResponse
+		}
+	}
+	return ErrorCategoryAgentError
+}
+
+// classifyRawError inspects an untyped error for timeout/connection patterns.
+func classifyRawError(err error) ErrorCategory {
+	if err == nil {
+		return ErrorCategoryInternal
+	}
+
+	errStr := err.Error()
+
+	// Context deadline exceeded = timeout
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(errStr, "context deadline exceeded") {
+		return ErrorCategoryAgentTimeout
+	}
+
+	// Connection refused / reset = agent unreachable
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "i/o timeout") {
+		return ErrorCategoryAgentUnreachable
+	}
+
+	// Cancelled context
+	if errors.Is(err, context.Canceled) || strings.Contains(errStr, "context canceled") {
+		return ErrorCategoryInternal
+	}
+
+	return ErrorCategoryInternal
 }
 
 func pointerTime(t time.Time) *time.Time {
@@ -1902,6 +2048,11 @@ func (c *executionController) savePayload(ctx context.Context, data []byte) *str
 }
 
 func (j asyncExecutionJob) process() {
+	// Release the per-agent concurrency slot when this job finishes
+	if j.plan.target != nil {
+		defer ReleaseExecutionSlot(j.plan.target.NodeID)
+	}
+
 	// Use a bounded context so that paused executions do not block goroutines
 	// indefinitely if the resume/cancel event is never delivered (e.g. event bus
 	// crash, server restart). 24 hours is generous but prevents permanent leaks.

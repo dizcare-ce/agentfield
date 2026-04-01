@@ -74,6 +74,8 @@ type AgentFieldServer struct {
 	tagApprovalService  *services.TagApprovalService
 	tagVCVerifier       *services.TagVCVerifier
 	agentfieldHome      string
+	// LLM health monitoring
+	llmHealthMonitor       *services.LLMHealthMonitor
 	// Cleanup service
 	cleanupService         *handlers.ExecutionCleanupService
 	payloadStore           services.PayloadStore
@@ -396,6 +398,19 @@ func NewAgentFieldServer(cfg *config.Config) (*AgentFieldServer, error) {
 		logger.Logger.Warn().Err(err).Msg("failed to start observability forwarder")
 	}
 
+	// Initialize LLM health monitor
+	var llmHealthMonitor *services.LLMHealthMonitor
+	if cfg.AgentField.LLMHealth.Enabled && len(cfg.AgentField.LLMHealth.Endpoints) > 0 {
+		llmHealthMonitor = services.NewLLMHealthMonitor(cfg.AgentField.LLMHealth, uiService)
+		handlers.SetLLMHealthMonitor(llmHealthMonitor)
+		logger.Logger.Info().
+			Int("endpoints", len(cfg.AgentField.LLMHealth.Endpoints)).
+			Msg("LLM health monitor configured")
+	}
+
+	// Initialize per-agent concurrency limiter
+	handlers.InitConcurrencyLimiter(cfg.AgentField.ExecutionQueue.MaxConcurrentPerAgent)
+
 	// Initialize execution cleanup service
 	cleanupService := handlers.NewExecutionCleanupService(storageProvider, cfg.AgentField.ExecutionCleanup)
 
@@ -429,6 +444,7 @@ func NewAgentFieldServer(cfg *config.Config) (*AgentFieldServer, error) {
 		tagApprovalService:     tagApprovalService,
 		tagVCVerifier:          tagVCVerifier,
 		agentfieldHome:         agentfieldHome,
+		llmHealthMonitor:       llmHealthMonitor,
 		cleanupService:         cleanupService,
 		payloadStore:           payloadStore,
 		webhookDispatcher:      webhookDispatcher,
@@ -498,6 +514,11 @@ func (s *AgentFieldServer) Start() error {
 			logger.Logger.Error().Err(err).Msg("Failed to recover nodes from database")
 		}
 	}()
+
+	// Start LLM health monitor in background
+	if s.llmHealthMonitor != nil {
+		go s.llmHealthMonitor.Start()
+	}
 
 	// Start execution cleanup service in background
 	ctx := context.Background()
@@ -1100,12 +1121,21 @@ func (s *AgentFieldServer) setupRoutes() {
 				executions.POST("/note", handlers.AddExecutionNoteHandler(s.storage))
 				executions.GET("/:execution_id/notes", handlers.GetExecutionNotesHandler(s.storage))
 
+				// Execution log streaming (SSE)
+				execLogsHandler := ui.NewExecutionLogsHandler(s.llmHealthMonitor)
+				executions.GET("/:execution_id/logs/stream", execLogsHandler.StreamExecutionLogsHandler)
+
 				// DID and VC management endpoints for executions
 				didHandler := ui.NewDIDHandler(s.storage, s.didService, s.vcService, s.didWebService)
 				executions.GET("/:execution_id/vc", didHandler.GetExecutionVCHandler)
 				executions.GET("/:execution_id/vc-status", didHandler.GetExecutionVCStatusHandler)
 				executions.POST("/:execution_id/verify-vc", didHandler.VerifyExecutionVCComprehensiveHandler)
 			}
+
+			// LLM health status endpoint and execution queue status
+			llmHandler := ui.NewExecutionLogsHandler(s.llmHealthMonitor)
+			uiAPI.GET("/llm/health", llmHandler.GetLLMHealthHandler)
+			uiAPI.GET("/queue/status", llmHandler.GetExecutionQueueStatusHandler)
 
 			// Workflows management group
 			workflows := uiAPI.Group("/workflows")

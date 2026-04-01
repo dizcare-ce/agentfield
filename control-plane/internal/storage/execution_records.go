@@ -1151,6 +1151,111 @@ func (ls *LocalStorage) MarkStaleWorkflowExecutions(ctx context.Context, staleAf
 	return updated, nil
 }
 
+// RetryStaleWorkflowExecutions finds stale workflow executions that haven't exceeded
+// maxRetries and resets both workflow_executions and executions back to "pending"
+// so the paired records stay in sync for the retry path.
+func (ls *LocalStorage) RetryStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, maxRetries int, limit int) ([]string, error) {
+	if limit <= 0 || maxRetries <= 0 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
+	}
+
+	cutoff := time.Now().UTC().Add(-staleAfter)
+	db := ls.requireSQLDB()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT execution_id
+		FROM workflow_executions
+		WHERE status IN ('running', 'pending', 'queued')
+		  AND retry_count < ?
+		  AND COALESCE(updated_at, created_at, started_at) <= ?
+		ORDER BY COALESCE(updated_at, created_at, started_at) ASC
+		LIMIT ?`, maxRetries, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query retriable workflow executions: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan retriable workflow execution: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate retriable workflow executions: %w", err)
+	}
+
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin retry transaction: %w", err)
+	}
+	defer rollbackTx(tx, "RetryStaleWorkflowExecutions")
+
+	now := time.Now().UTC()
+	retryReason := "auto-retry after stale timeout"
+
+	workflowStmt, err := tx.PrepareContext(ctx, `
+		UPDATE workflow_executions
+		SET status = 'pending',
+		    retry_count = retry_count + 1,
+		    error_message = ?,
+		    completed_at = NULL,
+		    updated_at = ?
+		WHERE execution_id = ? AND status IN ('running', 'pending', 'queued')`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare retry statement: %w", err)
+	}
+	defer workflowStmt.Close()
+
+	executionStmt, err := tx.PrepareContext(ctx, `
+		UPDATE executions
+		SET status = 'pending',
+		    error_message = ?,
+		    completed_at = NULL,
+		    duration_ms = NULL,
+		    updated_at = ?
+		WHERE execution_id = ? AND status IN ('running', 'pending', 'queued')`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare execution retry statement: %w", err)
+	}
+	defer executionStmt.Close()
+
+	var retried []string
+	for _, id := range ids {
+		result, err := workflowStmt.ExecContext(ctx, retryReason, now, id)
+		if err != nil {
+			return retried, fmt.Errorf("retry workflow execution %s: %w", id, err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return retried, fmt.Errorf("rows affected for workflow execution %s: %w", id, err)
+		}
+		if affected == 0 {
+			continue
+		}
+
+		if _, err := executionStmt.ExecContext(ctx, retryReason, now, id); err != nil {
+			return retried, fmt.Errorf("retry execution %s: %w", id, err)
+		}
+		retried = append(retried, id)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit retry transaction: %w", err)
+	}
+
+	return retried, nil
+}
+
 func scanExecution(scanner interface {
 	Scan(dest ...interface{}) error
 }) (*types.Execution, error) {

@@ -76,6 +76,9 @@ type StorageProvider interface {
 	CleanupOldExecutions(ctx context.Context, retentionPeriod time.Duration, batchSize int) (int, error)
 	MarkStaleExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error)
 	MarkStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, limit int) (int, error)
+	// RetryStaleWorkflowExecutions resets stale workflow executions with retry_count < maxRetries
+	// back to "pending" status with incremented retry_count. Returns IDs of retried executions.
+	RetryStaleWorkflowExecutions(ctx context.Context, staleAfter time.Duration, maxRetries int, limit int) ([]string, error)
 
 	// Workflow cleanup operations - deletes all data related to a workflow ID
 	CleanupWorkflow(ctx context.Context, workflowID string, dryRun bool) (*types.WorkflowCleanupResult, error)

@@ -35,6 +35,7 @@ type UIConfig struct {
 type AgentFieldConfig struct {
 	Port             int                    `yaml:"port"`
 	NodeHealth       NodeHealthConfig       `yaml:"node_health" mapstructure:"node_health"`
+	LLMHealth        LLMHealthConfig        `yaml:"llm_health" mapstructure:"llm_health"`
 	ExecutionCleanup ExecutionCleanupConfig `yaml:"execution_cleanup" mapstructure:"execution_cleanup"`
 	ExecutionQueue   ExecutionQueueConfig   `yaml:"execution_queue" mapstructure:"execution_queue"`
 	Approval         ApprovalConfig         `yaml:"approval" mapstructure:"approval"`
@@ -66,15 +67,37 @@ type ExecutionCleanupConfig struct {
 	BatchSize              int           `yaml:"batch_size" mapstructure:"batch_size" default:"100"`
 	PreserveRecentDuration time.Duration `yaml:"preserve_recent_duration" mapstructure:"preserve_recent_duration" default:"1h"`
 	StaleExecutionTimeout  time.Duration `yaml:"stale_execution_timeout" mapstructure:"stale_execution_timeout" default:"30m"`
+	MaxRetries             int           `yaml:"max_retries" mapstructure:"max_retries" default:"0"`
+	RetryBackoff           time.Duration `yaml:"retry_backoff" mapstructure:"retry_backoff" default:"30s"`
 }
 
 // ExecutionQueueConfig configures execution and webhook settings.
 type ExecutionQueueConfig struct {
 	AgentCallTimeout       time.Duration `yaml:"agent_call_timeout" mapstructure:"agent_call_timeout"`
+	MaxConcurrentPerAgent  int           `yaml:"max_concurrent_per_agent" mapstructure:"max_concurrent_per_agent"` // 0 = unlimited
 	WebhookTimeout         time.Duration `yaml:"webhook_timeout" mapstructure:"webhook_timeout"`
 	WebhookMaxAttempts     int           `yaml:"webhook_max_attempts" mapstructure:"webhook_max_attempts"`
 	WebhookRetryBackoff    time.Duration `yaml:"webhook_retry_backoff" mapstructure:"webhook_retry_backoff"`
 	WebhookMaxRetryBackoff time.Duration `yaml:"webhook_max_retry_backoff" mapstructure:"webhook_max_retry_backoff"`
+}
+
+// LLMHealthConfig configures LLM backend health monitoring with circuit breaker.
+type LLMHealthConfig struct {
+	Enabled            bool          `yaml:"enabled" mapstructure:"enabled"`
+	Endpoints          []LLMEndpoint `yaml:"endpoints" mapstructure:"endpoints"`
+	CheckInterval      time.Duration `yaml:"check_interval" mapstructure:"check_interval"`       // How often to probe (default 15s)
+	CheckTimeout       time.Duration `yaml:"check_timeout" mapstructure:"check_timeout"`         // Timeout per probe (default 5s)
+	FailureThreshold   int           `yaml:"failure_threshold" mapstructure:"failure_threshold"`  // Failures before opening circuit (default 3)
+	RecoveryTimeout    time.Duration `yaml:"recovery_timeout" mapstructure:"recovery_timeout"`    // How long circuit stays open before half-open (default 30s)
+	HalfOpenMaxProbes  int           `yaml:"half_open_max_probes" mapstructure:"half_open_max_probes"` // Probes in half-open before closing (default 2)
+}
+
+// LLMEndpoint defines a single LLM backend to monitor.
+type LLMEndpoint struct {
+	Name     string `yaml:"name" mapstructure:"name"`         // Display name (e.g. "litellm")
+	URL      string `yaml:"url" mapstructure:"url"`           // Health check URL (e.g. "http://localhost:4000/health")
+	Method   string `yaml:"method" mapstructure:"method"`     // HTTP method (default GET)
+	Header   string `yaml:"header" mapstructure:"header"`     // Optional auth header value
 }
 
 // FeatureConfig holds configuration for enabling/disabling features.
@@ -294,6 +317,61 @@ func ApplyEnvOverrides(cfg *Config) {
 	if val := os.Getenv("AGENTFIELD_HEARTBEAT_STALE_THRESHOLD"); val != "" {
 		if d, err := time.ParseDuration(val); err == nil {
 			cfg.AgentField.NodeHealth.HeartbeatStaleThreshold = d
+		}
+	}
+
+	// LLM health monitoring overrides
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_ENABLED"); val != "" {
+		cfg.AgentField.LLMHealth.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_CHECK_INTERVAL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.LLMHealth.CheckInterval = d
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_CHECK_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.LLMHealth.CheckTimeout = d
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_FAILURE_THRESHOLD"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.AgentField.LLMHealth.FailureThreshold = i
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_RECOVERY_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.LLMHealth.RecoveryTimeout = d
+		}
+	}
+	// Single LLM endpoint via env var (convenience for simple setups)
+	if val := os.Getenv("AGENTFIELD_LLM_HEALTH_ENDPOINT"); val != "" {
+		name := os.Getenv("AGENTFIELD_LLM_HEALTH_ENDPOINT_NAME")
+		if name == "" {
+			name = "default"
+		}
+		cfg.AgentField.LLMHealth.Endpoints = append(cfg.AgentField.LLMHealth.Endpoints, LLMEndpoint{
+			Name: name,
+			URL:  val,
+		})
+	}
+
+	// Execution queue overrides
+	if val := os.Getenv("AGENTFIELD_MAX_CONCURRENT_PER_AGENT"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.AgentField.ExecutionQueue.MaxConcurrentPerAgent = i
+		}
+	}
+
+	// Execution retry overrides
+	if val := os.Getenv("AGENTFIELD_EXECUTION_MAX_RETRIES"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.AgentField.ExecutionCleanup.MaxRetries = i
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_EXECUTION_RETRY_BACKOFF"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.ExecutionCleanup.RetryBackoff = d
 		}
 	}
 
