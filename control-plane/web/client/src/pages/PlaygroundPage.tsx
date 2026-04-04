@@ -9,6 +9,17 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -26,7 +37,16 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { Play, InProgress, ArrowRight, Upload } from "../components/ui/icon-bridge";
+import {
+  Play,
+  InProgress,
+  ArrowRight,
+  Upload,
+  Copy,
+  Check,
+  ChevronRight,
+  ChevronDown,
+} from "../components/ui/icon-bridge";
 import { reasonersApi } from "../services/reasonersApi";
 import type { ReasonerWithNode, ReasonersResponse } from "../types/reasoners";
 import { normalizeExecutionStatus } from "../utils/status";
@@ -67,6 +87,30 @@ function statusVariant(
   return "secondary";
 }
 
+function buildCurlCommand(
+  target: string,
+  input: string,
+  baseUrl: string = window.location.origin
+): string {
+  const escapedInput = input.replace(/'/g, "'\\''");
+  return `curl -X POST '${baseUrl}/api/v1/execute/${target}' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
+  -d '{"input": ${escapedInput}}'`;
+}
+
+function buildAsyncCurlCommand(
+  target: string,
+  input: string,
+  baseUrl: string = window.location.origin
+): string {
+  const escapedInput = input.replace(/'/g, "'\\''");
+  return `curl -X POST '${baseUrl}/api/v1/execute/async/${target}' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
+  -d '{"input": ${escapedInput}}'`;
+}
+
 export function PlaygroundPage() {
   const { reasonerId: paramReasonerId } = useParams<{ reasonerId?: string }>();
   const navigate = useNavigate();
@@ -88,8 +132,17 @@ export function PlaygroundPage() {
   const [inputError, setInputError] = useState<string | null>(null);
   const [result, setResult] = useState<unknown>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+  const [resultStatus, setResultStatus] = useState<string | null>(null);
+  const [resultDuration, setResultDuration] = useState<number | undefined>(undefined);
   const [executing, setExecuting] = useState(false);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
+
+  // ── copy feedback ─────────────────────────────────────────────────────────
+  const [copiedSync, setCopiedSync] = useState(false);
+  const [copiedAsync, setCopiedAsync] = useState(false);
+
+  // ── schema collapsible ────────────────────────────────────────────────────
+  const [schemaOpen, setSchemaOpen] = useState(false);
 
   // ── recent runs ───────────────────────────────────────────────────────────
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
@@ -152,6 +205,8 @@ export function PlaygroundPage() {
           }
           setResult(null);
           setResultError(null);
+          setResultStatus(null);
+          setResultDuration(undefined);
           setLastRunId(null);
         }
       })
@@ -207,7 +262,7 @@ export function PlaygroundPage() {
     let parsed: unknown;
     try {
       parsed = JSON.parse(input);
-    } catch (e) {
+    } catch {
       setInputError("Invalid JSON — please fix before executing.");
       return;
     }
@@ -215,6 +270,8 @@ export function PlaygroundPage() {
     setExecuting(true);
     setResult(null);
     setResultError(null);
+    setResultStatus(null);
+    setResultDuration(undefined);
     setLastRunId(null);
 
     try {
@@ -227,15 +284,35 @@ export function PlaygroundPage() {
         (data as any).run_id ??
         null;
       setLastRunId(runId);
+      setResultStatus((data as any).status ?? "succeeded");
+      setResultDuration((data as any).duration_ms);
       // Refresh recent runs after successful execution
       loadRecentRuns(selectedId);
     } catch (err) {
       setResultError(
         err instanceof Error ? err.message : "Execution failed."
       );
+      setResultStatus("failed");
     } finally {
       setExecuting(false);
     }
+  }
+
+  // ── cURL copy helpers ─────────────────────────────────────────────────────
+  function handleCopySync() {
+    if (!selectedId) return;
+    const cmd = buildCurlCommand(selectedId, input);
+    navigator.clipboard.writeText(cmd);
+    setCopiedSync(true);
+    setTimeout(() => setCopiedSync(false), 2000);
+  }
+
+  function handleCopyAsync() {
+    if (!selectedId) return;
+    const cmd = buildAsyncCurlCommand(selectedId, input);
+    navigator.clipboard.writeText(cmd);
+    setCopiedAsync(true);
+    setTimeout(() => setCopiedAsync(false), 2000);
   }
 
   // ── route sync ────────────────────────────────────────────────────────────
@@ -273,6 +350,10 @@ export function PlaygroundPage() {
     keys.forEach((k) => (example[k] = ""));
     return JSON.stringify(example, null, 2);
   }, [selectedReasoner]);
+
+  const normalizedResultStatus = resultStatus
+    ? normalizeExecutionStatus(resultStatus)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -359,32 +440,133 @@ export function PlaygroundPage() {
             {inputError && (
               <p className="text-xs text-destructive">{inputError}</p>
             )}
-            <Button
-              onClick={handleExecute}
-              disabled={executing || !selectedId}
-              className="w-full"
-            >
-              {executing ? (
-                <>
-                  <InProgress className="h-4 w-4 mr-2 animate-spin" />
-                  Executing…
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Execute
-                </>
-              )}
-            </Button>
+
+            {/* ── Schema collapsible ──────────────────────────────────── */}
+            {selectedReasoner && (
+              <div className="space-y-2">
+                <Collapsible open={schemaOpen} onOpenChange={setSchemaOpen}>
+                  <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    {schemaOpen ? (
+                      <ChevronDown className="size-3" />
+                    ) : (
+                      <ChevronRight className="size-3" />
+                    )}
+                    Schema
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="mt-2 space-y-2">
+                      {selectedReasoner.input_schema && (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                            Input Schema
+                          </p>
+                          <pre className="text-[10px] font-mono bg-muted rounded-md p-2 max-h-32 overflow-auto">
+                            {JSON.stringify(selectedReasoner.input_schema, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {selectedReasoner.output_schema && (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                            Output Schema
+                          </p>
+                          <pre className="text-[10px] font-mono bg-muted rounded-md p-2 max-h-32 overflow-auto">
+                            {JSON.stringify(selectedReasoner.output_schema, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {!selectedReasoner.input_schema && !selectedReasoner.output_schema && (
+                        <p className="text-xs text-muted-foreground">No schema defined.</p>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+
+            {/* ── Execute + cURL buttons ──────────────────────────────── */}
+            <div className="flex gap-2">
+              <Button
+                onClick={handleExecute}
+                disabled={executing || !selectedId}
+                className="flex-1"
+              >
+                {executing ? (
+                  <>
+                    <InProgress className="h-4 w-4 mr-2 animate-spin" />
+                    Executing…
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Execute
+                  </>
+                )}
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="default"
+                    disabled={!selectedId}
+                    className="gap-1.5"
+                  >
+                    {copiedSync || copiedAsync ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedSync || copiedAsync ? "Copied!" : "cURL"}
+                    <ChevronDown className="size-3 ml-0.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleCopySync}>
+                    {copiedSync ? (
+                      <Check className="size-3.5 mr-2" />
+                    ) : (
+                      <Copy className="size-3.5 mr-2" />
+                    )}
+                    {copiedSync ? "Copied!" : "Copy cURL (sync)"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleCopyAsync}>
+                    {copiedAsync ? (
+                      <Check className="size-3.5 mr-2" />
+                    ) : (
+                      <Copy className="size-3.5 mr-2" />
+                    )}
+                    {copiedAsync ? "Copied!" : "Copy cURL (async)"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </CardContent>
         </Card>
 
         {/* RESULT */}
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Result
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Result
+              </CardTitle>
+              {normalizedResultStatus && !executing && (
+                <div className="flex items-center gap-2">
+                  {resultDuration !== undefined && (
+                    <span className="text-xs text-muted-foreground">
+                      {formatDuration(resultDuration)}
+                    </span>
+                  )}
+                  <Badge
+                    variant={statusVariant(normalizedResultStatus)}
+                    className="text-xs"
+                  >
+                    {normalizedResultStatus}
+                  </Badge>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 flex-1">
             <div className="flex-1 min-h-[200px] rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-sm whitespace-pre-wrap overflow-auto">
@@ -404,18 +586,33 @@ export function PlaygroundPage() {
               )}
             </div>
 
-            {lastRunId && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full gap-2"
-                onClick={() =>
-                  navigate(`/executions/${encodeURIComponent(lastRunId)}`)
-                }
-              >
-                View as Execution
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+            {/* ── Post-execution action buttons ───────────────────────── */}
+            {(lastRunId || (result !== null && !resultError)) && !executing && (
+              <div className="flex gap-2">
+                {lastRunId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 gap-2"
+                    onClick={() =>
+                      navigate(`/runs/${encodeURIComponent(lastRunId)}`)
+                    }
+                  >
+                    View Run
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 gap-2"
+                  onClick={handleExecute}
+                  disabled={executing || !selectedId}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Replay
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
