@@ -6,6 +6,8 @@ import {
   useReactFlow,
   type Edge,
   type Node,
+  type NodeTypes,
+  type EdgeTypes,
   Panel,
   Background,
   BackgroundVariant,
@@ -165,8 +167,8 @@ export function VirtualizedDAG({
           /* ignore quota / private mode */
         }
       }}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
+      nodeTypes={nodeTypes as unknown as NodeTypes}
+      edgeTypes={edgeTypes as unknown as EdgeTypes}
       connectionLineComponent={FloatingConnectionLine}
       connectionMode={ConnectionMode.Strict}
       nodesDraggable={true}

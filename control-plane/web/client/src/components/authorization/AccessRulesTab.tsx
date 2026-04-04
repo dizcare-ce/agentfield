@@ -83,7 +83,7 @@ function renderRuleCell(callerTags: string[], targetTags: string[]) {
   const content = (
     <div className="flex min-w-0 items-center gap-1 overflow-hidden">
       {renderSide(callerTags)}
-      <ArrowRight className="mx-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" weight="bold" />
+      <ArrowRight className="mx-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       {renderSide(targetTags)}
     </div>
   );

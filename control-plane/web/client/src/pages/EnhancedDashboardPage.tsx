@@ -914,7 +914,7 @@ function ReasonerRow({ reasoner }: { reasoner: ReasonerSummary }) {
               reasoner.status === "active"
                 ? "success"
                 : reasoner.status === "attention"
-                  ? "warning"
+                  ? "degraded"
                   : "secondary"
             }
             className="text-xs"

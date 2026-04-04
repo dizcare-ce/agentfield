@@ -205,15 +205,15 @@ export const WorkflowDeckGLView = forwardRef<
     () => ({
       fitToContent,
       zoomIn: () =>
-        setViewState((s) => ({
-          ...s,
-          zoom: Math.min(s.zoom + 0.35, s.maxZoom ?? 8),
-        })),
+        setViewState((s) => {
+          const currentZoom = typeof s.zoom === "number" ? s.zoom : 0;
+          return { ...s, zoom: Math.min(currentZoom + 0.35, (s.maxZoom as number | undefined) ?? 8) };
+        }),
       zoomOut: () =>
-        setViewState((s) => ({
-          ...s,
-          zoom: Math.max(s.zoom - 0.35, s.minZoom ?? -6),
-        })),
+        setViewState((s) => {
+          const currentZoom = typeof s.zoom === "number" ? s.zoom : 0;
+          return { ...s, zoom: Math.max(currentZoom - 0.35, (s.minZoom as number | undefined) ?? -6) };
+        }),
     }),
     [fitToContent],
   );

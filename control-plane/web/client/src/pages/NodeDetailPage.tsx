@@ -4,7 +4,14 @@ import {
   StatusAnnouncer,
   useAccessibility,
 } from "@/components/AccessibilityEnhancements";
+import { DIDInfoModal } from "@/components/did/DIDInfoModal";
 import { EnvironmentVariableForm } from "@/components/forms/EnvironmentVariableForm";
+import {
+  MCPServerControls,
+  MCPServerList,
+  MCPToolExplorer,
+  MCPToolTester,
+} from "@/components/mcp";
 import { ReasonersSkillsTable } from "@/components/ReasonersSkillsTable";
 import { StatusRefreshButton } from "@/components/status";
 import {
@@ -29,10 +36,11 @@ import {
   AnimatedTabsContent,
   AnimatedTabsList,
   AnimatedTabsTrigger,
-} from "@/components/ui/tabs";
+} from "@/components/ui/animated-tabs";
 import { ResponsiveGrid } from "@/components/layout/ResponsiveGrid";
 import { useMode } from "@/contexts/ModeContext";
-import { useNodeUnifiedStatusSSE } from "@/hooks/useSSE";
+import { useDIDInfo } from "@/hooks/useDIDInfo";
+import { useMCPHealthSSE, useNodeUnifiedStatusSSE } from "@/hooks/useSSE";
 import {
   getMCPHealthModeAware,
   getMCPServerMetrics,
@@ -59,7 +67,6 @@ import type {
   MCPServerHealthForUI,
   MCPSummaryForUI,
 } from "@/types/agentfield";
-
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { EnhancedNodeDetailHeader } from "@/components/nodes";
@@ -97,7 +104,12 @@ function NodeDetailPageContent() {
   const [showRestartBanner, setShowRestartBanner] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // DID-related state
+  const { didInfo } = useDIDInfo(nodeId || "");
+  const [showDIDModal, setShowDIDModal] = useState(false);
+
   // Real-time updates using optimized SSE hook
+  const { latestEvent } = useMCPHealthSSE(nodeId || null);
   const { latestEvent: unifiedStatusEvent } = useNodeUnifiedStatusSSE(
     nodeId || null
   );
@@ -208,6 +220,9 @@ function NodeDetailPageContent() {
       hash &&
       [
         "overview",
+        "mcp-servers",
+        "tools",
+        "performance",
         "configuration",
       ].includes(hash)
     ) {
@@ -520,7 +535,7 @@ function NodeDetailPageContent() {
           {/* Tabs skeleton */}
           <div className="space-y-4">
             <div className="flex space-x-2">
-              {["Overview", "Configuration"].map(
+              {["Overview", "MCP Servers", "Tools", "Performance"].map(
                 (_, i) => (
                   <Skeleton key={i} className="h-10 w-24" />
                 )
@@ -739,7 +754,7 @@ function NodeDetailPageContent() {
   };
 
   const statusBadges = (
-    <span className="text-sm text-muted-foreground">
+    <span className="text-body-small">
       Verified {formatRelative(lastUpdate)}
     </span>
   );
@@ -777,6 +792,15 @@ function NodeDetailPageContent() {
             <AnimatedTabsList className="h-11 gap-1 rounded-lg bg-muted/40 p-1 flex-1">
               <AnimatedTabsTrigger value="overview" className="gap-2 px-4">
               Overview
+            </AnimatedTabsTrigger>
+            <AnimatedTabsTrigger value="mcp-servers" className="gap-2 px-4">
+              MCP Servers
+            </AnimatedTabsTrigger>
+            <AnimatedTabsTrigger value="tools" className="gap-2 px-4">
+              Tools
+            </AnimatedTabsTrigger>
+            <AnimatedTabsTrigger value="performance" className="gap-2 px-4">
+              Performance
             </AnimatedTabsTrigger>
             <AnimatedTabsTrigger value="configuration" className="gap-2 px-4">
               Configuration
@@ -882,10 +906,103 @@ function NodeDetailPageContent() {
               <ReasonersSkillsTable
                 reasoners={node.reasoners ?? []}
                 skills={node.skills ?? []}
+                reasonerDIDs={didInfo?.reasoners}
+                skillDIDs={didInfo?.skills}
+                agentDID={didInfo?.did}
                 agentStatus={agentStatusForTable}
                 nodeId={nodeId}
                 className="w-full"
               />
+            </div>
+          </AnimatedTabsContent>
+
+          <AnimatedTabsContent
+            value="mcp-servers"
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="flex flex-col gap-6 px-6 pb-6">
+              <ResponsiveGrid columns={{ base: 1, xl: 12 }} gap="md" align="start">
+                <div className="xl:col-span-8">
+                  <MCPServerList
+                    servers={mcpServers}
+                    nodeId={node.id}
+                    onServerAction={async (_action: string, _serverAlias: string) => {
+                      setTimeout(() => fetchData(false), 1000);
+                    }}
+                  />
+                </div>
+                <div className="xl:col-span-4">
+                  <MCPServerControls
+                    servers={mcpServers}
+                    nodeId={node.id}
+                    onBulkAction={async (_action: string, _serverAliases: string[]) => {
+                      setTimeout(() => fetchData(false), 1000);
+                    }}
+                  />
+                </div>
+              </ResponsiveGrid>
+            </div>
+          </AnimatedTabsContent>
+
+          <AnimatedTabsContent
+            value="tools"
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="flex flex-col gap-6 px-6 pb-6">
+              {mcpServers.length > 0 ? (
+                mcpServers.map((server) => (
+                  <ResponsiveGrid
+                    key={server.alias}
+                    columns={{ base: 1, xl: 12 }}
+                    gap="md"
+                    align="start"
+                  >
+                    <MCPToolExplorer
+                      tools={[]}
+                      serverAlias={server.alias}
+                      nodeId={node.id}
+                    />
+                    <MCPToolTester
+                      tool={{
+                        name: "",
+                        description: "",
+                        input_schema: { type: "object", properties: {} },
+                      }}
+                      serverAlias={server.alias}
+                      nodeId={node.id}
+                    />
+                  </ResponsiveGrid>
+                ))
+              ) : (
+                <div className="py-8 text-center">
+                  <p className="text-muted-foreground">
+                    No MCP servers available for tool exploration.
+                  </p>
+                </div>
+              )}
+            </div>
+          </AnimatedTabsContent>
+
+          <AnimatedTabsContent
+            value="performance"
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="flex flex-col gap-6 px-6 pb-6">
+              <div className="py-8 text-center">
+                <p className="text-muted-foreground">
+                  Performance metrics dashboard has been removed.
+                </p>
+                <p className="mt-2 text-body-small">
+                  Detailed MCP server metrics are available in the MCP Servers tab.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => fetchData(false)}
+                  className="mt-4"
+                >
+                  Refresh Data
+                </Button>
+              </div>
             </div>
           </AnimatedTabsContent>
 
@@ -936,6 +1053,11 @@ function NodeDetailPageContent() {
         </AnimatedTabs>
       </div>
 
+      <DIDInfoModal
+        isOpen={showDIDModal}
+        onClose={() => setShowDIDModal(false)}
+        nodeId={node.id}
+      />
     </div>
   );
 }

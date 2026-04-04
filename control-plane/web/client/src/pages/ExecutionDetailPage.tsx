@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ResponsiveGrid } from "@/components/layout/ResponsiveGrid";
 import { ExecutionDetailsLayout } from "../components/execution/ExecutionDetailsLayout";
-import { CompactExecutionHeader } from "../components/execution/CompactExecutionHeader";
+import { ExecutionHeader } from "../components/execution/ExecutionHeader";
 import { ExecutionTimeline } from "../components/execution/ExecutionTimeline";
 import { InputDataPanel as RedesignedInputDataPanel } from "../components/execution/InputDataPanel";
 import { OutputDataPanel as RedesignedOutputDataPanel } from "../components/execution/OutputDataPanel";

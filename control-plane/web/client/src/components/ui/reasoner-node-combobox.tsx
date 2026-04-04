@@ -21,7 +21,7 @@ function reasonerMatchesQuery(r: ReasonerWithNode, q: string): boolean {
     r.node_id.toLowerCase().includes(n) ||
     r.name.toLowerCase().includes(n) ||
     r.reasoner_id.toLowerCase().includes(n) ||
-    (r.description && r.description.toLowerCase().includes(n))
+    !!(r.description && r.description.toLowerCase().includes(n))
   );
 }
 

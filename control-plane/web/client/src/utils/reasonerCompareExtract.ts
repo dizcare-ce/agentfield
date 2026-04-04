@@ -153,10 +153,11 @@ export function formatOutputUsageHint(output: unknown): string | null {
 
   const tryUsage = (u: unknown): string | null => {
     if (!isPlainObject(u)) return null;
-    const total =
-      (typeof u.total_tokens === "number" && u.total_tokens) ||
-      (typeof u.total === "number" && u.total) ||
-      (typeof u.tokens === "number" && u.tokens);
+    const total: number | undefined =
+      typeof u.total_tokens === "number" ? u.total_tokens :
+      typeof u.total === "number" ? u.total :
+      typeof u.tokens === "number" ? u.tokens :
+      undefined;
     const inT =
       typeof u.prompt_tokens === "number"
         ? u.prompt_tokens

@@ -14,7 +14,7 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { AgentLegend } from "./AgentLegend";
@@ -1461,7 +1461,7 @@ function decorateEdgesWithStatus(
                   ref={deckGlRef}
                   nodes={deckGraphData.nodes}
                   edges={deckGraphData.edges}
-                  onNodeClick={handleDeckNodeClick}
+                  onNodeClick={handleDeckNodeClick as unknown as (node: import("./DeckGLGraph").WorkflowDAGNode) => void}
                 />
 
                 {graphExpanded ? (
@@ -1541,8 +1541,8 @@ function decorateEdgesWithStatus(
                 nodes={nodes}
                 edges={edges}
                 onNodeClick={handleNodeClick}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
+                nodeTypes={nodeTypes as Record<string, React.ComponentType<object>>}
+                edgeTypes={edgeTypes as Record<string, React.ComponentType<object>>}
                 className="min-h-[280px] w-full flex-1"
                 style={{ width: "100%", height: "100%", minHeight: 280 }}
                 threshold={PERFORMANCE_THRESHOLD}
