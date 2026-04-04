@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { AppSidebar } from "./AppSidebar";
 import { HealthStrip } from "./HealthStrip";
+import { CommandPalette } from "./CommandPalette";
 
 const routeNames: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -48,7 +49,13 @@ export function AppLayout() {
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
+          <div className="ml-auto">
+            <kbd className="hidden md:inline-flex h-5 items-center gap-1 rounded border border-border bg-muted px-1.5 text-[10px] font-mono text-muted-foreground">
+              ⌘K
+            </kbd>
+          </div>
         </header>
+        <CommandPalette />
         <HealthStrip />
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
