@@ -7,11 +7,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RunTrace, buildTraceTree, formatDuration } from "@/components/RunTrace";
 import { StepDetail } from "@/components/StepDetail";
+import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -47,6 +49,7 @@ export function RunDetailPage() {
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [replaying, setReplaying] = useState(false);
+  const [viewMode, setViewMode] = useState<"trace" | "graph">("trace");
 
   // Auto-select root step (first in timeline)
   useEffect(() => {
@@ -136,6 +139,15 @@ export function RunDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {!isSingleStep && (
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "trace" | "graph")}>
+              <TabsList className="h-7">
+                <TabsTrigger value="trace" className="text-xs px-2.5 h-6">Trace</TabsTrigger>
+                <TabsTrigger value="graph" className="text-xs px-2.5 h-6">Graph</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+
           <Badge variant={statusVariant(dag.workflow_status)}>
             {dag.workflow_status}
           </Badge>
@@ -197,25 +209,36 @@ export function RunDetailPage() {
       ) : (
         // Multi-step run: split view
         <div className="grid grid-cols-[1fr_1fr] gap-4 min-h-[500px]">
-          {/* Left: trace panel */}
+          {/* Left: trace or graph panel */}
           <Card>
             <CardContent className="p-0">
-              <ScrollArea className="h-[500px]">
-                <div className="p-2">
-                  {traceTree ? (
-                    <RunTrace
-                      node={traceTree}
-                      maxDuration={maxDuration}
-                      selectedId={selectedStepId}
-                      onSelect={setSelectedStepId}
-                    />
-                  ) : (
-                    <p className="text-xs text-muted-foreground p-4">
-                      No steps to display
-                    </p>
-                  )}
+              {viewMode === "graph" ? (
+                <div className="h-[500px]">
+                  <WorkflowDAGViewer
+                    workflowId={dag.root_workflow_id}
+                    dagData={dag}
+                    selectedNodeIds={selectedStepId ? [selectedStepId] : undefined}
+                    onExecutionClick={(execution) => setSelectedStepId(execution.execution_id)}
+                  />
                 </div>
-              </ScrollArea>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <div className="p-2">
+                    {traceTree ? (
+                      <RunTrace
+                        node={traceTree}
+                        maxDuration={maxDuration}
+                        selectedId={selectedStepId}
+                        onSelect={setSelectedStepId}
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground p-4">
+                        No steps to display
+                      </p>
+                    )}
+                  </div>
+                </ScrollArea>
+              )}
             </CardContent>
           </Card>
 
