@@ -1186,6 +1186,8 @@ func (s *AgentFieldServer) setupRoutes() {
 				didHandler := ui.NewDIDHandler(s.storage, s.didService, s.vcService, s.didWebService)
 				did.GET("/status", didHandler.GetDIDSystemStatusHandler)
 				did.GET("/export/vcs", didHandler.ExportVCsHandler)
+				did.POST("/verify", didHandler.VerifyVCHandler)
+				did.POST("/verify-audit", didHandler.VerifyAuditBundleHandler)
 				did.GET("/:did/resolution-bundle", didHandler.GetDIDResolutionBundleHandler)
 				did.GET("/:did/resolution-bundle/download", didHandler.DownloadDIDResolutionBundleHandler)
 			}

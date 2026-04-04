@@ -23,6 +23,8 @@ const routeNames: Record<string, string> = {
   "/runs": "Runs",
   "/agents": "Agents",
   "/playground": "Playground",
+  "/verify": "Verify",
+  "/access": "Access management",
   "/settings": "Settings",
   "/nodes": "Nodes",
   "/reasoners": "Reasoners",

@@ -98,6 +98,7 @@ func DefaultEntries() []EndpointEntry {
 		{Method: "GET", Path: "/api/v1/did/resolve/:did", Group: "did", Summary: "Resolve a DID to its document", AuthLevel: "public", Tags: []string{"did", "identity", "resolve"}},
 		{Method: "GET", Path: "/api/v1/did/issuer-public-keys", Group: "did", Summary: "Get issuer public keys", AuthLevel: "public", Tags: []string{"did", "identity", "keys"}},
 		{Method: "GET", Path: "/api/v1/did/workflow/:workflow_id/vc-chain", Group: "did", Summary: "Get VC chain for workflow", AuthLevel: "api_key", Tags: []string{"did", "vc", "workflow", "audit"}},
+		{Method: "POST", Path: "/api/v1/did/verify-audit", Group: "did", Summary: "Verify exported provenance JSON (VC chain or bare VC)", AuthLevel: "api_key", Tags: []string{"did", "vc", "verify", "audit"}},
 
 		// --- Agentic API ---
 		{Method: "GET", Path: "/api/v1/agentic/discover", Group: "agentic", Summary: "Search API endpoints by keyword, group, or method", AuthLevel: "api_key", Tags: []string{"agentic", "discover", "api", "search"}},

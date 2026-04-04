@@ -111,7 +111,8 @@ type VCVerificationResult struct {
 	ComponentResults  []ComponentVerification `json:"component_results,omitempty"`
 	DIDResolutions    []DIDResolutionResult   `json:"did_resolutions,omitempty"`
 	VerificationSteps []VerificationStep      `json:"verification_steps,omitempty"`
-	Summary           VerificationSummary     `json:"summary"`
+	Summary           VerificationSummary              `json:"summary"`
+	Comprehensive     *ComprehensiveVerificationResult `json:"comprehensive,omitempty"`
 }
 
 // ComponentVerification represents verification result for a single component
@@ -158,17 +159,15 @@ type VerificationSummary struct {
 }
 
 func verifyVC(vcFilePath string, options VerifyOptions) error {
-	result := VCVerificationResult{
-		VerifiedAt:        time.Now().UTC().Format(time.RFC3339),
-		VerificationSteps: []VerificationStep{},
-		DIDResolutions:    []DIDResolutionResult{},
-		ComponentResults:  []ComponentVerification{},
-	}
-
-	// Step 1: Read and parse VC file
 	step1 := VerificationStep{Step: 1, Description: "Reading VC file"}
 	vcData, err := os.ReadFile(vcFilePath)
 	if err != nil {
+		result := VCVerificationResult{
+			VerifiedAt:        time.Now().UTC().Format(time.RFC3339),
+			VerificationSteps: []VerificationStep{},
+			DIDResolutions:    []DIDResolutionResult{},
+			ComponentResults:  []ComponentVerification{},
+		}
 		step1.Success = false
 		step1.Error = fmt.Sprintf("Failed to read VC file: %v", err)
 		result.VerificationSteps = append(result.VerificationSteps, step1)
@@ -178,158 +177,9 @@ func verifyVC(vcFilePath string, options VerifyOptions) error {
 	}
 	step1.Success = true
 	step1.Details = fmt.Sprintf("Read %d bytes from %s", len(vcData), vcFilePath)
-	result.VerificationSteps = append(result.VerificationSteps, step1)
 
-	// Step 2: Parse VC structure
-	step2 := VerificationStep{Step: 2, Description: "Parsing VC structure"}
-	var enhancedChain EnhancedVCChain
-	if err := json.Unmarshal(vcData, &enhancedChain); err == nil && enhancedChain.WorkflowID != "" {
-		normalizeEnhancedChain(&enhancedChain)
-		// Enhanced VC chain with DID resolution bundle
-		step2.Success = true
-		step2.Details = fmt.Sprintf("Parsed enhanced VC chain with %d execution VCs", len(enhancedChain.ExecutionVCs))
-		result.Type = "workflow"
-		result.WorkflowID = enhancedChain.WorkflowID
-		result.FormatValid = true
-	} else {
-		// Try legacy format
-		var workflowChain types.WorkflowVCChainResponse
-		if err := json.Unmarshal(vcData, &workflowChain); err == nil && workflowChain.WorkflowID != "" {
-			step2.Success = true
-			step2.Details = fmt.Sprintf("Parsed legacy VC chain with %d execution VCs", len(workflowChain.ComponentVCs))
-			result.Type = "workflow"
-			result.WorkflowID = workflowChain.WorkflowID
-			result.FormatValid = true
-			// Convert to enhanced format
-			enhancedChain = convertLegacyChain(workflowChain)
-			normalizeEnhancedChain(&enhancedChain)
-		} else {
-			step2.Success = false
-			step2.Error = "Invalid VC format: not a recognized AgentField VC structure"
-			result.VerificationSteps = append(result.VerificationSteps, step2)
-			result.Valid = false
-			result.FormatValid = false
-			result.Error = step2.Error
-			return outputResult(result, options)
-		}
-	}
-	result.VerificationSteps = append(result.VerificationSteps, step2)
-
-	// Step 3: Collect unique DIDs
-	step3 := VerificationStep{Step: 3, Description: "Collecting unique DIDs"}
-	uniqueDIDs := collectUniqueDIDs(enhancedChain)
-	step3.Success = true
-	step3.Details = fmt.Sprintf("Found %d unique DIDs", len(uniqueDIDs))
-	result.VerificationSteps = append(result.VerificationSteps, step3)
-
-	// Step 4: Resolve DIDs
-	step4 := VerificationStep{Step: 4, Description: "Resolving DIDs"}
-	didResolutions := make(map[string]DIDResolutionInfo)
-	resolvedCount := 0
-
-	for _, did := range uniqueDIDs {
-		resolution, err := resolveDID(did, enhancedChain.DIDResolutionBundle, options)
-		didResult := DIDResolutionResult{
-			DID:    did,
-			Method: getDIDMethod(did),
-		}
-
-		if err != nil {
-			didResult.Success = false
-			didResult.Error = err.Error()
-		} else {
-			didResult.Success = true
-			didResult.ResolvedFrom = resolution.ResolvedFrom
-			if resolution.WebURL != "" {
-				didResult.WebURL = resolution.WebURL
-			}
-			didResolutions[did] = resolution
-			resolvedCount++
-		}
-		result.DIDResolutions = append(result.DIDResolutions, didResult)
-	}
-
-	step4.Success = resolvedCount > 0
-	step4.Details = fmt.Sprintf("Resolved %d/%d DIDs", resolvedCount, len(uniqueDIDs))
-	if resolvedCount == 0 {
-		step4.Error = "Failed to resolve any DIDs"
-	}
-	result.VerificationSteps = append(result.VerificationSteps, step4)
-
-	// Step 5: Enhanced comprehensive verification
-	step5 := VerificationStep{Step: 5, Description: "Performing comprehensive verification"}
-
-	// Use the enhanced verifier for comprehensive checks
-	enhancedVerifier := NewEnhancedVCVerifier(didResolutions, options.Verbose)
-	comprehensiveResult := enhancedVerifier.VerifyEnhancedVCChain(enhancedChain)
-
-	// Convert comprehensive result to legacy format for compatibility
-	validSignatures := 0
-	totalSignatures := len(enhancedChain.ExecutionVCs)
-	if enhancedChain.WorkflowVC.VCDocument != nil {
-		totalSignatures++
-	}
-
-	for _, compResult := range comprehensiveResult.ComponentResults {
-		if compResult.SignatureValid {
-			validSignatures++
-		}
-		// Convert to legacy ComponentVerification format
-		legacyResult := ComponentVerification{
-			VCID:           compResult.VCID,
-			ExecutionID:    compResult.ExecutionID,
-			IssuerDID:      compResult.IssuerDID,
-			Valid:          compResult.Valid,
-			SignatureValid: compResult.SignatureValid,
-			FormatValid:    compResult.FormatValid,
-			Status:         compResult.Status,
-			Error:          compResult.Error,
-		}
-		result.ComponentResults = append(result.ComponentResults, legacyResult)
-	}
-
-	step5.Success = comprehensiveResult.Valid
-	step5.Details = fmt.Sprintf("Comprehensive verification completed - Score: %.1f/100", comprehensiveResult.OverallScore)
-	if !comprehensiveResult.Valid {
-		step5.Error = fmt.Sprintf("Found %d critical issues", len(comprehensiveResult.CriticalIssues))
-	}
-	result.VerificationSteps = append(result.VerificationSteps, step5)
-
-	// Add detailed verification information if verbose
-	if options.Verbose && len(comprehensiveResult.CriticalIssues) > 0 {
-		step6 := VerificationStep{Step: 6, Description: "Critical Issues Detected"}
-		step6.Success = false
-		details := "Critical issues found:\n"
-		for _, issue := range comprehensiveResult.CriticalIssues {
-			details += fmt.Sprintf("  - %s: %s\n", issue.Type, issue.Description)
-		}
-		step6.Details = details
-		result.VerificationSteps = append(result.VerificationSteps, step6)
-	}
-
-	// Final result based on comprehensive verification
-	result.SignatureValid = comprehensiveResult.SecurityAnalysis.SecurityScore > 80.0
-	result.Valid = comprehensiveResult.Valid
-
-	if result.Valid {
-		result.Message = fmt.Sprintf("Workflow VC chain verified successfully (Score: %.1f/100)", comprehensiveResult.OverallScore)
-	} else {
-		result.Message = fmt.Sprintf("Workflow VC chain verification failed (Score: %.1f/100)", comprehensiveResult.OverallScore)
-		if len(comprehensiveResult.CriticalIssues) > 0 {
-			result.Error = fmt.Sprintf("%d critical issues detected", len(comprehensiveResult.CriticalIssues))
-		}
-	}
-
-	// Summary
-	result.Summary = VerificationSummary{
-		TotalComponents: len(enhancedChain.ExecutionVCs),
-		ValidComponents: len(result.ComponentResults),
-		TotalDIDs:       len(uniqueDIDs),
-		ResolvedDIDs:    resolvedCount,
-		TotalSignatures: totalSignatures,
-		ValidSignatures: validSignatures,
-	}
-
+	result := VerifyProvenanceJSON(vcData, options)
+	result.VerificationSteps = append([]VerificationStep{step1}, result.VerificationSteps...)
 	return outputResult(result, options)
 }
 
@@ -579,7 +429,7 @@ func getDIDMethod(did string) string {
 }
 
 func convertLegacyChain(legacy types.WorkflowVCChainResponse) EnhancedVCChain {
-	return EnhancedVCChain{
+	chain := EnhancedVCChain{
 		WorkflowID:          legacy.WorkflowID,
 		GeneratedAt:         time.Now().UTC().Format(time.RFC3339),
 		TotalExecutions:     len(legacy.ComponentVCs),
@@ -589,6 +439,10 @@ func convertLegacyChain(legacy types.WorkflowVCChainResponse) EnhancedVCChain {
 		ComponentVCs:        legacy.ComponentVCs,
 		WorkflowVC:          legacy.WorkflowVC,
 	}
+	if len(legacy.DIDResolutionBundle) > 0 {
+		chain.DIDResolutionBundle = mergeDIDBundle(chain.DIDResolutionBundle, legacy.DIDResolutionBundle)
+	}
+	return chain
 }
 
 func normalizeEnhancedChain(chain *EnhancedVCChain) {

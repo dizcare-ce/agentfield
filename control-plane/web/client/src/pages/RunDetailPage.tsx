@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRunDAG, useCancelExecution } from "@/hooks/queries";
 import {
@@ -15,6 +15,7 @@ import {
   FileJson,
   Info,
   Link2,
+  ShieldCheck,
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
@@ -746,6 +747,21 @@ export function RunDetailPage() {
                   Same shape as GET /workflows/…/vc-chain — use with{" "}
                   <code className="text-[10px]">af verify</code>
                 </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link
+                  to="/verify"
+                  className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <ShieldCheck className="size-4 shrink-0" />
+                    Open Verify tool
+                  </span>
+                  <span className="pl-6 text-xs text-muted-foreground">
+                    Upload the file you downloaded for cryptographic checks
+                  </span>
+                </Link>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -4,6 +4,8 @@ import {
   Server,
   FlaskConical,
   Settings,
+  Shield,
+  ShieldCheck,
 } from "lucide-react";
 
 export const navigation = [
@@ -26,6 +28,16 @@ export const navigation = [
     title: "Playground",
     icon: FlaskConical,
     path: "/playground",
+  },
+  {
+    title: "Verify",
+    icon: ShieldCheck,
+    path: "/verify",
+  },
+  {
+    title: "Access management",
+    icon: Shield,
+    path: "/access",
   },
   {
     title: "Settings",

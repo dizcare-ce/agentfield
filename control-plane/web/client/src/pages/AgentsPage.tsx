@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAgents } from "@/hooks/queries";
+import { Link, useNavigate } from "react-router-dom";
+import { useAgents, useAgentTagSummaries } from "@/hooks/queries";
 import { getNodeDetails } from "@/services/api";
 import { startAgent } from "@/services/configurationApi";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,6 +20,7 @@ import {
   SkillIcon,
 } from "@/components/ui/icon-bridge";
 import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition, LifecycleStatus } from "@/types/agentfield";
+import type { AgentTagSummary } from "@/services/tagApprovalApi";
 import { useQuery } from "@tanstack/react-query";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -352,11 +354,73 @@ function EndpointRow({ nodeId, row, onOpen }: EndpointRowProps) {
 
 // ─── AgentRow ────────────────────────────────────────────────────────────────
 
-interface AgentRowProps {
-  node: AgentNodeSummary;
+function AgentAuthTagStrip({ summary }: { summary: AgentTagSummary }) {
+  const granted = summary.approved_tags ?? [];
+  const requested = summary.proposed_tags ?? [];
+  const hasTags = granted.length > 0 || requested.length > 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/50 bg-muted/15 px-4 py-2 pl-14 text-left">
+      <span className="w-full text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:w-auto">
+        Auth tags
+      </span>
+      {!hasTags && (
+        <span className="text-[10px] text-muted-foreground">No tags recorded</span>
+      )}
+      {granted.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-muted-foreground">Granted</span>
+          {granted.slice(0, 8).map((t) => (
+            <Badge
+              key={`g-${t}`}
+              variant="secondary"
+              size="sm"
+              showIcon={false}
+              className="max-w-[140px] truncate text-[10px]"
+            >
+              {t}
+            </Badge>
+          ))}
+          {granted.length > 8 && (
+            <span className="text-[10px] text-muted-foreground">+{granted.length - 8}</span>
+          )}
+        </div>
+      )}
+      {requested.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-muted-foreground">Requested</span>
+          {requested.slice(0, 8).map((t) => (
+            <Badge
+              key={`p-${t}`}
+              variant="outline"
+              size="sm"
+              showIcon={false}
+              className="max-w-[140px] truncate text-[10px]"
+            >
+              {t}
+            </Badge>
+          ))}
+          {requested.length > 8 && (
+            <span className="text-[10px] text-muted-foreground">+{requested.length - 8}</span>
+          )}
+        </div>
+      )}
+      <Link
+        to="/access"
+        className="ml-auto text-[10px] font-medium text-primary hover:underline"
+      >
+        Access management
+      </Link>
+    </div>
+  );
 }
 
-function AgentRow({ node }: AgentRowProps) {
+interface AgentRowProps {
+  node: AgentNodeSummary;
+  tagSummary?: AgentTagSummary;
+}
+
+function AgentRow({ node, tagSummary }: AgentRowProps) {
   const [open, setOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
@@ -452,6 +516,8 @@ function AgentRow({ node }: AgentRowProps) {
         </Button>
       </button>
 
+      {tagSummary ? <AgentAuthTagStrip summary={tagSummary} /> : null}
+
       {/* Inline expanded reasoner rows */}
       {open && (
         <NodeReasonerList
@@ -468,6 +534,15 @@ function AgentRow({ node }: AgentRowProps) {
 
 export function AgentsPage() {
   const { data, isLoading, isError, error } = useAgents();
+  const { data: tagAgents } = useAgentTagSummaries();
+  const tagsByAgentId = useMemo(() => {
+    const m = new Map<string, AgentTagSummary>();
+    for (const a of tagAgents ?? []) {
+      m.set(a.agent_id, a);
+    }
+    return m;
+  }, [tagAgents]);
+
   const agentsFromApi = data?.nodes;
   const nodes = agentsFromApi ?? [];
   const [searchQuery, setSearchQuery] = useState("");
@@ -639,7 +714,11 @@ export function AgentsPage() {
         <Card className="overflow-hidden p-0">
           <div className="divide-y divide-border">
             {filteredNodes.map((node) => (
-              <AgentRow key={node.id} node={node} />
+              <AgentRow
+                key={node.id}
+                node={node}
+                tagSummary={tagsByAgentId.get(node.id)}
+              />
             ))}
           </div>
         </Card>

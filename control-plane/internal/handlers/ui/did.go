@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 
+	afcli "github.com/Agent-Field/agentfield/control-plane/internal/cli"
 	"github.com/gin-gonic/gin"
 )
 
@@ -478,6 +480,30 @@ func (h *DIDHandler) VerifyVCHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// VerifyAuditBundleHandler verifies exported provenance JSON (workflow chain, enhanced export, or bare W3C VC).
+// POST /api/ui/v1/did/verify-audit
+// Query: resolve_web=true, did_resolver=<url>, verbose=true
+func (h *DIDHandler) VerifyAuditBundleHandler(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, afcli.MaxVerifyAuditBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body", "details": err.Error()})
+		return
+	}
+	if len(body) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty body"})
+		return
+	}
+	opts := afcli.VerifyOptions{
+		OutputFormat: "json",
+		ResolveWeb:   c.Query("resolve_web") == "true",
+		Resolver:     c.Query("did_resolver"),
+		Verbose:      c.Query("verbose") == "true",
+	}
+	result := afcli.VerifyProvenanceJSON(body, opts)
+	c.JSON(http.StatusOK, result)
 }
 
 // VerifyExecutionVCComprehensiveHandler handles requests for comprehensive VC verification.

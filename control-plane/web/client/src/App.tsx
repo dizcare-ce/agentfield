@@ -19,8 +19,10 @@ import { NewSettingsPage } from "./pages/NewSettingsPage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { RunsPage } from "./pages/RunsPage";
 import { RunDetailPage } from "./pages/RunDetailPage";
+import { VerifyProvenancePage } from "./pages/VerifyProvenancePage";
 import { ComparisonPage } from "./pages/ComparisonPage";
 import { PlaygroundPage } from "./pages/PlaygroundPage";
+import { AccessManagementPage } from "./pages/AccessManagementPage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
@@ -45,8 +47,10 @@ function AppContent() {
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/runs/compare" element={<ComparisonPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
+        <Route path="/verify" element={<VerifyProvenancePage />} />
         <Route path="/playground" element={<PlaygroundPage />} />
         <Route path="/playground/:reasonerId" element={<PlaygroundPage />} />
+        <Route path="/access" element={<AccessManagementPage />} />
 
         {/* Old → New redirects */}
         <Route path="/executions" element={<Navigate to="/runs" replace />} />
@@ -59,7 +63,8 @@ function AppContent() {
         <Route path="/reasoners/:reasonerId" element={<NavigateToPlayground />} />
         <Route path="/identity/dids" element={<Navigate to="/settings" replace />} />
         <Route path="/identity/credentials" element={<Navigate to="/settings" replace />} />
-        <Route path="/authorization" element={<Navigate to="/settings" replace />} />
+        <Route path="/governance" element={<Navigate to="/access" replace />} />
+        <Route path="/authorization" element={<Navigate to="/access" replace />} />
         <Route path="/packages" element={<Navigate to="/settings" replace />} />
       </Route>
     </Routes>

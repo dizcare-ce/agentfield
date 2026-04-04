@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	afcli "github.com/Agent-Field/agentfield/control-plane/internal/cli"
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 )
@@ -170,6 +172,30 @@ func (h *DIDHandlers) VerifyVC(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// VerifyAuditBundle verifies exported provenance JSON (same logic as `af vc verify`).
+// POST /api/v1/did/verify-audit
+// Query: resolve_web=true, did_resolver=<url>, verbose=true
+func (h *DIDHandlers) VerifyAuditBundle(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, afcli.MaxVerifyAuditBodyBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body", "details": err.Error()})
+		return
+	}
+	if len(body) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty body"})
+		return
+	}
+	opts := afcli.VerifyOptions{
+		OutputFormat: "json",
+		ResolveWeb:   c.Query("resolve_web") == "true",
+		Resolver:     c.Query("did_resolver"),
+		Verbose:      c.Query("verbose") == "true",
+	}
+	result := afcli.VerifyProvenanceJSON(body, opts)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetWorkflowVCChain handles workflow VC chain requests.
@@ -528,6 +554,7 @@ func (h *DIDHandlers) RegisterRoutes(router *gin.RouterGroup) {
 		didGroup.POST("/register", h.RegisterAgent)
 		didGroup.GET("/resolve/:did", h.ResolveDID)
 		didGroup.POST("/verify", h.VerifyVC)
+		didGroup.POST("/verify-audit", h.VerifyAuditBundle)
 		didGroup.GET("/workflow/:workflow_id/vc-chain", h.GetWorkflowVCChain)
 		didGroup.POST("/workflow/:workflow_id/vc", h.CreateWorkflowVC)
 		didGroup.GET("/status", h.GetDIDStatus)

@@ -14,6 +14,8 @@ import {
   Play,
   Server,
   FlaskConical,
+  Shield,
+  ShieldCheck,
   Settings,
   Search,
 } from "lucide-react";
@@ -64,6 +66,18 @@ export function CommandPalette() {
           >
             <FlaskConical className="mr-2 size-4" />
             Playground
+          </CommandItem>
+          <CommandItem
+            onSelect={() => runAction(() => navigate("/verify"))}
+          >
+            <ShieldCheck className="mr-2 size-4" />
+            Verify
+          </CommandItem>
+          <CommandItem
+            onSelect={() => runAction(() => navigate("/access"))}
+          >
+            <Shield className="mr-2 size-4" />
+            Access management
           </CommandItem>
           <CommandItem
             onSelect={() => runAction(() => navigate("/settings"))}

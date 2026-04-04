@@ -9,7 +9,8 @@ import type {
   VCStatusSummary,
   AuditTrailEntry,
   ComprehensiveVCVerificationResult,
-  WorkflowVCStatusBatchResponse
+  WorkflowVCStatusBatchResponse,
+  ProvenanceVerificationResponse
 } from '../types/did';
 import { normalizeExecutionStatus, isSuccessStatus, isFailureStatus } from '../utils/status';
 import { getGlobalApiKey } from './api';
@@ -103,6 +104,35 @@ export async function verifyVC(vcDocument: any): Promise<VCVerificationResponse>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request)
+  });
+}
+
+export interface VerifyProvenanceAuditOptions {
+  resolveWeb?: boolean;
+  verbose?: boolean;
+  didResolver?: string;
+}
+
+/**
+ * Verify exported provenance JSON (workflow audit, execution bundle, or bare W3C VC).
+ * POST /api/ui/v1/did/verify-audit — same logic as `af vc verify`.
+ */
+export async function verifyProvenanceAudit(
+  document: unknown,
+  options?: VerifyProvenanceAuditOptions,
+): Promise<ProvenanceVerificationResponse> {
+  const body =
+    typeof document === 'string' ? document : JSON.stringify(document);
+  const params = new URLSearchParams();
+  if (options?.resolveWeb) params.set('resolve_web', 'true');
+  if (options?.verbose) params.set('verbose', 'true');
+  if (options?.didResolver) params.set('did_resolver', options.didResolver);
+  const q = params.toString();
+  const path = `/did/verify-audit${q ? `?${q}` : ''}`;
+  return fetchWrapper<ProvenanceVerificationResponse>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
   });
 }
 
