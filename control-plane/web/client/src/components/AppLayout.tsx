@@ -42,26 +42,29 @@ export function AppLayout() {
     <SidebarProvider defaultOpen={true}>
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-10 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar/30 px-4 backdrop-blur-sm">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbPage>
-                  {currentRoute?.[1] || "AgentField"}
-                </BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-          <div className="ml-auto">
-            <kbd className="hidden md:inline-flex h-5 items-center gap-1 rounded border border-border bg-muted px-1.5 text-[10px] font-mono text-muted-foreground">
+          <div className="min-w-0 flex-1">
+            <Breadcrumb>
+              <BreadcrumbList className="flex-nowrap">
+                <BreadcrumbItem>
+                  <BreadcrumbPage className="truncate">
+                    {currentRoute?.[1] || "AgentField"}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <HealthStrip />
+            <Separator orientation="vertical" className="hidden h-4 sm:block" />
+            <kbd className="hidden md:inline-flex h-5 shrink-0 items-center gap-1 rounded border border-border bg-muted px-1.5 text-[10px] font-mono text-muted-foreground">
               ⌘K
             </kbd>
           </div>
         </header>
         <CommandPalette />
-        <HealthStrip />
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>

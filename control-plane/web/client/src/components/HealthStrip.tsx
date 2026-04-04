@@ -1,5 +1,6 @@
 import { Activity, Bot, Layers } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
   TooltipContent,
@@ -11,7 +12,11 @@ import { useSSE } from "@/hooks/useSSE";
 import { cn } from "@/lib/utils";
 import type { AgentNodeSummary } from "@/types/agentfield";
 
-export function HealthStrip() {
+type HealthStripProps = {
+  className?: string;
+};
+
+export function HealthStrip({ className }: HealthStripProps) {
   const llmHealth = useLLMHealth();
   const queueStatus = useQueueStatus();
   const agents = useAgents();
@@ -44,15 +49,25 @@ export function HealthStrip() {
   );
 
   return (
-    <div className="flex items-center gap-4 border-b border-border px-4 py-2 text-xs">
-      <TooltipProvider delayDuration={300}>
+    <TooltipProvider delayDuration={300}>
+      <div
+        className={cn(
+          "flex items-center gap-2 text-xs sm:gap-3",
+          className,
+        )}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <Activity
-                className={`size-3.5 ${llmOk ? "text-green-500" : "text-destructive"}`}
+                className={cn(
+                  "size-3.5 shrink-0",
+                  llmOk ? "text-green-500" : "text-destructive",
+                )}
               />
-              <span className="text-muted-foreground">LLM</span>
+              <span className="hidden text-muted-foreground lg:inline">
+                LLM
+              </span>
               <Badge
                 variant={llmOk ? "secondary" : "destructive"}
                 className="h-5 px-1.5 text-[10px]"
@@ -70,11 +85,16 @@ export function HealthStrip() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <Bot
-                className={`size-3.5 ${onlineCount > 0 ? "text-green-500" : "text-muted-foreground"}`}
+                className={cn(
+                  "size-3.5 shrink-0",
+                  onlineCount > 0 ? "text-green-500" : "text-muted-foreground",
+                )}
               />
-              <span className="text-muted-foreground">Agents</span>
+              <span className="hidden text-muted-foreground lg:inline">
+                Agents
+              </span>
               <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                 {onlineCount}/{totalAgents} online
               </Badge>
@@ -85,11 +105,16 @@ export function HealthStrip() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <Layers
-                className={`size-3.5 ${totalRunning > 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                className={cn(
+                  "size-3.5 shrink-0",
+                  totalRunning > 0 ? "text-blue-500" : "text-muted-foreground",
+                )}
               />
-              <span className="text-muted-foreground">Queue</span>
+              <span className="hidden text-muted-foreground lg:inline">
+                Queue
+              </span>
               <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                 {totalRunning} running
               </Badge>
@@ -98,22 +123,27 @@ export function HealthStrip() {
           <TooltipContent>Execution queue status</TooltipContent>
         </Tooltip>
 
-        {/* SSE live-update indicator */}
+        <Separator orientation="vertical" className="h-4" />
+
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 ml-auto">
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <div
                 className={cn(
-                  "size-1.5 rounded-full",
+                  "size-1.5 shrink-0 rounded-full",
                   sseConnected
                     ? "bg-green-500"
                     : sseReconnecting
-                      ? "bg-amber-500 animate-pulse"
+                      ? "animate-pulse bg-amber-500"
                       : "bg-muted-foreground",
                 )}
               />
-              <span className="text-[10px] text-muted-foreground">
-                {sseConnected ? "Live" : sseReconnecting ? "Reconnecting" : "Disconnected"}
+              <span className="hidden text-[10px] text-muted-foreground sm:inline">
+                {sseConnected
+                  ? "Live"
+                  : sseReconnecting
+                    ? "Reconnecting"
+                    : "Disconnected"}
               </span>
             </div>
           </TooltipTrigger>
@@ -125,7 +155,7 @@ export function HealthStrip() {
                 : "Live updates unavailable — pages will not auto-refresh"}
           </TooltipContent>
         </Tooltip>
-      </TooltipProvider>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

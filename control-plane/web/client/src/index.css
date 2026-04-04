@@ -43,6 +43,9 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    /* shadcn sidebar menu button hover/active (see ui/sidebar.tsx) */
+    --sidebar-hover: hsl(var(--sidebar-accent));
+    --sidebar-active-bg: hsl(var(--sidebar-accent));
 
     /* Status colors (domain-specific extension) */
     --status-success: 142 76% 36%;
@@ -84,6 +87,8 @@
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-hover: hsl(var(--sidebar-accent));
+    --sidebar-active-bg: hsl(var(--sidebar-accent));
 
     /* Status colors dark mode */
     --status-success: 142 72% 29%;

@@ -1,15 +1,20 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/hooks/queries";
 import { getNodeDetails } from "@/services/api";
 import { startAgent } from "@/services/configurationApi";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
   ChevronRight,
-  RefreshCw,
+  Function,
   Play,
+  RefreshCw,
+  Search,
+  WatsonxAi,
 } from "@/components/ui/icon-bridge";
 import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition, LifecycleStatus } from "@/types/agentfield";
 import { useQuery } from "@tanstack/react-query";
@@ -69,7 +74,15 @@ function getStatusTextColor(lifecycleStatus: LifecycleStatus | undefined): strin
 
 // ─── NodeReasonerList ────────────────────────────────────────────────────────
 
-const SHOW_LIMIT = 5;
+/** Scroll when many endpoints so the agent list stays usable. */
+const SCROLL_AFTER = 10;
+
+type NodeEndpointRow = {
+  id: string;
+  name: string;
+  description?: string;
+  kind: "reasoner" | "skill";
+};
 
 interface NodeReasonerListProps {
   nodeId: string;
@@ -77,11 +90,21 @@ interface NodeReasonerListProps {
   skillCount: number;
 }
 
+function matchesFilter(q: string, row: NodeEndpointRow): boolean {
+  if (!q.trim()) return true;
+  const n = q.trim().toLowerCase();
+  return (
+    row.id.toLowerCase().includes(n) ||
+    row.name.toLowerCase().includes(n) ||
+    (row.description?.toLowerCase().includes(n) ?? false)
+  );
+}
+
 function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerListProps) {
   const navigate = useNavigate();
-  const [showAll, setShowAll] = useState(false);
+  const [filter, setFilter] = useState("");
 
-  const { data: nodeDetails, isLoading } = useQuery({
+  const { data: nodeDetails, isLoading, isError, error } = useQuery({
     queryKey: ["node-details", nodeId],
     queryFn: () => getNodeDetails(nodeId),
     staleTime: 30_000,
@@ -89,73 +112,220 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
 
   const reasoners: ReasonerDefinition[] = nodeDetails?.reasoners ?? [];
   const skills: SkillDefinition[] = nodeDetails?.skills ?? [];
-  const allItems: Array<{ id: string; name?: string; isSkill?: boolean }> = [
-    ...reasoners.map((r) => ({ id: r.id, name: r.name })),
-    ...skills.map((s) => ({ id: s.id, name: s.name, isSkill: true })),
-  ];
-  const total = reasonerCount + skillCount;
+
+  const reasonerRows: NodeEndpointRow[] = useMemo(
+    () =>
+      reasoners.map((r) => ({
+        id: r.id,
+        name: r.name || r.id,
+        description: r.description,
+        kind: "reasoner" as const,
+      })),
+    [reasoners]
+  );
+
+  const skillRows: NodeEndpointRow[] = useMemo(
+    () =>
+      skills.map((s) => ({
+        id: s.id,
+        name: s.name || s.id,
+        description: s.description,
+        kind: "skill" as const,
+      })),
+    [skills]
+  );
+
+  const filteredReasoners = useMemo(
+    () => reasonerRows.filter((r) => matchesFilter(filter, r)),
+    [reasonerRows, filter]
+  );
+  const filteredSkills = useMemo(
+    () => skillRows.filter((s) => matchesFilter(filter, s)),
+    [skillRows, filter]
+  );
+
+  const totalLoaded = reasonerRows.length + skillRows.length;
+  const totalExpected = reasonerCount + skillCount;
+  const showSearch = totalLoaded >= 10;
+  const useScroll = totalLoaded > SCROLL_AFTER;
+  const showSectionLabels = reasonerRows.length > 0 && skillRows.length > 0;
 
   if (isLoading) {
     return (
-      <>
-        {Array.from({ length: Math.min(total, 3) }).map((_, i) => (
-          <div
-            key={i}
-            className="h-6 ml-8 mr-4 my-0.5 rounded bg-muted/40 animate-pulse"
-          />
-        ))}
-      </>
-    );
-  }
-
-  if (allItems.length === 0) {
-    return (
-      <div className="pl-8 pr-4 py-1 bg-muted/30">
-        <p className="text-[11px] text-muted-foreground italic">No reasoners registered</p>
+      <div className="border-t border-border bg-muted/15">
+        <div className="pl-10 pr-4 py-2 space-y-2">
+          {Array.from({ length: Math.min(Math.max(totalExpected, 1), 4) }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="size-8 shrink-0 rounded-md bg-muted/50 animate-pulse" />
+              <div className="h-4 flex-1 max-w-[200px] rounded bg-muted/40 animate-pulse" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
-  const visible = showAll ? allItems : allItems.slice(0, SHOW_LIMIT);
-  const hiddenCount = allItems.length - SHOW_LIMIT;
+  if (isError) {
+    return (
+      <div className="border-t border-border bg-muted/15 px-4 py-2 pl-10">
+        <p className="text-xs text-destructive">
+          Could not load endpoints
+          {error instanceof Error ? `: ${error.message}` : ""}. Try expanding again or check the node is reachable.
+        </p>
+      </div>
+    );
+  }
+
+  if (totalLoaded === 0) {
+    return (
+      <div className="border-t border-border bg-muted/15 pl-10 pr-4 py-2.5">
+        <p className="text-xs text-muted-foreground">No reasoners or skills registered on this node.</p>
+      </div>
+    );
+  }
+
+  const listBody = (
+    <div className="divide-y divide-border/70">
+      {filteredReasoners.length === 0 && filteredSkills.length === 0 ? (
+        <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+          No matches for &quot;{filter.trim()}&quot;
+        </div>
+      ) : (
+        <>
+          {filteredReasoners.length > 0 && (
+            <>
+              {showSectionLabels && (
+                <div
+                  className="sticky top-0 z-[1] flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
+                  role="presentation"
+                >
+                  <WatsonxAi className="size-3.5 opacity-80" aria-hidden />
+                  Reasoners
+                  <span className="font-mono text-[10px] normal-case tracking-normal text-muted-foreground/80">
+                    ({filteredReasoners.length})
+                  </span>
+                </div>
+              )}
+              {filteredReasoners.map((row) => (
+                <EndpointRow key={`r-${row.id}`} nodeId={nodeId} row={row} onOpen={navigate} />
+              ))}
+            </>
+          )}
+          {filteredSkills.length > 0 && (
+            <>
+              {showSectionLabels && (
+                <div
+                  className="sticky top-0 z-[1] flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
+                  role="presentation"
+                >
+                  <Function className="size-3.5 opacity-80" aria-hidden />
+                  Skills
+                  <span className="font-mono text-[10px] normal-case tracking-normal text-muted-foreground/80">
+                    ({filteredSkills.length})
+                  </span>
+                </div>
+              )}
+              {filteredSkills.map((row) => (
+                <EndpointRow key={`s-${row.id}`} nodeId={nodeId} row={row} onOpen={navigate} />
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
 
   return (
-    <>
-      {visible.map((item) => (
-        <div
-          key={item.id}
-          className="flex items-center justify-between pl-8 pr-4 py-0.5 bg-muted/30 hover:bg-accent/30 group"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[11px] font-mono truncate text-foreground/70">
-              {item.name || item.id}
-            </span>
-            {item.isSkill && (
-              <span className="text-[9px] text-muted-foreground border border-border rounded px-1">
-                skill
-              </span>
-            )}
+    <div className="border-t border-border bg-muted/15">
+      {showSearch && (
+        <div className="border-b border-border/60 px-3 py-2 pl-10">
+          <div className="relative max-w-md">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name or id…"
+              className="h-8 border-border/80 bg-background/80 pl-8 text-xs shadow-none"
+              aria-label="Filter reasoners and skills"
+            />
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground flex-shrink-0 gap-0.5"
-            onClick={() => navigate(`/playground/${nodeId}.${item.id}`)}
-          >
-            <Play className="size-2.5" />
-            Play
-          </Button>
         </div>
-      ))}
-      {!showAll && hiddenCount > 0 && (
-        <button
-          className="w-full pl-8 pr-4 py-0.5 bg-muted/30 text-[10px] text-muted-foreground hover:text-foreground text-left transition-colors"
-          onClick={() => setShowAll(true)}
-        >
-          Show {hiddenCount} more
-        </button>
       )}
-    </>
+      <div className="pl-6">
+        {useScroll ? (
+          <ScrollArea className="max-h-[min(45vh,320px)] pr-3" type="hover">
+            {listBody}
+          </ScrollArea>
+        ) : (
+          listBody
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface EndpointRowProps {
+  nodeId: string;
+  row: NodeEndpointRow;
+  onOpen: (path: string) => void;
+}
+
+function EndpointRow({ nodeId, row, onOpen }: EndpointRowProps) {
+  const isSkill = row.kind === "skill";
+  const Icon = isSkill ? Function : WatsonxAi;
+  const label = isSkill ? "skill" : "reasoner";
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-start gap-3 px-3 py-2 pl-4 text-left transition-colors",
+        "hover:bg-accent/40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      )}
+      onClick={() => onOpen(`/playground/${nodeId}.${row.id}`)}
+      aria-label={`Open ${label} ${row.name} in playground`}
+    >
+      <span
+        className={cn(
+          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border",
+          isSkill
+            ? "border-border bg-background text-muted-foreground"
+            : "border-border bg-background text-muted-foreground"
+        )}
+      >
+        <Icon className="size-4 shrink-0" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1 pt-0.5">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-xs font-medium text-foreground">{row.name}</span>
+          <span
+            className={cn(
+              "rounded-md border px-1.5 py-0 text-[10px] font-medium leading-none",
+              isSkill
+                ? "border-border/80 bg-muted/50 text-muted-foreground"
+                : "border-primary/25 bg-primary/5 text-primary"
+            )}
+          >
+            {isSkill ? "Skill" : "Reasoner"}
+          </span>
+        </span>
+        {row.description ? (
+          <span className="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+            {row.description}
+          </span>
+        ) : (
+          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground/80">{row.id}</span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5 self-center text-muted-foreground">
+        <span className="hidden text-[11px] sm:inline">Playground</span>
+        <Play className="size-3.5 opacity-70" aria-hidden />
+      </span>
+    </button>
   );
 }
 
