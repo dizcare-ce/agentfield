@@ -23,6 +23,10 @@ import {
   LiveElapsedDuration,
 } from "@/components/ui/data-formatters";
 
+import { DashboardActiveWorkload } from "@/components/dashboard/DashboardActiveWorkload";
+import { DashboardRunOutcomeStrip } from "@/components/dashboard/DashboardRunOutcomeStrip";
+import { shortRunIdForDashboard as shortRunId } from "@/components/dashboard/dashboardRunUtils";
+
 import { useRuns } from "@/hooks/queries";
 import { useLLMHealth, useQueueStatus } from "@/hooks/queries";
 import { useAgents } from "@/hooks/queries";
@@ -37,12 +41,6 @@ import type { WorkflowSummary } from "@/types/workflows";
 import type { AgentNodeSummary } from "@/types/agentfield";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
-
-function shortRunId(runId: string): string {
-  const tail = 6;
-  if (runId.length <= tail + 2) return runId;
-  return `…${runId.slice(-tail)}`;
-}
 
 function terminalActivityMs(run: WorkflowSummary): number {
   const t = run.completed_at ?? run.latest_activity ?? run.started_at;
@@ -351,6 +349,37 @@ function PrimaryRunFocus({
 
 // ─── failures: production-style attention ─────────────────────────────────────
 
+interface FailureReasonerBarsProps {
+  rows: [string, number][];
+}
+
+function FailureReasonerBars({ rows }: FailureReasonerBarsProps) {
+  const max = Math.max(...rows.map(([, c]) => c), 1);
+  return (
+    <div className="space-y-3" aria-label="Failure counts by reasoner">
+      <p className="text-xs font-medium text-muted-foreground">By reasoner</p>
+      <div className="space-y-2.5">
+        {rows.map(([name, count], idx) => (
+          <div key={`${name}-${idx}-bar`} className="space-y-1">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate text-foreground">{name}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">{count}</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-destructive transition-all"
+                style={{ width: `${(count / max) * 100}%` }}
+                role="presentation"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 interface FailuresAttentionProps {
   failures: WorkflowSummary[];
   topFailingReasoners: [string, number][];
@@ -397,6 +426,9 @@ function FailuresAttention({
               </Badge>
             ))}
           </div>
+        ) : null}
+        {topFailingReasoners.length > 0 ? (
+          <FailureReasonerBars rows={topFailingReasoners} />
         ) : null}
         <ul className="space-y-2">
           {preview.map((run) => (
@@ -593,6 +625,18 @@ export function NewDashboardPage() {
         onOpenRun={(runId) => navigate(`/runs/${runId}`)}
         onViewRunsList={() => navigate("/runs")}
       />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <DashboardRunOutcomeStrip
+          className={active.length > 0 ? "lg:col-span-2" : "lg:col-span-3"}
+          runs={recentRuns}
+          loading={runsQuery.isLoading}
+          onSelectRun={(runId) => navigate(`/runs/${runId}`)}
+        />
+        {active.length > 0 ? (
+          <DashboardActiveWorkload activeRuns={active} className="lg:col-span-1" />
+        ) : null}
+      </div>
 
       <FailuresAttention
         failures={failures}
