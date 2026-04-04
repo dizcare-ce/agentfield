@@ -9,9 +9,63 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarFooter,
+  SidebarRail,
+  SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { navigation } from "@/config/navigation";
 import { Zap } from "lucide-react";
+import { ModeToggle } from "@/components/ui/mode-toggle";
+
+function SidebarLogo() {
+  const { state } = useSidebar();
+  const navigate = useNavigate();
+  const isCollapsed = state === "collapsed";
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          size="lg"
+          onClick={() => navigate("/dashboard")}
+          tooltip="AgentField"
+          className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+        >
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+            <Zap className="size-4" />
+          </div>
+          {!isCollapsed && (
+            <div className="flex flex-col gap-0.5 leading-none">
+              <span className="font-semibold text-sidebar-foreground">AgentField</span>
+              <span className="text-xs text-sidebar-foreground/60">Control Plane</span>
+            </div>
+          )}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
+function SidebarThemeToggle() {
+  const { state } = useSidebar();
+  const isCollapsed = state === "collapsed";
+
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <div
+          className={
+            isCollapsed
+              ? "flex items-center justify-center"
+              : "flex items-center px-1"
+          }
+        >
+          <ModeToggle />
+        </div>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
 
 export function AppSidebar() {
   const location = useLocation();
@@ -20,24 +74,11 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              onClick={() => navigate("/dashboard")}
-              className="gap-2"
-            >
-              <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Zap className="size-4" />
-              </div>
-              <div className="flex flex-col gap-0.5 leading-none">
-                <span className="font-semibold">AgentField</span>
-                <span className="text-xs text-muted-foreground">Control Plane</span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <SidebarLogo />
       </SidebarHeader>
+
+      <SidebarSeparator />
+
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
@@ -58,9 +99,12 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
       <SidebarFooter>
-        {/* Theme toggle can go here later */}
+        <SidebarThemeToggle />
       </SidebarFooter>
+
+      <SidebarRail />
     </Sidebar>
   );
 }
