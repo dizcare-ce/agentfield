@@ -26,14 +26,25 @@ import {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function formatDuration(ms?: number, terminal?: boolean): string {
+function formatDuration(ms: number | undefined, terminal?: boolean): string {
   if (!terminal && ms == null) return "—";
   if (ms == null) return "—";
-  const totalSeconds = Math.floor(ms / 1000);
-  if (totalSeconds < 60) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${seconds}s`;
+  if (ms < 1000) return `${ms}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) {
+    const rem = Math.round(secs % 60);
+    return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  }
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    const remMins = mins % 60;
+    return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 function RunStatusBadge({ status }: { status: string }) {
@@ -207,14 +218,14 @@ export function RunsPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Page heading */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
       </div>
 
       {/* Filter bar */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-3">
         <Select
           value={timeRange}
           onValueChange={handleFilterChange(setTimeRange)}
@@ -279,10 +290,10 @@ export function RunsPage() {
 
       {/* Table */}
       <div className="rounded-lg border border-border bg-card">
-        <Table className="text-sm">
+        <Table className="text-xs">
           <TableHeader>
             <TableRow>
-              <TableHead className="h-10 w-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 w-10 px-3 text-[11px] font-medium text-muted-foreground">
                 <Checkbox
                   checked={allSelected}
                   data-state={someSelected ? "indeterminate" : undefined}
@@ -290,22 +301,22 @@ export function RunsPage() {
                   aria-label="Select all"
                 />
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Run ID
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Root Reasoner
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Steps
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Status
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Duration
               </TableHead>
-              <TableHead className="h-10 px-4 text-xs font-medium text-muted-foreground">
+              <TableHead className="h-8 px-3 text-[11px] font-medium text-muted-foreground">
                 Started
               </TableHead>
             </TableRow>
@@ -389,29 +400,29 @@ function RunRow({ run, isSelected, onRowClick, onToggleSelect }: RunRowProps) {
       data-state={isSelected ? "selected" : undefined}
       onClick={() => onRowClick(run)}
     >
-      <TableCell className="p-4 w-10" onClick={(e) => onToggleSelect(run.run_id, e)}>
+      <TableCell className="px-3 py-1.5 w-10" onClick={(e) => onToggleSelect(run.run_id, e)}>
         <Checkbox
           checked={isSelected}
           aria-label={`Select run ${run.run_id}`}
           onCheckedChange={() => {}}
         />
       </TableCell>
-      <TableCell className="p-4 font-mono text-xs text-muted-foreground">
+      <TableCell className="px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
         {shortId}
       </TableCell>
-      <TableCell className="p-4 font-medium text-sm">
+      <TableCell className="px-3 py-1.5 text-xs font-medium">
         {run.root_reasoner || run.display_name || "—"}
       </TableCell>
-      <TableCell className="p-4 text-xs text-muted-foreground">
+      <TableCell className="px-3 py-1.5 text-xs tabular-nums">
         {run.total_executions ?? 1}
       </TableCell>
-      <TableCell className="p-4">
+      <TableCell className="px-3 py-1.5">
         <RunStatusBadge status={run.status} />
       </TableCell>
-      <TableCell className="p-4 text-xs text-muted-foreground">
+      <TableCell className="px-3 py-1.5 text-xs tabular-nums text-muted-foreground">
         {formatDuration(run.duration_ms, run.terminal)}
       </TableCell>
-      <TableCell className="p-4 text-xs text-muted-foreground">
+      <TableCell className="px-3 py-1.5 text-[11px] text-muted-foreground">
         {startedAt}
       </TableCell>
     </TableRow>
