@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search } from "lucide-react";
-import { useRuns } from "@/hooks/queries";
+import { useRuns, useCancelExecution } from "@/hooks/queries";
 import type { WorkflowSummary } from "@/types/workflows";
 import { normalizeExecutionStatus } from "@/utils/status";
 import {
@@ -99,10 +99,12 @@ const PAGE_SIZE = 50;
 
 export function RunsPage() {
   const navigate = useNavigate();
+  const cancelMutation = useCancelExecution();
 
   // filter state
-  const [timeRange, setTimeRange] = useState("24h");
+  const [timeRange, setTimeRange] = useState("all");
   const [status, setStatus] = useState("all");
+  const [agentFilter, setAgentFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -171,6 +173,22 @@ export function RunsPage() {
   const loadingInitial = isLoading && page === 1;
   const loadingMore = isFetching && page > 1;
 
+  // derive unique agent IDs for the agent filter
+  const agentIds = useMemo(() => {
+    const ids = new Set(
+      allRuns.map((r) => r.agent_id || r.agent_name).filter(Boolean) as string[],
+    );
+    return Array.from(ids).sort();
+  }, [allRuns]);
+
+  // apply agent filter client-side
+  const filteredRuns = useMemo(() => {
+    if (agentFilter === "all") return allRuns;
+    return allRuns.filter(
+      (r) => (r.agent_id || r.agent_name) === agentFilter,
+    );
+  }, [allRuns, agentFilter]);
+
   // row click
   const handleRowClick = useCallback(
     (run: WorkflowSummary) => {
@@ -197,15 +215,15 @@ export function RunsPage() {
   );
 
   const toggleSelectAll = useCallback(() => {
-    if (selected.size === allRuns.length && allRuns.length > 0) {
+    if (selected.size === filteredRuns.length && filteredRuns.length > 0) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(allRuns.map((r) => r.run_id)));
+      setSelected(new Set(filteredRuns.map((r) => r.run_id)));
     }
-  }, [allRuns, selected.size]);
+  }, [filteredRuns, selected.size]);
 
   const allSelected =
-    allRuns.length > 0 && selected.size === allRuns.length;
+    filteredRuns.length > 0 && selected.size === filteredRuns.length;
   const someSelected = selected.size > 0 && !allSelected;
 
   const handleFilterChange = useCallback(
@@ -258,6 +276,28 @@ export function RunsPage() {
           </SelectContent>
         </Select>
 
+        <Select
+          value={agentFilter}
+          onValueChange={(v) => {
+            setAgentFilter(v);
+            setSelected(new Set());
+          }}
+        >
+          <SelectTrigger className="w-[150px] h-8 text-xs">
+            <SelectValue placeholder="All agents" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">
+              All agents
+            </SelectItem>
+            {agentIds.map((id) => (
+              <SelectItem key={id} value={id} className="text-xs">
+                {id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
@@ -275,13 +315,37 @@ export function RunsPage() {
           <span className="text-xs text-muted-foreground">
             {selected.size} selected
           </span>
-          <Button size="sm" variant="outline" className="h-7 text-xs">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={selected.size !== 2}
+            onClick={() => {
+              const ids = Array.from(selected);
+              if (ids.length === 2) {
+                navigate(`/runs/compare?a=${ids[0]}&b=${ids[1]}`);
+              }
+            }}
+          >
             Compare Selected ({selected.size})
           </Button>
           <Button
             size="sm"
             variant="outline"
             className="h-7 text-xs text-destructive hover:text-destructive"
+            disabled={cancelMutation.isPending}
+            onClick={async () => {
+              for (const runId of selected) {
+                const run = allRuns.find((r) => r.run_id === runId);
+                if (
+                  run?.root_execution_id &&
+                  (run.status === "running" || run.status === "pending")
+                ) {
+                  await cancelMutation.mutateAsync(run.root_execution_id);
+                }
+              }
+              setSelected(new Set());
+            }}
           >
             Cancel Running
           </Button>
@@ -334,14 +398,14 @@ export function RunsPage() {
                   {error instanceof Error ? error.message : "Failed to load runs"}
                 </TableCell>
               </TableRow>
-            ) : allRuns.length === 0 ? (
+            ) : filteredRuns.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="p-8 text-center text-muted-foreground text-xs">
                   No runs found
                 </TableCell>
               </TableRow>
             ) : (
-              allRuns.map((run) => (
+              filteredRuns.map((run) => (
                 <RunRow
                   key={run.run_id}
                   run={run}

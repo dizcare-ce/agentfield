@@ -1,21 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useRunDAG } from "@/hooks/queries";
+import { useRunDAG, useCancelExecution } from "@/hooks/queries";
 import {
   Card,
   CardContent,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RunTrace, buildTraceTree, formatDuration } from "@/components/RunTrace";
 import { StepDetail } from "@/components/StepDetail";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-type ViewMode = "trace" | "graph";
 
 function statusVariant(
   status: string,
@@ -44,9 +42,10 @@ function computeMaxDuration(
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   const { data: dag, isLoading, isError, error } = useRunDAG(runId);
+  const cancelMutation = useCancelExecution();
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("trace");
+  const [replaying, setReplaying] = useState(false);
 
   // Auto-select root step (first in timeline)
   useEffect(() => {
@@ -140,20 +139,31 @@ export function RunDetailPage() {
             {dag.workflow_status}
           </Badge>
 
-          {!isSingleStep && (
-            <Tabs
-              value={viewMode}
-              onValueChange={(v) => setViewMode(v as ViewMode)}
+          {dag.workflow_status === "running" && (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={cancelMutation.isPending}
+              onClick={() => {
+                const execId =
+                  (dag as any).dag?.execution_id ??
+                  dag.timeline[0]?.execution_id;
+                if (execId) cancelMutation.mutate(execId);
+              }}
             >
-              <TabsList className="h-8">
-                <TabsTrigger value="trace" className="text-xs px-3">
-                  Trace
-                </TabsTrigger>
-                <TabsTrigger value="graph" className="text-xs px-3">
-                  Graph
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+              Cancel Run
+            </Button>
+          )}
+
+          {(dag.workflow_status === "failed" || dag.workflow_status === "timeout") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={replaying}
+              onClick={() => setReplaying(true)}
+            >
+              Replay
+            </Button>
           )}
         </div>
       </div>
@@ -175,29 +185,22 @@ export function RunDetailPage() {
       ) : (
         // Multi-step run: split view
         <div className="grid grid-cols-[1fr_1fr] gap-4 min-h-[500px]">
-          {/* Left: trace / graph panel */}
+          {/* Left: trace panel */}
           <Card>
             <CardContent className="p-0">
               <ScrollArea className="h-[500px]">
                 <div className="p-2">
-                  {viewMode === "trace" ? (
-                    traceTree ? (
-                      <RunTrace
-                        node={traceTree}
-                        maxDuration={maxDuration}
-                        selectedId={selectedStepId}
-                        onSelect={setSelectedStepId}
-                      />
-                    ) : (
-                      <p className="text-xs text-muted-foreground p-4">
-                        No steps to display
-                      </p>
-                    )
+                  {traceTree ? (
+                    <RunTrace
+                      node={traceTree}
+                      maxDuration={maxDuration}
+                      selectedId={selectedStepId}
+                      onSelect={setSelectedStepId}
+                    />
                   ) : (
-                    // Graph view placeholder
-                    <div className="flex items-center justify-center h-full min-h-[200px] text-sm text-muted-foreground p-8 text-center">
-                      Graph view coming soon — use Trace view
-                    </div>
+                    <p className="text-xs text-muted-foreground p-4">
+                      No steps to display
+                    </p>
                   )}
                 </div>
               </ScrollArea>

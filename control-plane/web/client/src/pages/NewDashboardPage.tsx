@@ -225,7 +225,7 @@ export function NewDashboardPage() {
   const navigate = useNavigate();
 
   // Data queries
-  const runsQuery = useRuns({ pageSize: 15, sortBy: "latest_activity", sortOrder: "desc" });
+  const runsQuery = useRuns({ timeRange: "all", pageSize: 15, sortBy: "latest_activity", sortOrder: "desc" });
   const llmHealthQuery = useLLMHealth();
   const queueQuery = useQueueStatus();
   const agentsQuery = useAgents();
@@ -260,6 +260,14 @@ export function NewDashboardPage() {
 
   // Average duration across recent runs
   const recentRuns = runsQuery.data?.workflows ?? [];
+
+  // Debug: log query state if no runs found
+  if (runsQuery.isError) {
+    console.error("[Dashboard] runs query error:", runsQuery.error);
+  }
+  if (!runsQuery.isLoading && recentRuns.length === 0) {
+    console.warn("[Dashboard] no runs returned. Query data:", runsQuery.data);
+  }
   const avgDuration = (() => {
     const completed = recentRuns.filter((r) => r.duration_ms != null);
     if (completed.length === 0) return null;
@@ -335,8 +343,7 @@ export function NewDashboardPage() {
             runs={recentRuns.slice(0, 15)}
             loading={runsQuery.isLoading}
             onRowClick={(runId) => {
-              const run = recentRuns.find((r) => r.run_id === runId);
-              navigate(`/workflows/${run?.workflow_id ?? runId}`);
+              navigate(`/runs/${runId}`);
             }}
           />
         </CardContent>
