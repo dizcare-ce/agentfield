@@ -7,12 +7,20 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { useLLMHealth, useQueueStatus, useAgents } from "@/hooks/queries";
+import { useSSE } from "@/hooks/useSSE";
+import { cn } from "@/lib/utils";
 import type { AgentNodeSummary } from "@/types/agentfield";
 
 export function HealthStrip() {
   const llmHealth = useLLMHealth();
   const queueStatus = useQueueStatus();
   const agents = useAgents();
+
+  // SSE connection status (execution channel is the primary indicator)
+  const { connected: sseConnected, reconnecting: sseReconnecting } = useSSE(
+    "/api/ui/v1/executions/events",
+    { autoReconnect: true, maxReconnectAttempts: 10, reconnectDelayMs: 2000, exponentialBackoff: true },
+  );
 
   // LLM status
   const llmOk = llmHealth.data
@@ -88,6 +96,34 @@ export function HealthStrip() {
             </div>
           </TooltipTrigger>
           <TooltipContent>Execution queue status</TooltipContent>
+        </Tooltip>
+
+        {/* SSE live-update indicator */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1.5 ml-auto">
+              <div
+                className={cn(
+                  "size-1.5 rounded-full",
+                  sseConnected
+                    ? "bg-green-500"
+                    : sseReconnecting
+                      ? "bg-amber-500 animate-pulse"
+                      : "bg-muted-foreground",
+                )}
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {sseConnected ? "Live" : sseReconnecting ? "Reconnecting" : "Disconnected"}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            {sseConnected
+              ? "Real-time updates active"
+              : sseReconnecting
+                ? "Attempting to restore live updates"
+                : "Live updates unavailable — pages will not auto-refresh"}
+          </TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>

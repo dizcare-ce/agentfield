@@ -14,6 +14,7 @@ import {
 import { AppSidebar } from "./AppSidebar";
 import { HealthStrip } from "./HealthStrip";
 import { CommandPalette } from "./CommandPalette";
+import { useSSEQuerySync } from "@/hooks/useSSEQuerySync";
 
 const routeNames: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -32,6 +33,10 @@ export function AppLayout() {
   const currentRoute = Object.entries(routeNames).find(([path]) =>
     location.pathname.startsWith(path)
   );
+
+  // Wire SSE events to TanStack Query cache invalidation so all pages
+  // auto-refresh when runs or agent status changes.
+  useSSEQuerySync();
 
   return (
     <SidebarProvider defaultOpen={true}>

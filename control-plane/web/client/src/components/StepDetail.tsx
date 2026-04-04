@@ -16,7 +16,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ChevronDown } from "@/components/ui/icon-bridge";
-import { Copy, Check, ShieldAlert } from "lucide-react";
+import { Copy, Check, ShieldAlert, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { retryExecutionWebhook } from "@/services/executionsApi";
 import { formatDuration } from "./RunTrace";
 
 // ─── Simple JSON syntax highlighter ──────────────────────────────────────────
@@ -227,6 +229,80 @@ export function StepDetail({ executionId }: { executionId: string }) {
                     ))}
                   </div>
                 ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
+        {/* Webhook Delivery */}
+        {(execution.webhook_registered || (execution.webhook_events && execution.webhook_events.length > 0)) && (
+          <Collapsible defaultOpen={false}>
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
+              <ChevronDown className="size-3 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
+              Webhooks ({execution.webhook_events?.length ?? 0})
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="mt-2 flex flex-col gap-1">
+                {execution.webhook_events && execution.webhook_events.length > 0 ? (
+                  execution.webhook_events.map((event, i) => (
+                    <div
+                      key={event.id ?? i}
+                      className="flex items-center justify-between rounded-md bg-muted px-2 py-1.5 text-[11px]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={cn(
+                            "size-1.5 rounded-full shrink-0",
+                            event.status === "delivered"
+                              ? "bg-green-500"
+                              : event.status === "failed"
+                                ? "bg-red-500"
+                                : "bg-amber-500 animate-pulse",
+                          )}
+                        />
+                        <span className="font-mono truncate max-w-[120px]">
+                          {event.event_type}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground shrink-0">
+                        {event.http_status != null && (
+                          <span
+                            className={cn(
+                              event.http_status >= 200 && event.http_status < 300
+                                ? "text-green-600 dark:text-green-400"
+                                : "text-red-500",
+                            )}
+                          >
+                            HTTP {event.http_status}
+                          </span>
+                        )}
+                        {!event.http_status && (
+                          <span className="capitalize">{event.status}</span>
+                        )}
+                        <span>{new Date(event.created_at).toLocaleTimeString()}</span>
+                        {event.status === "failed" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-1.5 text-[10px] gap-1"
+                            onClick={() =>
+                              retryExecutionWebhook(execution.execution_id).catch(
+                                console.error,
+                              )
+                            }
+                          >
+                            <RefreshCw className="size-2.5" />
+                            Retry
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-muted-foreground px-1">
+                    Webhook registered but no delivery attempts yet.
+                  </p>
+                )}
               </div>
             </CollapsibleContent>
           </Collapsible>
