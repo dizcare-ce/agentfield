@@ -409,10 +409,6 @@ export function UnifiedJsonViewer({
 
   const isFlexibleHeight = maxHeight === "none";
 
-  const handleCopy = (value: string, path: string[]) => {
-    console.log(`Copied ${path.join(".")}:`, value);
-  };
-
   return (
     <div
       className={cn(
@@ -501,7 +497,6 @@ export function UnifiedJsonViewer({
               level={0}
               path={[]}
               searchTerm={searchTerm}
-              onCopy={handleCopy}
             />
           </div>
         )}

@@ -13,23 +13,6 @@ import { getWorkflowRunSummary } from "../services/workflowsApi";
 import { useWorkflowDAGSmart } from "../hooks/useWorkflowDAG";
 import type { WorkflowSummary } from "../types/workflows";
 
-interface WorkflowDAGNode {
-  workflow_id: string;
-  execution_id: string;
-  agent_node_id: string;
-  reasoner_id: string;
-  status: string;
-  started_at: string;
-  completed_at?: string;
-  duration_ms?: number;
-  parent_workflow_id?: string;
-  parent_execution_id?: string;
-  workflow_depth: number;
-  children?: WorkflowDAGNode[];
-  agent_name?: string;
-  task_name?: string;
-}
-
 export function WorkflowDetailPage() {
   const { workflowId: runId } = useParams<{ workflowId: string }>();
   const navigate = useNavigate();
@@ -99,19 +82,8 @@ export function WorkflowDetailPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const handleExecutionClick = (execution: WorkflowDAGNode) => {
-    console.log("Execution clicked:", execution);
-  };
-
-  const handleNodeSelect = (node: WorkflowDAGNode) => {
-    // TODO: Highlight node in DAG
-    console.log("Node selected:", node);
-  };
-
   const handleTagFilter = (tags: string[]) => {
     setTimelineSelectedTags(tags);
-    // TODO: Apply tag filter to DAG visualization
-    console.log("Tag filter changed:", tags);
   };
 
   // Timeline state handlers
@@ -213,14 +185,12 @@ export function WorkflowDetailPage() {
             dagData={dagData}
             loading={dagLoading}
             error={dagError?.message || null}
-            onExecutionClick={handleExecutionClick}
             className="min-h-[800px]"
           />
         }
         rightColumn={
           <WorkflowTimeline
             nodes={dagData?.timeline || []}
-            onNodeSelect={handleNodeSelect}
             onTagFilter={handleTagFilter}
             className="min-h-[800px]"
             // Lifted state props

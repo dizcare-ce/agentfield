@@ -292,8 +292,6 @@ export async function getExecutionVCStatus(executionId: string): Promise<{
   original_status?: string;
 }> {
   try {
-    // DEBUG: Log the execution ID being requested
-    console.log('DEBUG: getExecutionVCStatus called for executionId:', executionId);
 
     // Try to get execution VC directly from a dedicated endpoint first
     try {
@@ -307,25 +305,18 @@ export async function getExecutionVCStatus(executionId: string): Promise<{
         document_size_bytes?: number;
         original_status?: string;
       }>(`/executions/${executionId}/vc-status`);
-
-      console.log('DEBUG: Direct endpoint response:', result);
       return result;
     } catch (directError) {
       // If direct endpoint doesn't exist, fall back to export method
       console.warn('Direct VC status endpoint not available, using fallback method');
-      console.log('DEBUG: Direct endpoint error:', directError);
 
       const response = await exportVCs({
         limit: 100, // Get more VCs to search through
       });
 
-      console.log('DEBUG: Export VCs response:', response);
-
       const executionVC = response.execution_vcs.find(vc => vc.execution_id === executionId);
 
       if (executionVC) {
-        console.log('DEBUG: Found execution VC in export:', executionVC);
-        console.log('DEBUG: ExecutionVCInfo does not include vc_document field');
         return {
           has_vc: true,
           vc_id: executionVC.vc_id,
@@ -337,8 +328,6 @@ export async function getExecutionVCStatus(executionId: string): Promise<{
           // Note: vc_document is not available in ExecutionVCInfo type
         };
       }
-
-      console.log('DEBUG: No execution VC found in export for executionId:', executionId);
       return {
         has_vc: false,
         status: 'none'
@@ -358,12 +347,9 @@ export async function getExecutionVCStatus(executionId: string): Promise<{
  */
 export async function getExecutionVCDocument(executionId: string): Promise<ExecutionVC> {
   try {
-    console.log('DEBUG: getExecutionVCDocument called for executionId:', executionId);
 
     // Try to get the full execution VC from the backend
     const result = await fetchWrapper<ExecutionVC>(`/executions/${executionId}/vc`);
-
-    console.log('DEBUG: getExecutionVCDocument response:', result);
 
     if (!result.vc_document) {
       throw new Error('VC document not found or not available for download');
@@ -393,7 +379,6 @@ export async function getExecutionVCDocument(executionId: string): Promise<Execu
  */
 export async function getExecutionVCDocumentEnhanced(executionId: string): Promise<any> {
   try {
-    console.log('DEBUG: getExecutionVCDocumentEnhanced called for executionId:', executionId);
 
     // Get the execution VC
     const executionVC = await getExecutionVCDocument(executionId);
@@ -468,8 +453,6 @@ export async function getExecutionVCDocumentEnhanced(executionId: string): Promi
         export_timestamp: new Date().toISOString()
       }
     };
-
-    console.log('DEBUG: Enhanced execution VC chain created:', enhancedChain);
     return enhancedChain;
   } catch (error) {
     console.error('Failed to get enhanced execution VC document:', error);
@@ -506,10 +489,6 @@ export async function getWorkflowAuditTrail(workflowId: string): Promise<AuditTr
  */
 export async function downloadVCDocument(vc: ExecutionVC): Promise<void> {
   try {
-    // DEBUG: Log the VC object to understand what data we have
-    console.log('DEBUG: downloadVCDocument called with VC:', vc);
-    console.log('DEBUG: vc.vc_document type:', typeof vc.vc_document);
-    console.log('DEBUG: vc.vc_document value:', vc.vc_document);
 
     if (!vc.vc_document) {
       console.error('DEBUG: vc_document is missing or undefined');
@@ -519,8 +498,6 @@ export async function downloadVCDocument(vc: ExecutionVC): Promise<void> {
     const vcDocument = typeof vc.vc_document === 'string'
       ? JSON.parse(vc.vc_document)
       : vc.vc_document;
-
-    console.log('DEBUG: Parsed VC document:', vcDocument);
 
     const blob = new Blob([JSON.stringify(vcDocument, null, 2)], {
       type: 'application/json'
@@ -757,7 +734,6 @@ export async function getDIDResolutionBundle(did: string): Promise<{
  */
 export async function downloadDIDResolutionBundle(did: string): Promise<void> {
   try {
-    console.log('DEBUG: downloadDIDResolutionBundle called for DID:', did);
 
     const response = await fetch(`${API_BASE_URL}/did/${encodeURIComponent(did)}/resolution-bundle/download`);
 

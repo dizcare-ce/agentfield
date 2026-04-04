@@ -1220,6 +1220,7 @@ function decorateEdgesWithStatus(
 
       // Process the data if we have it
       if (data) {
+
         const timeline = data.timeline ?? [];
 
         // Determine the appropriate default layout based on graph size
