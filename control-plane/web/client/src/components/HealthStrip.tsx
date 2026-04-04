@@ -11,7 +11,7 @@ import {
 export function HealthStrip() {
   return (
     <div className="flex items-center gap-4 border-b border-border px-4 py-2 text-xs">
-      <TooltipProvider>
+      <TooltipProvider delayDuration={300}>
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex items-center gap-1.5">

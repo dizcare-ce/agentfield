@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/hooks/queries";
 import { getNodeDetails } from "@/services/api";
 import { startAgent } from "@/services/configurationApi";
-import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -17,51 +17,54 @@ import { useQuery } from "@tanstack/react-query";
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatRelativeTime(dateStr: string | undefined): string {
-  if (!dateStr) return "unknown";
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  if (diffMs < 0) return "just now";
-  const diffSeconds = Math.floor(diffMs / 1000);
-  if (diffSeconds < 60) return `${diffSeconds}s ago`;
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 0 || diffMs > 365 * 24 * 60 * 60 * 1000) return ">1y ago";
+  const secs = Math.floor(diffMs / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
-type StatusVariant = "success" | "destructive" | "pending" | "secondary" | "default";
-
-function getStatusVariant(
-  lifecycleStatus: LifecycleStatus | undefined
-): StatusVariant {
+function getStatusDotColor(lifecycleStatus: LifecycleStatus | undefined): string {
   switch (lifecycleStatus) {
     case "ready":
     case "running":
-      return "success";
+      return "bg-green-400";
     case "starting":
-      return "pending";
+      return "bg-yellow-400";
     case "stopped":
     case "error":
     case "offline":
-      return "destructive";
+      return "bg-red-400";
     case "degraded":
-      return "degraded" as StatusVariant;
+      return "bg-orange-400";
     default:
-      return "secondary";
+      return "bg-muted-foreground";
   }
 }
 
-function getStatusLabel(lifecycleStatus: LifecycleStatus | undefined): string {
-  if (!lifecycleStatus) return "unknown";
-  return lifecycleStatus;
-}
-
-function getHealthColor(score: number | undefined): string {
-  if (score === undefined) return "text-muted-foreground";
-  if (score >= 80) return "text-green-400";
-  if (score >= 50) return "text-yellow-400";
-  return "text-red-400";
+function getStatusTextColor(lifecycleStatus: LifecycleStatus | undefined): string {
+  switch (lifecycleStatus) {
+    case "ready":
+    case "running":
+      return "text-green-500";
+    case "starting":
+      return "text-yellow-500";
+    case "stopped":
+    case "error":
+    case "offline":
+      return "text-red-500";
+    case "degraded":
+      return "text-orange-500";
+    default:
+      return "text-muted-foreground";
+  }
 }
 
 // ─── NodeReasonerList ────────────────────────────────────────────────────────
@@ -94,21 +97,21 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
 
   if (isLoading) {
     return (
-      <div className="border-t border-border">
+      <>
         {Array.from({ length: Math.min(total, 3) }).map((_, i) => (
           <div
             key={i}
-            className="h-6 mx-4 my-1 rounded bg-muted/40 animate-pulse"
+            className="h-6 ml-8 mr-4 my-0.5 rounded bg-muted/40 animate-pulse"
           />
         ))}
-      </div>
+      </>
     );
   }
 
   if (allItems.length === 0) {
     return (
-      <div className="border-t border-border px-4 py-2">
-        <p className="text-xs text-muted-foreground italic">No reasoners registered</p>
+      <div className="pl-8 pr-4 py-1 bg-muted/30">
+        <p className="text-[11px] text-muted-foreground italic">No reasoners registered</p>
       </div>
     );
   }
@@ -117,20 +120,20 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
   const hiddenCount = allItems.length - SHOW_LIMIT;
 
   return (
-    <div className="border-t border-border">
+    <>
       {visible.map((item) => (
         <div
           key={item.id}
-          className="flex items-center justify-between px-4 py-1 hover:bg-accent/30 group"
+          className="flex items-center justify-between pl-8 pr-4 py-0.5 bg-muted/30 hover:bg-accent/30 group"
         >
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-xs font-mono truncate text-foreground/80">
+            <span className="text-[11px] font-mono truncate text-foreground/70">
               {item.name || item.id}
             </span>
             {item.isSkill && (
-              <Badge variant="secondary" className="text-[9px] h-4 px-1 py-0 flex-shrink-0">
+              <span className="text-[9px] text-muted-foreground border border-border rounded px-1">
                 skill
-              </Badge>
+              </span>
             )}
           </div>
           <Button
@@ -146,30 +149,30 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
       ))}
       {!showAll && hiddenCount > 0 && (
         <button
-          className="w-full px-4 py-1 text-[10px] text-muted-foreground hover:text-foreground text-center transition-colors"
+          className="w-full pl-8 pr-4 py-0.5 bg-muted/30 text-[10px] text-muted-foreground hover:text-foreground text-left transition-colors"
           onClick={() => setShowAll(true)}
         >
           Show {hiddenCount} more
         </button>
       )}
-    </div>
+    </>
   );
 }
 
-// ─── AgentCard ───────────────────────────────────────────────────────────────
+// ─── AgentRow ────────────────────────────────────────────────────────────────
 
-interface AgentCardProps {
+interface AgentRowProps {
   node: AgentNodeSummary;
 }
 
-function AgentCard({ node }: AgentCardProps) {
+function AgentRow({ node }: AgentRowProps) {
   const [open, setOpen] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
-  const statusVariant = getStatusVariant(node.lifecycle_status);
-  const statusLabel = getStatusLabel(node.lifecycle_status);
+  const dotColor = getStatusDotColor(node.lifecycle_status);
+  const statusTextColor = getStatusTextColor(node.lifecycle_status);
+  const statusLabel = node.lifecycle_status ?? "unknown";
   const totalItems = node.reasoner_count + node.skill_count;
-  const healthScore = node.mcp_summary?.overall_health_score;
 
   const handleRestart = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -184,68 +187,55 @@ function AgentCard({ node }: AgentCardProps) {
   };
 
   return (
-    <div className="rounded-md border border-border bg-card overflow-hidden">
-      {/* Card header — entire row is the expand/collapse trigger */}
+    <>
+      {/* Main row */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full px-4 py-2.5 text-left hover:bg-accent/50 transition-colors"
+        className="flex items-center gap-3 w-full px-4 py-2.5 text-left hover:bg-accent/40 transition-colors"
       >
         <ChevronRight
           className={cn(
-            "size-3.5 text-muted-foreground transition-transform flex-shrink-0",
+            "size-3 text-muted-foreground transition-transform flex-shrink-0",
             open && "rotate-90"
           )}
         />
 
-        <span className="font-mono text-sm font-medium truncate min-w-0">
+        <span className="font-mono text-sm font-medium truncate min-w-0 flex-1">
           {node.id}
         </span>
 
-        <Badge
-          variant={statusVariant}
-          className="text-[10px] h-5 px-1.5 flex-shrink-0"
-        >
-          <span
-            className={cn(
-              "mr-1 inline-block size-1.5 rounded-full flex-shrink-0",
-              statusVariant === "success"
-                ? "bg-green-400"
-                : statusVariant === "pending"
-                  ? "bg-yellow-400"
-                  : statusVariant === "destructive"
-                    ? "bg-red-400"
-                    : "bg-muted-foreground"
-            )}
-          />
-          {statusLabel}
-        </Badge>
+        {/* Status dot + label */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className={cn("inline-block size-1.5 rounded-full flex-shrink-0", dotColor)} />
+          <span className={cn("text-xs flex-shrink-0", statusTextColor)}>
+            {statusLabel}
+          </span>
+        </div>
 
+        {/* Reasoner count */}
         {totalItems > 0 && (
-          <span className="text-xs text-muted-foreground flex-shrink-0">
+          <span className="text-xs text-muted-foreground flex-shrink-0 w-24 text-right">
             {totalItems} reasoner{totalItems !== 1 ? "s" : ""}
           </span>
         )}
 
+        {/* Version */}
         {node.version && (
-          <span className="text-xs text-muted-foreground font-mono flex-shrink-0 hidden sm:inline">
+          <span className="text-xs text-muted-foreground font-mono flex-shrink-0 w-16 text-right hidden sm:inline">
             v{node.version}
           </span>
         )}
 
-        <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">
+        {/* Heartbeat */}
+        <span className="text-xs text-muted-foreground flex-shrink-0 w-20 text-right">
           {formatRelativeTime(node.last_heartbeat)}
         </span>
 
-        {healthScore != null && (
-          <span className={cn("text-xs font-mono flex-shrink-0", getHealthColor(healthScore))}>
-            {healthScore}
-          </span>
-        )}
-
+        {/* Restart button */}
         <Button
           variant="ghost"
           size="icon"
-          className="size-7 -mr-1 flex-shrink-0"
+          className="size-6 flex-shrink-0 text-muted-foreground hover:text-foreground"
           onClick={handleRestart}
           disabled={restarting}
           aria-label="Restart agent"
@@ -254,7 +244,7 @@ function AgentCard({ node }: AgentCardProps) {
         </Button>
       </button>
 
-      {/* Collapsible reasoner list */}
+      {/* Inline expanded reasoner rows */}
       {open && (
         <NodeReasonerList
           nodeId={node.id}
@@ -262,7 +252,7 @@ function AgentCard({ node }: AgentCardProps) {
           skillCount={node.skill_count}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -273,18 +263,15 @@ export function AgentsPage() {
   const nodes = data?.nodes ?? [];
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Page heading */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isLoading
-            ? "Loading agents…"
-            : nodes.length === 0
-              ? "No agents registered"
-              : `${nodes.length} agent node${nodes.length !== 1 ? "s" : ""} registered`}
-        </p>
-      </div>
+    <div className="flex flex-col gap-4">
+      {/* Subtitle only — breadcrumb handles page identity */}
+      <p className="text-sm text-muted-foreground">
+        {isLoading
+          ? "Loading agents…"
+          : nodes.length === 0
+            ? "No agents registered"
+            : `${nodes.length} agent node${nodes.length !== 1 ? "s" : ""} registered`}
+      </p>
 
       {/* Error state */}
       {isError && (
@@ -296,14 +283,18 @@ export function AgentsPage() {
 
       {/* Loading skeleton */}
       {isLoading && (
-        <div className="flex flex-col gap-2">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-10 rounded-md border border-border bg-card animate-pulse"
-            />
-          ))}
-        </div>
+        <Card>
+          <div className="divide-y divide-border">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-10 px-4 py-2.5 animate-pulse"
+              >
+                <div className="h-4 bg-muted/40 rounded w-48" />
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {/* Empty state */}
@@ -320,13 +311,15 @@ export function AgentsPage() {
         </div>
       )}
 
-      {/* Agent cards */}
+      {/* Agent list */}
       {!isLoading && nodes.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {nodes.map((node) => (
-            <AgentCard key={node.id} node={node} />
-          ))}
-        </div>
+        <Card className="overflow-hidden p-0">
+          <div className="divide-y divide-border">
+            {nodes.map((node) => (
+              <AgentRow key={node.id} node={node} />
+            ))}
+          </div>
+        </Card>
       )}
     </div>
   );
