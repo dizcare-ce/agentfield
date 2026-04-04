@@ -329,6 +329,21 @@ docker run -p 8080:8080 agentfield/control-plane:latest
       <a href="https://agentfield.ai/github/sec-af?utm_source=github-readme&utm_medium=referral">View project →</a>
     </td>
   </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://agentfield.ai/github/cloudsecurity/?utm_source=github&utm_campaign=github-readme&utm_content=cloudsec&utm_id=github-readme-cloudsec-repo">
+        <img src="assets/examples/cloud-security.png" alt="CloudSecurity AF" />
+      </a>
+      <br/>
+      <b>CloudSecurity AF</b>
+      <br/>
+      <sub>AI-native cloud infrastructure security scanner that performs shift-left attack path analysis directly from IaC, prioritizing the most dangerous risk chains before deployment.</sub>
+      <br/><br/>
+      <a href="https://agentfield.ai/github/cloudsecurity/?utm_source=github&utm_campaign=github-readme&utm_content=cloudsec&utm_id=github-readme-cloudsec-repo">View project →</a>
+    </td>
+    <td align="center" width="50%">
+    </td>
+  </tr>
 </table>
 
 [See all examples →](https://agentfield.ai/docs/learn/examples?utm_source=github-readme&utm_medium=referral)
