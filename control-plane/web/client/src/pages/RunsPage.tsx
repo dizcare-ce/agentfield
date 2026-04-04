@@ -9,7 +9,7 @@ import {
   Play,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useRuns, useCancelExecution, useAgents } from "@/hooks/queries";
+import { useRuns, useCancelExecution } from "@/hooks/queries";
 import type { WorkflowSummary } from "@/types/workflows";
 import {
   getStatusLabel,
@@ -581,7 +581,6 @@ function RunsPaginationBar({
 export function RunsPage() {
   const navigate = useNavigate();
   const cancelMutation = useCancelExecution();
-  const agentsQuery = useAgents();
   const { state: sidebarState, isMobile } = useSidebar();
 
   /** Match main content horizontal inset (sidebar + p-6) so the bar centers over the table column, not the viewport. */
@@ -599,8 +598,6 @@ export function RunsPage() {
   const [timeRange, setTimeRange] = useState("all");
   /** Empty set = all statuses (no restriction). */
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(() => new Set());
-  /** Empty set = all agents (no restriction). */
-  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -608,11 +605,6 @@ export function RunsPage() {
     () => [...selectedStatuses].sort().join("\0"),
     [selectedStatuses],
   );
-  const agentFilterKey = useMemo(
-    () => [...selectedAgents].sort().join("\0"),
-    [selectedAgents],
-  );
-
   /** Single status only: server-side filter. Multiple: fetch unfiltered by status, narrow client-side. */
   const apiStatus =
     selectedStatuses.size === 1 ? [...selectedStatuses][0] : undefined;
@@ -643,7 +635,6 @@ export function RunsPage() {
   const prevFiltersRef = useRef({
     timeRange,
     statusFilterKey,
-    agentFilterKey,
     debouncedSearch,
     sortBy,
     sortOrder,
@@ -653,7 +644,6 @@ export function RunsPage() {
     if (
       prev.timeRange !== timeRange ||
       prev.statusFilterKey !== statusFilterKey ||
-      prev.agentFilterKey !== agentFilterKey ||
       prev.debouncedSearch !== debouncedSearch ||
       prev.sortBy !== sortBy ||
       prev.sortOrder !== sortOrder
@@ -662,7 +652,6 @@ export function RunsPage() {
       prevFiltersRef.current = {
         timeRange,
         statusFilterKey,
-        agentFilterKey,
         debouncedSearch,
         sortBy,
         sortOrder,
@@ -671,7 +660,6 @@ export function RunsPage() {
   }, [
     timeRange,
     statusFilterKey,
-    agentFilterKey,
     debouncedSearch,
     sortBy,
     sortOrder,
@@ -706,16 +694,6 @@ export function RunsPage() {
     }
   }, [pageSize]);
 
-  // Registered agents (stable filter list; not tied to the current result page).
-  const agentMultiOptions = useMemo(() => {
-    const nodes = agentsQuery.data?.nodes ?? [];
-    return [...nodes]
-      .map((n) => n.id)
-      .filter(Boolean)
-      .sort()
-      .map((id) => ({ value: id, label: id }));
-  }, [agentsQuery.data?.nodes]);
-
   const statusMultiOptions = useMemo(
     () =>
       FILTER_STATUS_CANONICAL.map((canonical) => ({
@@ -729,7 +707,6 @@ export function RunsPage() {
   const hasActiveFilters =
     timeRange !== "all" ||
     selectedStatuses.size > 0 ||
-    selectedAgents.size > 0 ||
     search.trim() !== "" ||
     debouncedSearch.trim() !== "";
 
@@ -740,7 +717,6 @@ export function RunsPage() {
     }
     setTimeRange("all");
     setSelectedStatuses(new Set());
-    setSelectedAgents(new Set());
     setSearch("");
     setDebouncedSearch("");
     setSelected(new Set());
@@ -754,15 +730,7 @@ export function RunsPage() {
     [],
   );
 
-  const handleAgentsFilterChange = useCallback(
-    (updater: (prev: Set<string>) => Set<string>) => {
-      setSelectedAgents(updater);
-      setSelected(new Set());
-    },
-    [],
-  );
-
-  /** Server applies status when exactly one is selected; otherwise narrow here (multi-status OR, agents OR). */
+  /** Server applies status when exactly one is selected; otherwise narrow here (multi-status OR). */
   const filteredRuns = useMemo(() => {
     let rows = pageRows;
     if (selectedStatuses.size > 1) {
@@ -770,14 +738,8 @@ export function RunsPage() {
         selectedStatuses.has(normalizeExecutionStatus(r.status)),
       );
     }
-    if (selectedAgents.size > 0) {
-      rows = rows.filter((r) => {
-        const id = r.agent_id || r.agent_name;
-        return id != null && selectedAgents.has(id);
-      });
-    }
     return rows;
-  }, [pageRows, selectedStatuses, selectedAgents]);
+  }, [pageRows, selectedStatuses]);
 
   // row click
   const handleRowClick = useCallback(
@@ -901,20 +863,6 @@ export function RunsPage() {
               onSelectedChange={handleStatusesFilterChange}
               pluralLabel={(n) => `${n} statuses`}
             />
-            <FilterMultiCombobox
-              label="Agents"
-              emptyLabel="All agents"
-              searchPlaceholder="Find agents…"
-              emptyMessage={
-                agentMultiOptions.length === 0
-                  ? "No registered agents yet."
-                  : "No agent matches."
-              }
-              options={agentMultiOptions}
-              selected={selectedAgents}
-              onSelectedChange={handleAgentsFilterChange}
-              pluralLabel={(n) => `${n} agents`}
-            />
           </div>
 
           <Separator
@@ -1022,9 +970,8 @@ export function RunsPage() {
                     <Play className="size-8 text-muted-foreground/30 mb-3" />
                     <p className="text-sm font-medium text-muted-foreground">No runs found</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {pageRows.length > 0 &&
-                      (selectedStatuses.size > 0 || selectedAgents.size > 0)
-                        ? "No rows match the current status or agent filters on this page. Try clearing filters or another page."
+                      {pageRows.length > 0 && selectedStatuses.size > 0
+                        ? "No rows match the current status filters on this page. Try clearing filters or another page."
                         : timeRange !== "all"
                           ? "Try expanding the time range"
                           : "Execute a reasoner to create your first run"}

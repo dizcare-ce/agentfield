@@ -114,6 +114,27 @@ export async function getWorkflowVCChain(workflowId: string): Promise<WorkflowVC
 }
 
 /**
+ * Same JSON shape as GET /api/ui/v1/workflows/:id/vc-chain — valid input for `af verify <file.json>`
+ * (legacy WorkflowVCChainResponse; CLI normalizes to EnhancedVCChain).
+ */
+export async function downloadWorkflowVCAuditFile(
+  workflowId: string,
+  filename?: string,
+): Promise<void> {
+  const chain = await getWorkflowVCChain(workflowId);
+  const blob = new Blob([JSON.stringify(chain, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download =
+    filename ?? `workflow-${workflowId.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 48)}-vc-audit.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Create a workflow-level VC
  */
 export async function createWorkflowVC(

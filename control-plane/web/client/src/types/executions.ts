@@ -132,6 +132,11 @@ export interface WorkflowExecution {
   notes?: ExecutionNote[];
   webhook_registered?: boolean;
   webhook_events?: ExecutionWebhookEvent[];
+  /** From execution_vcs when VC/DID is enabled */
+  caller_did?: string;
+  target_did?: string;
+  input_hash?: string;
+  output_hash?: string;
 }
 
 // Import ExecutionNote type

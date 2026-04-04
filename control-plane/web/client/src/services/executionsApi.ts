@@ -210,6 +210,10 @@ function transformExecutionDetailsResponse(raw: any): WorkflowExecution {
     webhook_registered:
       Boolean(raw.webhook_registered) || normalisedWebhookEvents.length > 0,
     webhook_events: normalisedWebhookEvents,
+    caller_did: raw.caller_did ?? undefined,
+    target_did: raw.target_did ?? undefined,
+    input_hash: raw.input_hash ?? undefined,
+    output_hash: raw.output_hash ?? undefined,
   };
 }
 

@@ -16,47 +16,157 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ChevronDown } from "@/components/ui/icon-bridge";
-import { Copy, Check, ShieldAlert, RefreshCw } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Copy, Check, ShieldAlert, RefreshCw, Terminal, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { retryExecutionWebhook } from "@/services/executionsApi";
 import { formatDuration } from "./RunTrace";
 import { JsonHighlightedPre } from "@/components/ui/json-syntax-highlight";
+import { StepProvenanceCard } from "@/components/StepProvenanceCard";
 
-// ─── Copy button with transient check icon ────────────────────────────────────
+// ─── cURL snippet: copy + minimal info (hover) ────────────────────────────────
 
-function CopyBtn({
+function CopyCurlSnippet({
   label,
+  hint,
   getText,
-  disabled,
 }: {
   label: string;
+  hint: string;
   getText: () => string;
-  disabled?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
   const handleClick = () => {
     const text = getText();
-    navigator.clipboard.writeText(text).then(() => {
+    void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
   };
 
   return (
+    <div className="inline-flex items-center gap-0">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 gap-1 px-1.5 pr-1 text-[10px] text-muted-foreground"
+        onClick={handleClick}
+        title={`Copy cURL: ${label}`}
+      >
+        {copied ? (
+          <Check className="size-2.5 shrink-0" />
+        ) : (
+          <Copy className="size-2.5 shrink-0" />
+        )}
+        <span className="max-w-[9rem] truncate sm:max-w-none">{label}</span>
+      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={`What this copies: ${label}`}
+          >
+            <Info className="size-3" strokeWidth={2.25} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="max-w-[min(20rem,calc(100vw-2rem))] border border-border bg-popover px-2.5 py-2 text-left text-[11px] leading-snug text-popover-foreground shadow-md"
+        >
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** Workflow ID label + clickable value (copies raw id). */
+function CopyableWorkflowId({ workflowId }: { workflowId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/80">
+      <span className="shrink-0 font-sans">Workflow ID:</span>
+      <button
+        type="button"
+        className={cn(
+          "max-w-full break-all rounded-sm px-1 py-0.5 text-left font-mono",
+          "text-foreground/90 transition-colors",
+          "hover:bg-muted hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+        title="Copy workflow ID"
+        onClick={() => {
+          void navigator.clipboard.writeText(workflowId).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+      >
+        {workflowId}
+      </button>
+      {copied ? (
+        <Check className="size-3 shrink-0 text-green-600 dark:text-green-500" aria-hidden />
+      ) : (
+        <Copy
+          className="size-3 shrink-0 opacity-40 pointer-events-none"
+          aria-hidden
+        />
+      )}
+    </p>
+  );
+}
+
+/** Icon-only copy for JSON blocks (sits on Input / Output headers). */
+function CopyJsonHeaderButton({
+  data,
+  ariaLabel,
+  disabled,
+}: {
+  data: unknown;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  return (
     <Button
+      type="button"
       variant="ghost"
-      size="sm"
-      className="h-6 px-2 text-[10px] text-muted-foreground"
-      onClick={handleClick}
+      size="icon"
+      className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
       disabled={disabled}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={(e) => {
+        e.preventDefault();
+        const text =
+          data == null ? "" : JSON.stringify(data, null, 2);
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
     >
       {copied ? (
-        <Check className="size-2.5 mr-1" />
+        <Check className="size-3.5" />
       ) : (
-        <Copy className="size-2.5 mr-1" />
+        <Copy className="size-3.5" />
       )}
-      {label}
     </Button>
   );
 }
@@ -90,6 +200,12 @@ export function StepDetail({ executionId }: { executionId: string }) {
   const hasInput = execution.input_data != null;
   const notes = execution.notes ?? [];
 
+  const apiUiBase =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined) || "/api/ui/v1";
+  const curlApiRoot =
+    apiUiBase.startsWith("http") ? apiUiBase : `${window.location.origin}${apiUiBase}`;
+  const workflowId = execution.workflow_id;
+
   const buildCurl = () => {
     const origin = window.location.origin;
     return (
@@ -99,6 +215,61 @@ export function StepDetail({ executionId }: { executionId: string }) {
       `  -d '${JSON.stringify({ input: execution.input_data })}'`
     );
   };
+
+  const buildCurlWorkflowDag = () =>
+    [
+      `curl -sS '${curlApiRoot}/workflows/${workflowId}/dag?mode=lightweight' \\`,
+      `  -H 'X-API-Key: YOUR_API_KEY'`,
+    ].join("\n");
+
+  const buildCurlWorkflowVCAudit = () =>
+    [
+      `# JSON matches GET vc-chain — use as: af verify audit.json`,
+      `curl -sS '${curlApiRoot}/workflows/${workflowId}/vc-chain' \\`,
+      `  -H 'X-API-Key: YOUR_API_KEY'`,
+    ].join("\n");
+
+  const buildCurlStepDetails = () =>
+    [
+      `curl -sS '${curlApiRoot}/executions/${execution.execution_id}/details' \\`,
+      `  -H 'X-API-Key: YOUR_API_KEY'`,
+    ].join("\n");
+
+  const curlSnippets: {
+    id: string;
+    label: string;
+    hint: string;
+    getText: () => string;
+  }[] = [
+    {
+      id: "execute",
+      label: "Execute",
+      hint:
+        "POST /api/v1/execute/{agent}.{reasoner} with the Input JSON from this step. Calls the public execute API and starts a new run (not a replay of this exact execution id).",
+      getText: buildCurl,
+    },
+    {
+      id: "dag",
+      label: "Workflow DAG",
+      hint:
+        "GET /api/ui/v1/workflows/{workflowId}/dag?mode=lightweight — graph + timeline metadata for the whole workflow (agents, steps order, lightweight structure).",
+      getText: buildCurlWorkflowDag,
+    },
+    {
+      id: "vc",
+      label: "VC audit",
+      hint:
+        "GET /api/ui/v1/workflows/{workflowId}/vc-chain — verifiable credential chain for the workflow. Response matches what af verify expects if you save it as a JSON file.",
+      getText: buildCurlWorkflowVCAudit,
+    },
+    {
+      id: "details",
+      label: "Execution record",
+      hint:
+        "GET /api/ui/v1/executions/{this execution id}/details — full JSON for this single step: status, input/output, errors, notes, webhooks; same payload the sidebar loads.",
+      getText: buildCurlStepDetails,
+    },
+  ];
 
   return (
     <ScrollArea className="h-full min-w-0 max-w-full">
@@ -116,32 +287,97 @@ export function StepDetail({ executionId }: { executionId: string }) {
               <> · Depth: {execution.workflow_depth}</>
             )}
           </p>
+          <CopyableWorkflowId workflowId={workflowId} />
 
-          {/* Copy action row */}
-          <div className="flex flex-wrap items-center gap-0.5 mt-2">
-            <CopyBtn label="Copy cURL" getText={buildCurl} />
-            <CopyBtn
-              label="Copy Input"
-              getText={() => JSON.stringify(execution.input_data, null, 2)}
-              disabled={!hasInput}
-            />
-            <CopyBtn
-              label="Copy Output"
-              getText={() => JSON.stringify(execution.output_data, null, 2)}
-              disabled={!hasOutput}
-            />
-          </div>
+          {/* cURL: compact dropdown on small screens; inline from md+ */}
+          <TooltipProvider delayDuration={280}>
+            <div className="mt-2 flex flex-wrap items-center gap-x-0.5 gap-y-1">
+              <div className="hidden md:flex md:flex-wrap md:items-center md:gap-x-0 md:gap-y-1">
+                {curlSnippets.map((s) => (
+                  <CopyCurlSnippet
+                    key={s.id}
+                    label={s.label}
+                    hint={s.hint}
+                    getText={s.getText}
+                  />
+                ))}
+              </div>
+              <div className="md:hidden">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-[10px] font-medium"
+                    >
+                      <Terminal className="size-3 shrink-0" />
+                      Copy cURL
+                      <ChevronDown className="size-3 shrink-0 opacity-60" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-[min(100vw-1.5rem,18rem)]"
+                  >
+                    <DropdownMenuLabel className="text-[10px] font-normal leading-snug text-muted-foreground">
+                      Each item copies a ready-to-run curl. Descriptions below.
+                    </DropdownMenuLabel>
+                    {curlSnippets.map((s) => (
+                      <DropdownMenuItem
+                        key={s.id}
+                        className="flex cursor-pointer flex-col items-stretch gap-1 py-2.5"
+                        onSelect={() =>
+                          void navigator.clipboard.writeText(s.getText())
+                        }
+                      >
+                        <span className="flex items-center gap-2 text-xs font-medium">
+                          <Copy className="size-3.5 shrink-0 opacity-70" />
+                          {s.label}
+                        </span>
+                        <span className="pl-[1.375rem] text-[10px] leading-snug text-muted-foreground">
+                          {s.hint}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </TooltipProvider>
         </div>
+
+        <StepProvenanceCard
+          callerDid={execution.caller_did}
+          targetDid={execution.target_did}
+          inputHash={execution.input_hash}
+          outputHash={execution.output_hash}
+        />
+
+        {/* Error above input so failures are visible before scrolling past payload */}
+        {hasError ? (
+          <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
+            <p className="text-xs font-medium text-destructive">Error</p>
+            <p className="text-xs mt-1 font-mono whitespace-pre-wrap break-all">
+              {execution.error_message}
+            </p>
+          </div>
+        ) : null}
 
         {/* Input section */}
         {hasInput && (
           <Collapsible defaultOpen>
-            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
-              <ChevronDown className="size-3 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
-              Input
-            </CollapsibleTrigger>
+            <div className="flex min-w-0 w-full items-center gap-0.5">
+              <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+                <ChevronDown className="size-3 shrink-0 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
+                Input
+              </CollapsibleTrigger>
+              <CopyJsonHeaderButton
+                data={execution.input_data}
+                ariaLabel="Copy input JSON"
+              />
+            </div>
             <CollapsibleContent>
-              <div className="mt-2 rounded-md bg-muted p-3 overflow-auto max-h-64">
+              <div className="mt-2 min-w-0 max-w-full rounded-md bg-muted p-3 overflow-x-auto overflow-y-auto max-h-64">
                 <JsonHighlightedPre
                   data={execution.input_data}
                   className="text-xs font-mono leading-relaxed"
@@ -151,22 +387,21 @@ export function StepDetail({ executionId }: { executionId: string }) {
           </Collapsible>
         )}
 
-        {/* Output or Error */}
-        {hasError ? (
-          <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
-            <p className="text-xs font-medium text-destructive">Error</p>
-            <p className="text-xs mt-1 font-mono whitespace-pre-wrap break-all">
-              {execution.error_message}
-            </p>
-          </div>
-        ) : hasOutput ? (
+        {/* Output (omit when error present — same as before) */}
+        {!hasError && hasOutput ? (
           <Collapsible defaultOpen>
-            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-full text-left">
-              <ChevronDown className="size-3 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
-              Output
-            </CollapsibleTrigger>
+            <div className="flex min-w-0 w-full items-center gap-0.5">
+              <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+                <ChevronDown className="size-3 shrink-0 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
+                Output
+              </CollapsibleTrigger>
+              <CopyJsonHeaderButton
+                data={execution.output_data}
+                ariaLabel="Copy output JSON"
+              />
+            </div>
             <CollapsibleContent>
-              <div className="mt-2 rounded-md bg-muted p-3 overflow-auto max-h-64">
+              <div className="mt-2 min-w-0 max-w-full rounded-md bg-muted p-3 overflow-x-auto overflow-y-auto max-h-64">
                 <JsonHighlightedPre
                   data={execution.output_data}
                   className="text-xs font-mono leading-relaxed"
@@ -174,11 +409,11 @@ export function StepDetail({ executionId }: { executionId: string }) {
               </div>
             </CollapsibleContent>
           </Collapsible>
-        ) : (
+        ) : !hasError ? (
           <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
             No output
           </div>
-        )}
+        ) : null}
 
         {/* Notes */}
         {notes.length > 0 && (
