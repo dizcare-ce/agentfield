@@ -1,10 +1,4 @@
 import { cn } from "@/lib/utils";
-import {
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  Circle,
-} from "@/components/ui/icon-bridge";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
 
 // ─── Tree node type (runtime-constructed) ────────────────────────────────────
@@ -77,22 +71,39 @@ export function formatDuration(ms: number | null | undefined): string {
   return `${days}d ${hr}h`;
 }
 
-function StatusIcon({ status }: { status: string }) {
-  switch (status) {
-    case "succeeded":
-      return <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />;
-    case "failed":
-    case "timeout":
-      return <XCircle className="size-3.5 shrink-0 text-destructive" />;
-    case "running":
-      return (
-        <Loader2 className="size-3.5 shrink-0 text-blue-500 animate-spin" />
-      );
-    default:
-      return (
-        <Circle className="size-3.5 shrink-0 text-muted-foreground" />
-      );
+function formatRelativeStart(ms: number): string {
+  if (ms < 0) return "+0:00";
+  const secs = Math.floor(ms / 1000);
+  const mins = Math.floor(secs / 60);
+  const remSecs = secs % 60;
+  if (mins < 60) return `+${mins}:${String(remSecs).padStart(2, "0")}`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `+${hours}:${String(remMins).padStart(2, "0")}:${String(remSecs).padStart(2, "0")}`;
+}
+
+// ─── Flatten tree to ordered list for group-counting ─────────────────────────
+
+function flattenTree(node: TraceTreeNode): TraceTreeNode[] {
+  const result: TraceTreeNode[] = [node];
+  for (const child of node.children ?? []) {
+    result.push(...flattenTree(child));
   }
+  return result;
+}
+
+// ─── Status dot ───────────────────────────────────────────────────────────────
+
+function StatusDot({ status }: { status: string }) {
+  const color =
+    status === "succeeded"
+      ? "bg-green-500"
+      : status === "failed" || status === "timeout"
+        ? "bg-red-500"
+        : status === "running"
+          ? "bg-blue-500 animate-pulse"
+          : "bg-muted-foreground/40";
+  return <span className={cn("size-1.5 rounded-full shrink-0 inline-block", color)} />;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -103,6 +114,12 @@ interface RunTraceProps {
   selectedId: string | null;
   onSelect: (executionId: string) => void;
   depth?: number;
+  /** ISO string of the run's start time, used to compute relative step start offsets */
+  runStartedAt?: string | null;
+  /** Internal: flat ordered list of all nodes, used for group separators */
+  _flatNodes?: TraceTreeNode[];
+  /** Internal: sequential index of this node in the flat list */
+  _index?: number;
 }
 
 export function RunTrace({
@@ -111,7 +128,14 @@ export function RunTrace({
   selectedId,
   onSelect,
   depth = 0,
+  runStartedAt,
+  _flatNodes,
+  _index = 0,
 }: RunTraceProps) {
+  // Build flat list once at the root level
+  const flatNodes = _flatNodes ?? flattenTree(node);
+  const index = _index;
+
   const barWidth =
     node.duration_ms != null
       ? Math.max(4, (node.duration_ms / Math.max(maxDuration, 1)) * 100)
@@ -120,40 +144,98 @@ export function RunTrace({
 
   const barColor =
     node.status === "succeeded"
-      ? "bg-green-500"
-      : node.status === "failed" || node.status === "timeout"
-        ? "bg-destructive"
-        : node.status === "running"
-          ? "bg-blue-500"
-          : "bg-muted-foreground/40";
+      ? "bg-green-600"
+      : node.status === "failed"
+        ? "bg-red-500"
+        : node.status === "timeout"
+          ? "bg-amber-500"
+          : node.status === "running"
+            ? "bg-blue-500 animate-pulse"
+            : "bg-muted-foreground/30";
+
+  // Relative start time
+  let relativeStart: string | null = null;
+  if (runStartedAt && node.started_at) {
+    const runStartMs = new Date(runStartedAt).getTime();
+    const stepStartMs = new Date(node.started_at).getTime();
+    relativeStart = formatRelativeStart(stepStartMs - runStartMs);
+  }
+
+  // Group separator: show a divider when reasoner_id changes from previous sibling
+  const prevNode = index > 0 ? flatNodes[index - 1] : null;
+  const showSeparator =
+    depth > 0 &&
+    prevNode !== null &&
+    prevNode.reasoner_id !== node.reasoner_id;
+
+  // Group count badge: count consecutive siblings with same reasoner_id
+  // Only show on the first node of a consecutive run
+  const siblings = flatNodes.filter(
+    (n) => n.parent_execution_id === node.parent_execution_id,
+  );
+  const siblingIndex = siblings.findIndex(
+    (n) => n.execution_id === node.execution_id,
+  );
+  const prevSibling = siblingIndex > 0 ? siblings[siblingIndex - 1] : null;
+  const isFirstOfGroup =
+    prevSibling === null || prevSibling.reasoner_id !== node.reasoner_id;
+  const groupCount = isFirstOfGroup
+    ? siblings
+        .slice(siblingIndex)
+        .findIndex((n) => n.reasoner_id !== node.reasoner_id)
+    : 0;
+  const effectiveGroupCount =
+    groupCount === -1
+      ? siblings.length - siblingIndex
+      : groupCount;
 
   return (
     <div>
+      {showSeparator && <div className="border-t border-border/30 my-0.5" />}
+
       <button
         type="button"
         onClick={() => onSelect(node.execution_id)}
         className={cn(
-          "flex items-center gap-2 w-full rounded-md text-sm transition-colors",
-          "hover:bg-accent text-left",
+          "flex items-center gap-1.5 w-full rounded-md transition-colors",
+          "hover:bg-accent text-left py-1",
           isSelected && "bg-accent",
         )}
-        style={{ paddingLeft: `${depth * 16 + 8}px`, paddingRight: "8px", paddingTop: "6px", paddingBottom: "6px" }}
+        style={{
+          paddingLeft: `${depth * 14 + 8}px`,
+          paddingRight: "8px",
+        }}
       >
-        {/* Tree connector */}
+        {/* Step number */}
+        <span className="text-[10px] text-muted-foreground/50 tabular-nums w-5 text-right shrink-0">
+          {index + 1}
+        </span>
+
+        {/* Tree connector — only for children */}
         {depth > 0 && (
-          <span className="text-muted-foreground/50 text-xs shrink-0 font-mono">
+          <span className="text-muted-foreground/40 text-[10px] shrink-0 font-mono w-4">
             └─
           </span>
         )}
 
+        {/* Status dot */}
+        <StatusDot status={node.status} />
+
         {/* Reasoner name */}
-        <span className="truncate font-mono text-xs min-w-0 flex-shrink">
+        <span className="flex-1 truncate font-mono text-xs min-w-0">
           {node.reasoner_id}
         </span>
 
+        {/* Group count badge */}
+        {isFirstOfGroup && effectiveGroupCount > 1 && (
+          <span className="text-[9px] text-muted-foreground bg-muted rounded px-1 shrink-0">
+            ×{effectiveGroupCount}
+          </span>
+        )}
+
         {/* Duration bar */}
-        <div className="flex-1 flex items-center min-w-[40px]">
-          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className="w-16 flex items-center shrink-0">
+          <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
             <div
               className={cn("h-full rounded-full transition-all", barColor)}
               style={{ width: `${barWidth}%` }}
@@ -161,26 +243,38 @@ export function RunTrace({
           </div>
         </div>
 
+        {/* Relative start */}
+        {relativeStart !== null && (
+          <span className="text-[10px] text-muted-foreground/40 tabular-nums shrink-0 w-12 text-right">
+            {relativeStart}
+          </span>
+        )}
+
         {/* Duration text */}
-        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+        <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap shrink-0 w-10 text-right">
           {formatDuration(node.duration_ms)}
         </span>
-
-        {/* Status icon */}
-        <StatusIcon status={node.status} />
       </button>
 
       {/* Children */}
-      {node.children?.map((child) => (
-        <RunTrace
-          key={child.execution_id}
-          node={child}
-          maxDuration={maxDuration}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          depth={depth + 1}
-        />
-      ))}
+      {node.children?.map((child) => {
+        const childIndex = flatNodes.findIndex(
+          (n) => n.execution_id === child.execution_id,
+        );
+        return (
+          <RunTrace
+            key={child.execution_id}
+            node={child}
+            maxDuration={maxDuration}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            depth={depth + 1}
+            runStartedAt={runStartedAt}
+            _flatNodes={flatNodes}
+            _index={childIndex}
+          />
+        );
+      })}
     </div>
   );
 }
