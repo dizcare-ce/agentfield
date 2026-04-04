@@ -7,6 +7,8 @@ Persona: AI builder debugging multi-agent systems. Core questions:
 3. What exactly went in and came out at each step?
 4. How does this run compare to the last one?
 
+**Stale sections (2026-04-04):** Some items below predate the current tree. A code-backed re-audit lives in [`16-runs-workflow-audit-executed.md`](./16-runs-workflow-audit-executed.md). At minimum, re-verify before acting on: dashboard row navigation (now `/runs/...` in source), Runs agent filter behavior (present but client-paged), and run detail Graph tab (real DAG, not a “coming soon” placeholder).
+
 ---
 
 ## 1. NewDashboardPage (`src/pages/NewDashboardPage.tsx`)

@@ -714,6 +714,15 @@ func (h *ExecutionHandler) toExecutionDetails(ctx context.Context, exec *types.E
 	webhookRegistered := exec.WebhookRegistered
 	webhookEvents := exec.WebhookEvents
 
+	notes := exec.Notes
+	if notes == nil {
+		notes = []types.ExecutionNote{}
+	}
+	var latestNote *types.ExecutionNote
+	if n := len(notes); n > 0 {
+		latestNote = &notes[n-1]
+	}
+
 	resp := ExecutionDetailsResponse{
 		ID:                  0,
 		ExecutionID:         exec.ExecutionID,
@@ -741,9 +750,9 @@ func (h *ExecutionHandler) toExecutionDetails(ctx context.Context, exec *types.E
 		RetryCount:          0,
 		CreatedAt:           exec.StartedAt.Format(time.RFC3339),
 		UpdatedAt:           &updated,
-		Notes:               nil,
-		NotesCount:          0,
-		LatestNote:          nil,
+		Notes:               notes,
+		NotesCount:          len(notes),
+		LatestNote:          latestNote,
 		WebhookRegistered:   webhookRegistered,
 		WebhookEvents:       webhookEvents,
 	}

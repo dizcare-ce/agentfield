@@ -11,40 +11,51 @@
 @layer base {
   :root {
     --radius: 0.5rem;
+
+    /*
+     * Theme knobs (change these to re-tint the whole app).
+     * --shell-*  = neutral slate chrome (backgrounds, borders, sidebar gray).
+     * --brand-*  = product accent (logo, focus rings, sidebar primary in dark).
+     */
+    --shell-h: 222.2;
+    --shell-s: 14%;
+    --brand-h: 224.3;
+    --brand-s: 76.3%;
+    --brand-l: 48%;
+
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: var(--shell-h) 47.4% 11.2%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: var(--shell-h) 47.4% 11.2%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
+    --popover-foreground: var(--shell-h) 47.4% 11.2%;
+    --primary: var(--shell-h) 47.4% 11.2%;
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary-foreground: var(--shell-h) 47.4% 11.2%;
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
     --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent-foreground: var(--shell-h) 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --ring: var(--shell-h) 47.4% 11.2%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-foreground: var(--shell-h) 35% 26%;
+    --sidebar-primary: var(--shell-h) 47.4% 11.2%;
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-    /* App mark: same vibrant blue + white bolt in light and dark (sidebar-primary differs by theme) */
-    --sidebar-logo: 224.3 76.3% 48%;
+    --sidebar-accent: var(--shell-h) 40% 96.1%;
+    --sidebar-accent-foreground: var(--shell-h) 47.4% 11.2%;
+    --sidebar-border: var(--shell-h) 32% 91%;
+    --sidebar-ring: var(--brand-h) var(--brand-s) var(--brand-l);
+    --sidebar-logo: var(--brand-h) var(--brand-s) var(--brand-l);
     --sidebar-logo-foreground: 0 0% 100%;
     /* shadcn sidebar menu button hover/active (see ui/sidebar.tsx) */
     --sidebar-hover: hsl(var(--sidebar-accent));
@@ -66,39 +77,50 @@
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    /*
+     * Dark shell: one neutral family (--shell-h / --shell-s) for gutter + inset + cards.
+     * Inset main (--background) sits slightly above gutter (--sidebar-background) in lightness.
+     * Brand blue is only --brand-* (logo, sidebar-primary, rings) — not mixed into grays.
+     */
+    --shell-h: 222.2;
+    --shell-s: 14%;
+    --brand-h: 224.3;
+    --brand-s: 76.3%;
+    --brand-l: 48%;
+
+    --sidebar-background: var(--shell-h) var(--shell-s) 5.4%;
+    --background: var(--shell-h) var(--shell-s) 8.6%;
+    --foreground: var(--shell-h) 8% 96%;
+    --card: var(--shell-h) var(--shell-s) 8.6%;
+    --card-foreground: var(--shell-h) 8% 96%;
+    --popover: var(--shell-h) var(--shell-s) 8.6%;
+    --popover-foreground: var(--shell-h) 8% 96%;
+    --primary: var(--shell-h) 8% 96%;
+    --primary-foreground: var(--shell-h) var(--shell-s) 8.6%;
+    --secondary: var(--shell-h) var(--shell-s) 14%;
+    --secondary-foreground: var(--shell-h) 8% 96%;
+    --muted: var(--shell-h) var(--shell-s) 14%;
+    --muted-foreground: var(--shell-h) 10% 64%;
+    --accent: var(--shell-h) var(--shell-s) 14%;
+    --accent-foreground: var(--shell-h) 8% 96%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: var(--shell-h) var(--shell-s) 18%;
+    --input: var(--shell-h) var(--shell-s) 18%;
+    --ring: var(--brand-h) var(--brand-s) var(--brand-l);
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-foreground: var(--shell-h) 6% 94%;
+    --sidebar-primary: var(--brand-h) var(--brand-s) var(--brand-l);
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-    --sidebar-logo: 224.3 76.3% 48%;
+    --sidebar-accent: var(--shell-h) var(--shell-s) 12%;
+    --sidebar-accent-foreground: var(--shell-h) 6% 94%;
+    --sidebar-border: var(--shell-h) var(--shell-s) 16%;
+    --sidebar-ring: var(--brand-h) var(--brand-s) var(--brand-l);
+    --sidebar-logo: var(--brand-h) var(--brand-s) var(--brand-l);
     --sidebar-logo-foreground: 0 0% 100%;
     --sidebar-hover: hsl(var(--sidebar-accent));
     --sidebar-active-bg: hsl(var(--sidebar-accent));

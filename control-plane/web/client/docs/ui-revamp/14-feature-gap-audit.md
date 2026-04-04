@@ -1,8 +1,24 @@
 # Feature Gap Audit: Old UI vs New UI
 
-**Audit date:** 2026-04-04
-**Auditor:** Research pass over all page source files
+**Audit date:** 2026-04-04  
+**Auditor:** Research pass over all page source files  
 **Purpose:** Identify features present in the old AgentField UI that are missing or degraded in the new UI, so they can be triaged before launch.
+
+### Re-audit executed 2026-04-04 (delta)
+
+Full trace documented in [`16-runs-workflow-audit-executed.md`](./16-runs-workflow-audit-executed.md). High-signal corrections to the table below:
+
+| Row / topic | Earlier assumption | Verified now |
+|-------------|-------------------|--------------|
+| Graph view on run detail | Placeholder (“coming soon”) | **Interactive DAG** ships via `WorkflowDAGViewer` → `components/WorkflowDAG/`. |
+| Runs list agent filter | Missing | **UI present**, but filtering is **client-side on the current page only**; **no** `agent_node_id` on `GET /api/ui/v2/workflow-runs`. |
+| Step detail cURL | Missing | **Present** in `StepDetail`. |
+| Step detail webhooks / HITL | Missing | **Present** in `StepDetail`; **approval fields were dropped in `transformExecutionDetailsResponse`** — **fixed** 2026-04-04. |
+| Execution notes (`app.note()`) | Partial | **Backend omitted notes** in `toExecutionDetails` — **fixed** 2026-04-04. |
+| Dashboard → run navigation | Broken `/workflows/...` | **Fixed** in `NewDashboardPage` (`/runs/${runId}`). |
+| Settings DID / identity | Unknown | **Identity tab** exists on `NewSettingsPage`. |
+
+The numbered gap table is **not** fully rewritten here; use `16` for execution-grade accuracy and this section for deltas.
 
 ---
 

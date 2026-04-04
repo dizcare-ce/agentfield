@@ -227,7 +227,7 @@ function TraceRow({
         type="button"
         onClick={() => onSelect(node.execution_id)}
         className={cn(
-          "flex items-center gap-1.5 w-full rounded-md transition-colors",
+          "flex min-w-0 items-center gap-1 w-full rounded-md transition-colors sm:gap-1.5",
           "hover:bg-accent text-left py-1",
           isSelected && "bg-accent",
         )}
@@ -264,7 +264,7 @@ function TraceRow({
         )}
 
         {/* Duration bar */}
-        <div className="w-16 flex items-center shrink-0">
+        <div className="w-12 flex items-center shrink-0 sm:w-16">
           <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
             <div
               className={cn("h-full rounded-full transition-all", barColor)}
@@ -275,7 +275,7 @@ function TraceRow({
 
         {/* Relative start */}
         {relativeStart !== null && (
-          <span className="text-[10px] text-muted-foreground/40 tabular-nums shrink-0 w-12 text-right">
+          <span className="hidden text-[10px] text-muted-foreground/40 tabular-nums shrink-0 w-12 text-right sm:inline-block">
             {relativeStart}
           </span>
         )}
@@ -319,7 +319,7 @@ export function RunTrace({
   });
 
   return (
-    <div ref={parentRef} className="h-full overflow-auto">
+    <div ref={parentRef} className="h-full min-w-0 overflow-auto">
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,

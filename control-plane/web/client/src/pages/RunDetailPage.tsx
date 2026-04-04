@@ -90,7 +90,7 @@ export function RunDetailPage() {
   // ─── Loading state ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-4 h-[calc(100vh-8rem)]">
+      <div className="flex min-w-0 flex-col gap-4 h-[calc(100vh-8rem)]">
         <div className="flex items-center justify-between flex-shrink-0">
           <div className="flex flex-col gap-1">
             <Skeleton className="h-7 w-36" />
@@ -106,7 +106,7 @@ export function RunDetailPage() {
   // ─── Error state ────────────────────────────────────────────────────────────
   if (isError) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">
           Run {shortId}
         </h1>
@@ -120,7 +120,7 @@ export function RunDetailPage() {
   // ─── Empty state ────────────────────────────────────────────────────────────
   if (!dag) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">
           Run {shortId}
         </h1>
@@ -149,29 +149,29 @@ export function RunDetailPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
+    <div className="flex min-w-0 flex-col h-[calc(100vh-8rem)] max-w-full">
       {/* ─── Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-shrink-0 mb-3">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 flex-shrink-0 mb-3 min-w-0">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h1 className="text-lg sm:text-xl font-semibold tracking-tight min-w-0">
               Run{" "}
-              <span className="font-mono text-muted-foreground">
+              <span className="font-mono text-muted-foreground break-all">
                 {runId?.slice(0, 16)}
               </span>
             </h1>
-            <Badge variant={statusVariant(dag.workflow_status)}>
+            <Badge variant={statusVariant(dag.workflow_status)} className="shrink-0">
               {dag.workflow_status}
             </Badge>
             {/* DID badge */}
             <span
-              className="text-[10px] font-mono text-muted-foreground/50 select-all"
+              className="text-[10px] font-mono text-muted-foreground/50 select-all shrink-0 max-w-full truncate"
               title={`Run DID: did:web:agentfield:run:${runId}`}
             >
               did:…{runId?.slice(-6)}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5 break-words">
             {dag.workflow_name || rootNode?.reasoner_id || "—"}
             {" · "}
             {dag.total_nodes} {dag.total_nodes === 1 ? "step" : "steps"}
@@ -181,7 +181,7 @@ export function RunDetailPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0 sm:justify-end">
           {/* Replay */}
           <Button
             variant="outline"
@@ -305,8 +305,8 @@ export function RunDetailPage() {
       {/* ─── Content ────────────────────────────────────────────────────── */}
       {isSingleStep ? (
         // Single-step run: show step detail directly, fill remaining height
-        <Card className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <CardContent className="p-0 flex-1 min-h-0">
+        <Card className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
+          <CardContent className="p-0 flex-1 min-h-0 min-w-0">
             {selectedStepId ? (
               <StepDetail executionId={selectedStepId} />
             ) : (
@@ -317,11 +317,11 @@ export function RunDetailPage() {
           </CardContent>
         </Card>
       ) : (
-        // Multi-step run: split view fills remaining height
-        <div className="grid grid-cols-[1fr_1fr] gap-4 flex-1 min-h-0">
+        // Multi-step run: split view fills remaining height (stacked on narrow viewports)
+        <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 flex-1 min-h-0">
           {/* Left: trace or graph panel */}
-          <Card className="overflow-hidden flex flex-col">
-            <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
+          <Card className="min-w-0 overflow-hidden flex flex-col">
+            <CardContent className="p-0 flex-1 min-h-0 min-w-0 flex flex-col">
               {viewMode === "graph" ? (
                 <div className="flex-1 min-h-0">
                   <WorkflowDAGViewer
@@ -352,8 +352,8 @@ export function RunDetailPage() {
           </Card>
 
           {/* Right: step detail panel */}
-          <Card className="overflow-hidden flex flex-col">
-            <CardContent className="p-0 flex-1 min-h-0">
+          <Card className="min-w-0 overflow-hidden flex flex-col">
+            <CardContent className="p-0 flex-1 min-h-0 min-w-0">
               {selectedStepId ? (
                 <StepDetail executionId={selectedStepId} />
               ) : (

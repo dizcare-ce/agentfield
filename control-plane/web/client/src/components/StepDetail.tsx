@@ -101,8 +101,8 @@ export function StepDetail({ executionId }: { executionId: string }) {
   };
 
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-4 p-4">
+    <ScrollArea className="h-full min-w-0 max-w-full">
+      <div className="flex min-w-0 max-w-full flex-col gap-4 p-4">
         {/* Step header */}
         <div>
           <h3 className="text-sm font-semibold font-mono">

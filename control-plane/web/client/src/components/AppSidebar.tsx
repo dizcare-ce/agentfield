@@ -72,7 +72,7 @@ export function AppSidebar() {
   const navigate = useNavigate();
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="gap-0 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:py-1.5">
         <div
           className={cn(
