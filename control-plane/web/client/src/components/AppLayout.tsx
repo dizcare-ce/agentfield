@@ -33,7 +33,7 @@ export function AppLayout() {
   );
 
   return (
-    <SidebarProvider defaultOpen={false}>
+    <SidebarProvider defaultOpen={true}>
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-10 shrink-0 items-center gap-2 border-b border-sidebar-border bg-sidebar/30 px-4 backdrop-blur-sm">

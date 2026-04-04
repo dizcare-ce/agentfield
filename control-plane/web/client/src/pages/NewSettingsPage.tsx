@@ -28,6 +28,7 @@ import {
   Renew,
   Eye,
   EyeOff,
+  Copy,
 } from "@/components/ui/icon-bridge";
 import {
   getObservabilityWebhook,
@@ -43,6 +44,8 @@ import {
 import { getDIDSystemStatus } from "@/services/didApi";
 import { formatRelativeTime } from "@/utils/dateFormat";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/ui/v1";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -57,18 +60,70 @@ interface HeaderEntry {
 // ---------------------------------------------------------------------------
 
 function GeneralTab() {
+  const serverUrl =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace("/api/ui/v1", "") ||
+    window.location.origin;
+
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(serverUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>General Settings</CardTitle>
-        <CardDescription>System-wide configuration options will appear here.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">
-          No configurable settings yet. Concurrency limits and timeout configuration coming soon.
-        </p>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">API Endpoint</CardTitle>
+          <CardDescription>
+            Point your agents to this URL using the <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">AGENTFIELD_SERVER</code> environment variable.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <code className="text-xs font-mono bg-muted px-3 py-2 rounded flex-1 truncate">
+              {serverUrl}
+            </code>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={handleCopy}
+            >
+              {copied ? (
+                <CheckCircle className="size-3 text-green-500" />
+              ) : (
+                <Copy className="size-3" />
+              )}
+              <span className="ml-1 text-xs">{copied ? "Copied" : "Copy"}</span>
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            All agent SDK calls, workflow triggers, and execution events flow through this endpoint.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Quick Start</CardTitle>
+          <CardDescription>Configure your agent to connect to this instance.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="rounded-md bg-muted px-3 py-2">
+            <code className="text-xs font-mono whitespace-pre-wrap break-all">
+              {`export AGENTFIELD_SERVER="${serverUrl}"`}
+            </code>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Then run your agent with <code className="font-mono bg-muted px-1 py-0.5 rounded">af run</code> or start it directly.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -592,32 +647,52 @@ function ObservabilityTab() {
 // ---------------------------------------------------------------------------
 
 function IdentityTab() {
-  const [serverDid, setServerDid] = useState<string>("Loading...");
+  const [serverDid, setServerDid] = useState<string>("");
   const [didStatus, setDidStatus] = useState<string>("unknown");
   const [loadingDid, setLoadingDid] = useState(true);
+  const [didCopied, setDidCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getDIDSystemStatus()
-      .then((res) => {
-        if (cancelled) return;
-        setDidStatus(res.status);
-        // The DID status endpoint returns status info; the server DID itself is
-        // surfaced via the message field when available.
-        setServerDid(res.message || "Not available");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setServerDid("Unavailable");
+
+    // Fetch system status and the actual server DID in parallel.
+    // The /did/status endpoint only returns operational status — the DID itself
+    // lives at /api/v1/did/agentfield-server (note: v1, not ui/v1).
+    const statusFetch = getDIDSystemStatus().catch(() => null);
+    const serverUrl =
+      (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace("/api/ui/v1", "") ||
+      window.location.origin;
+    const serverDidFetch = fetch(`${serverUrl}/api/v1/did/agentfield-server`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+    Promise.all([statusFetch, serverDidFetch]).then(([statusRes, serverDidRes]) => {
+      if (cancelled) return;
+      if (statusRes) {
+        setDidStatus(statusRes.status);
+      } else {
         setDidStatus("error");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDid(false);
-      });
+      }
+      if (serverDidRes && typeof serverDidRes.agentfield_server_did === "string" && serverDidRes.agentfield_server_did) {
+        setServerDid(serverDidRes.agentfield_server_did);
+      } else {
+        setServerDid("");
+      }
+      setLoadingDid(false);
+    });
+
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const handleCopyDid = () => {
+    if (!serverDid) return;
+    navigator.clipboard.writeText(serverDid).then(() => {
+      setDidCopied(true);
+      setTimeout(() => setDidCopied(false), 2000);
+    });
+  };
 
   const handleExportCredentials = async () => {
     window.open("/api/ui/v1/did/export/vcs", "_blank");
@@ -668,11 +743,33 @@ function IdentityTab() {
           <Separator />
 
           {/* Server DID */}
-          <div>
+          <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">Server DID</p>
-            <p className="text-xs text-muted-foreground font-mono mt-1 break-all">
-              {loadingDid ? "Loading..." : serverDid}
-            </p>
+            {loadingDid ? (
+              <p className="text-xs text-muted-foreground font-mono">Loading...</p>
+            ) : serverDid ? (
+              <div className="flex items-center gap-2">
+                <code className="text-xs font-mono bg-muted px-2 py-1 rounded flex-1 break-all">
+                  {serverDid}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0"
+                  onClick={handleCopyDid}
+                >
+                  {didCopied ? (
+                    <CheckCircle className="size-3 text-green-500" />
+                  ) : (
+                    <Copy className="size-3" />
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                DID system not configured — server DID unavailable in local mode.
+              </p>
+            )}
           </div>
 
           <Button variant="outline" size="sm" onClick={handleExportCredentials} className="w-fit">
