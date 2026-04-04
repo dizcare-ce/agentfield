@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, CheckCircle, Clock, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -29,12 +29,22 @@ import type { AgentNodeSummary } from "@/types/agentfield";
 
 function formatDuration(ms: number | undefined): string {
   if (ms == null) return "—";
-  if (ms < 1_000) return `${ms}ms`;
-  const secs = ms / 1_000;
+  if (ms < 1000) return `${ms}ms`;
+  const secs = ms / 1000;
   if (secs < 60) return `${secs.toFixed(1)}s`;
   const mins = Math.floor(secs / 60);
-  const rem = Math.round(secs % 60);
-  return `${mins}m ${rem}s`;
+  if (mins < 60) {
+    const rem = Math.round(secs % 60);
+    return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  }
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) {
+    const remMins = mins % 60;
+    return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 function formatRelative(isoString: string | undefined): string {
@@ -47,33 +57,6 @@ function formatRelative(isoString: string | undefined): string {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
-}
-
-// ─── stat card ──────────────────────────────────────────────────────────────
-
-interface StatCardProps {
-  label: string;
-  value: string | number;
-  loading?: boolean;
-}
-
-function StatCard({ label, value, loading }: StatCardProps) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {label}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Skeleton className="h-8 w-20" />
-        ) : (
-          <div className="text-2xl font-semibold tabular-nums">{value}</div>
-        )}
-      </CardContent>
-    </Card>
-  );
 }
 
 // ─── run status badge ────────────────────────────────────────────────────────
@@ -175,9 +158,9 @@ interface RecentRunsTableProps {
 function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
   if (loading) {
     return (
-      <div className="p-4 space-y-2">
+      <div className="p-3 space-y-1.5">
         {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-9 w-full" />
+          <Skeleton key={i} className="h-7 w-full" />
         ))}
       </div>
     );
@@ -185,9 +168,9 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
 
   if (runs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-        <CheckCircle className="size-8 mb-2 opacity-40" />
-        <p className="text-sm">No runs yet</p>
+      <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+        <CheckCircle className="size-7 mb-2 opacity-40" />
+        <p className="text-xs">No runs yet</p>
       </div>
     );
   }
@@ -196,12 +179,12 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="w-[110px]">Run</TableHead>
-          <TableHead>Reasoner</TableHead>
-          <TableHead className="w-[60px] text-right">Steps</TableHead>
-          <TableHead className="w-[100px]">Status</TableHead>
-          <TableHead className="w-[80px] text-right">Duration</TableHead>
-          <TableHead className="w-[90px] text-right">Started</TableHead>
+          <TableHead className="h-8 px-3 text-[11px] w-[110px]">Run</TableHead>
+          <TableHead className="h-8 px-3 text-[11px]">Reasoner</TableHead>
+          <TableHead className="h-8 px-3 text-[11px] w-[60px] text-right">Steps</TableHead>
+          <TableHead className="h-8 px-3 text-[11px] w-[100px]">Status</TableHead>
+          <TableHead className="h-8 px-3 text-[11px] w-[80px] text-right">Duration</TableHead>
+          <TableHead className="h-8 px-3 text-[11px] w-[90px] text-right">Started</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -211,22 +194,22 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
             className="cursor-pointer"
             onClick={() => onRowClick(run.run_id)}
           >
-            <TableCell className="font-mono text-xs text-muted-foreground">
+            <TableCell className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
               {run.run_id.slice(0, 8)}
             </TableCell>
-            <TableCell className="max-w-[200px] truncate text-sm font-medium">
+            <TableCell className="px-3 py-1.5 max-w-[200px] truncate text-xs font-medium">
               {run.root_reasoner || run.display_name || "—"}
             </TableCell>
-            <TableCell className="text-right tabular-nums text-sm">
+            <TableCell className="px-3 py-1.5 text-right tabular-nums text-xs">
               {run.total_executions ?? "—"}
             </TableCell>
-            <TableCell>
+            <TableCell className="px-3 py-1.5">
               <RunStatusBadge status={run.status} />
             </TableCell>
-            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+            <TableCell className="px-3 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
               {formatDuration(run.duration_ms)}
             </TableCell>
-            <TableCell className="text-right text-xs text-muted-foreground">
+            <TableCell className="px-3 py-1.5 text-right text-xs text-muted-foreground">
               {formatRelative(run.started_at)}
             </TableCell>
           </TableRow>
@@ -242,7 +225,7 @@ export function NewDashboardPage() {
   const navigate = useNavigate();
 
   // Data queries
-  const runsQuery = useRuns({ pageSize: 10, sortBy: "latest_activity", sortOrder: "desc" });
+  const runsQuery = useRuns({ pageSize: 15, sortBy: "latest_activity", sortOrder: "desc" });
   const llmHealthQuery = useLLMHealth();
   const queueQuery = useQueueStatus();
   const agentsQuery = useAgents();
@@ -284,8 +267,12 @@ export function NewDashboardPage() {
     return formatDuration(avg);
   })();
 
+  const statsLoading =
+    (summaryQuery.isLoading && runsQuery.isLoading) ||
+    agentsQuery.isLoading;
+
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-screen-xl mx-auto">
+    <div className="flex flex-col gap-4">
       {/* Issues banner — only renders when something is wrong */}
       {hasIssues && (
         <IssuesBanner
@@ -296,24 +283,56 @@ export function NewDashboardPage() {
         />
       )}
 
+      {/* Stats strip */}
+      {statsLoading ? (
+        <div className="flex items-center gap-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-24" />
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-6 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">{totalRuns ?? "—"}</span>
+            <span className="text-muted-foreground">runs today</span>
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">
+              {successRate != null ? `${(successRate * 100).toFixed(0)}%` : "—"}
+            </span>
+            <span className="text-muted-foreground">success</span>
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">{agentsOnline ?? "—"}</span>
+            <span className="text-muted-foreground">agents online</span>
+          </div>
+          <Separator orientation="vertical" className="h-6" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">{avgDuration ?? "—"}</span>
+            <span className="text-muted-foreground">avg time</span>
+          </div>
+        </div>
+      )}
+
       {/* Recent Runs */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <CardTitle className="text-base font-semibold">Recent Runs</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
+          <CardTitle className="text-sm font-medium">Recent Runs</CardTitle>
           <Button
             variant="ghost"
             size="sm"
             className="gap-1.5 text-muted-foreground hover:text-foreground"
-            onClick={() => navigate("/workflows")}
+            onClick={() => navigate("/runs")}
           >
             View All
             <ArrowRight className="size-3.5" />
           </Button>
         </CardHeader>
-        <Separator />
         <CardContent className="p-0">
           <RecentRunsTable
-            runs={recentRuns.slice(0, 10)}
+            runs={recentRuns.slice(0, 15)}
             loading={runsQuery.isLoading}
             onRowClick={(runId) => {
               const run = recentRuns.find((r) => r.run_id === runId);
@@ -322,39 +341,6 @@ export function NewDashboardPage() {
           />
         </CardContent>
       </Card>
-
-      {/* System Overview — 4 stat cards */}
-      <div>
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-          System Overview
-        </h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatCard
-            label="Total Runs Today"
-            value={totalRuns ?? "—"}
-            loading={summaryQuery.isLoading && runsQuery.isLoading}
-          />
-          <StatCard
-            label="Success Rate"
-            value={
-              successRate != null
-                ? `${(successRate * 100).toFixed(1)}%`
-                : "—"
-            }
-            loading={summaryQuery.isLoading}
-          />
-          <StatCard
-            label="Agents Online"
-            value={agentsOnline ?? "—"}
-            loading={agentsQuery.isLoading && summaryQuery.isLoading}
-          />
-          <StatCard
-            label="Avg Run Time"
-            value={avgDuration ?? "—"}
-            loading={runsQuery.isLoading}
-          />
-        </div>
-      </div>
     </div>
   );
 }
