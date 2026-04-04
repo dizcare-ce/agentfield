@@ -84,11 +84,11 @@ function App() {
         <ModeProvider>
           <AuthProvider>
             <AuthGuard>
-              <ErrorBoundary>
-                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+              <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                <ErrorBoundary>
                   <AppContent />
-                </Router>
-              </ErrorBoundary>
+                </ErrorBoundary>
+              </Router>
             </AuthGuard>
           </AuthProvider>
         </ModeProvider>
