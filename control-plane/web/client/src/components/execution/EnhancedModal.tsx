@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { UnifiedJsonViewer } from "@/components/ui/UnifiedJsonViewer";
+import { JsonHighlightedPre } from "@/components/ui/json-syntax-highlight";
 
 interface EnhancedModalProps {
   isOpen: boolean;
@@ -200,9 +201,10 @@ export function DataModal({ isOpen, onClose, title, icon, data }: DataModalProps
             <TabsContent value="raw" className="h-full m-0 p-4 overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border">
               <div className="border border-border rounded-lg h-full overflow-auto bg-background scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border">
                 <div className="p-4 h-full overflow-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border hover:scrollbar-thumb-muted-foreground">
-                  <pre className="text-sm font-mono whitespace-pre-wrap text-foreground leading-relaxed">
-                    {jsonString}
-                  </pre>
+                  <JsonHighlightedPre
+                    text={jsonString}
+                    className="text-sm font-mono leading-relaxed"
+                  />
                 </div>
               </div>
             </TabsContent>

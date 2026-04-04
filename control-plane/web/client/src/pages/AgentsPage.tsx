@@ -6,15 +6,17 @@ import { startAgent } from "@/services/configurationApi";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { EndpointKindIconBox } from "@/components/ui/endpoint-kind-icon-box";
 import {
+  AgentNodeIcon,
   ChevronRight,
-  Function,
   Play,
+  ReasonerIcon,
   RefreshCw,
   Search,
-  WatsonxAi,
+  SkillIcon,
 } from "@/components/ui/icon-bridge";
 import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition, LifecycleStatus } from "@/types/agentfield";
 import { useQuery } from "@tanstack/react-query";
@@ -54,6 +56,37 @@ function getStatusDotColor(lifecycleStatus: LifecycleStatus | undefined): string
   }
 }
 
+type AgentListStatusFilter = "all" | "online" | "offline";
+
+/** Treats ready/running/starting/degraded as reachable; offline/stopped/error/unknown as not. */
+function isAgentLifecycleOnline(status: LifecycleStatus): boolean {
+  return (
+    status === "ready" ||
+    status === "running" ||
+    status === "starting" ||
+    status === "degraded"
+  );
+}
+
+function matchesAgentNodeSearch(node: AgentNodeSummary, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (node.id.toLowerCase().includes(q)) return true;
+  if (node.version?.toLowerCase().includes(q)) return true;
+  if (node.lifecycle_status.toLowerCase().includes(q)) return true;
+  if (node.base_url?.toLowerCase().includes(q)) return true;
+  return false;
+}
+
+function matchesAgentStatusFilter(
+  node: AgentNodeSummary,
+  filter: AgentListStatusFilter
+): boolean {
+  if (filter === "all") return true;
+  const online = isAgentLifecycleOnline(node.lifecycle_status);
+  return filter === "online" ? online : !online;
+}
+
 function getStatusTextColor(lifecycleStatus: LifecycleStatus | undefined): string {
   switch (lifecycleStatus) {
     case "ready":
@@ -74,8 +107,8 @@ function getStatusTextColor(lifecycleStatus: LifecycleStatus | undefined): strin
 
 // ─── NodeReasonerList ────────────────────────────────────────────────────────
 
-/** Scroll when many endpoints so the agent list stays usable. */
-const SCROLL_AFTER = 10;
+/** When more than this many rows load, cap list height and scroll inside (native overflow — Radix ScrollArea needs fixed height). */
+const SCROLL_AFTER = 8;
 
 type NodeEndpointRow = {
   id: string;
@@ -110,30 +143,25 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
     staleTime: 30_000,
   });
 
-  const reasoners: ReasonerDefinition[] = nodeDetails?.reasoners ?? [];
-  const skills: SkillDefinition[] = nodeDetails?.skills ?? [];
+  const reasonerRows: NodeEndpointRow[] = useMemo(() => {
+    const list = nodeDetails?.reasoners ?? [];
+    return list.map((r: ReasonerDefinition) => ({
+      id: r.id,
+      name: r.name || r.id,
+      description: r.description,
+      kind: "reasoner" as const,
+    }));
+  }, [nodeDetails?.reasoners]);
 
-  const reasonerRows: NodeEndpointRow[] = useMemo(
-    () =>
-      reasoners.map((r) => ({
-        id: r.id,
-        name: r.name || r.id,
-        description: r.description,
-        kind: "reasoner" as const,
-      })),
-    [reasoners]
-  );
-
-  const skillRows: NodeEndpointRow[] = useMemo(
-    () =>
-      skills.map((s) => ({
-        id: s.id,
-        name: s.name || s.id,
-        description: s.description,
-        kind: "skill" as const,
-      })),
-    [skills]
-  );
+  const skillRows: NodeEndpointRow[] = useMemo(() => {
+    const list = nodeDetails?.skills ?? [];
+    return list.map((s: SkillDefinition) => ({
+      id: s.id,
+      name: s.name || s.id,
+      description: s.description,
+      kind: "skill" as const,
+    }));
+  }, [nodeDetails?.skills]);
 
   const filteredReasoners = useMemo(
     () => reasonerRows.filter((r) => matchesFilter(filter, r)),
@@ -199,7 +227,7 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
                   className="sticky top-0 z-[1] flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
                   role="presentation"
                 >
-                  <WatsonxAi className="size-3.5 opacity-80" aria-hidden />
+                  <ReasonerIcon className="size-3.5 opacity-80" aria-hidden />
                   Reasoners
                   <span className="font-mono text-[10px] normal-case tracking-normal text-muted-foreground/80">
                     ({filteredReasoners.length})
@@ -218,7 +246,7 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
                   className="sticky top-0 z-[1] flex items-center gap-2 bg-muted/30 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
                   role="presentation"
                 >
-                  <Function className="size-3.5 opacity-80" aria-hidden />
+                  <SkillIcon className="size-3.5 opacity-80" aria-hidden />
                   Skills
                   <span className="font-mono text-[10px] normal-case tracking-normal text-muted-foreground/80">
                     ({filteredSkills.length})
@@ -254,14 +282,14 @@ function NodeReasonerList({ nodeId, reasonerCount, skillCount }: NodeReasonerLis
           </div>
         </div>
       )}
-      <div className="pl-6">
-        {useScroll ? (
-          <ScrollArea className="max-h-[min(45vh,320px)] pr-3" type="hover">
-            {listBody}
-          </ScrollArea>
-        ) : (
-          listBody
+      <div
+        className={cn(
+          "min-h-0 pl-6",
+          useScroll &&
+            "max-h-[min(45vh,320px)] overflow-y-auto overflow-x-hidden overscroll-y-contain pr-2 [scrollbar-gutter:stable]"
         )}
+      >
+        {listBody}
       </div>
     </div>
   );
@@ -275,7 +303,6 @@ interface EndpointRowProps {
 
 function EndpointRow({ nodeId, row, onOpen }: EndpointRowProps) {
   const isSkill = row.kind === "skill";
-  const Icon = isSkill ? Function : WatsonxAi;
   const label = isSkill ? "skill" : "reasoner";
 
   return (
@@ -289,16 +316,10 @@ function EndpointRow({ nodeId, row, onOpen }: EndpointRowProps) {
       onClick={() => onOpen(`/playground/${nodeId}.${row.id}`)}
       aria-label={`Open ${label} ${row.name} in playground`}
     >
-      <span
-        className={cn(
-          "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border",
-          isSkill
-            ? "border-border bg-background text-muted-foreground"
-            : "border-border bg-background text-muted-foreground"
-        )}
-      >
-        <Icon className="size-4 shrink-0" aria-hidden />
-      </span>
+      <EndpointKindIconBox
+        kind={isSkill ? "skill" : "reasoner"}
+        className="mt-0.5"
+      />
       <span className="min-w-0 flex-1 pt-0.5">
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs font-medium text-foreground">{row.name}</span>
@@ -370,6 +391,13 @@ function AgentRow({ node }: AgentRowProps) {
           )}
         />
 
+        <span
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
+          aria-hidden
+        >
+          <AgentNodeIcon className="size-4 shrink-0" />
+        </span>
+
         <span className="font-mono text-sm font-medium truncate min-w-0 flex-1">
           {node.id}
         </span>
@@ -382,10 +410,20 @@ function AgentRow({ node }: AgentRowProps) {
           </span>
         </div>
 
-        {/* Reasoner count */}
+        {/* Reasoner / skill counts */}
         {totalItems > 0 && (
-          <span className="text-xs text-muted-foreground flex-shrink-0 w-24 text-right">
-            {totalItems} reasoner{totalItems !== 1 ? "s" : ""}
+          <span className="text-xs text-muted-foreground flex-shrink-0 text-right tabular-nums max-sm:max-w-[5.5rem] max-sm:truncate sm:w-36">
+            {node.reasoner_count > 0 && (
+              <>
+                {node.reasoner_count} reasoner{node.reasoner_count !== 1 ? "s" : ""}
+              </>
+            )}
+            {node.reasoner_count > 0 && node.skill_count > 0 && " · "}
+            {node.skill_count > 0 && (
+              <>
+                {node.skill_count} skill{node.skill_count !== 1 ? "s" : ""}
+              </>
+            )}
           </span>
         )}
 
@@ -430,7 +468,32 @@ function AgentRow({ node }: AgentRowProps) {
 
 export function AgentsPage() {
   const { data, isLoading, isError, error } = useAgents();
-  const nodes = data?.nodes ?? [];
+  const agentsFromApi = data?.nodes;
+  const nodes = agentsFromApi ?? [];
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AgentListStatusFilter>("all");
+
+  const filteredNodes = useMemo(() => {
+    const list = agentsFromApi ?? [];
+    return list.filter(
+      (n) =>
+        matchesAgentNodeSearch(n, searchQuery) &&
+        matchesAgentStatusFilter(n, statusFilter)
+    );
+  }, [agentsFromApi, searchQuery, statusFilter]);
+
+  const { totalAgents, onlineAgents, offlineAgents } = useMemo(() => {
+    const list = agentsFromApi ?? [];
+    const online = list.filter((n) => isAgentLifecycleOnline(n.lifecycle_status)).length;
+    return {
+      totalAgents: list.length,
+      onlineAgents: online,
+      offlineAgents: list.length - online,
+    };
+  }, [agentsFromApi]);
+
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 || statusFilter !== "all";
 
   return (
     <div className="flex flex-col gap-4">
@@ -442,6 +505,96 @@ export function AgentsPage() {
             ? "No agents registered"
             : `${nodes.length} agent node${nodes.length !== 1 ? "s" : ""} registered`}
       </p>
+
+      {/* Search + segmented connection filter (shadcn Tabs — Figma-style control) */}
+      {!isLoading && !isError && nodes.length > 0 && (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+          <div className="relative min-w-0 flex-1 lg:max-w-md">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by node id, version, status…"
+              className="h-9 border-border/80 bg-background pl-9 text-sm shadow-sm"
+              aria-label="Search agent nodes"
+            />
+          </div>
+          <Tabs
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as AgentListStatusFilter)}
+            className="w-full shrink-0 lg:w-auto"
+            aria-label="Filter agents by connection"
+          >
+            <TabsList
+              variant="segmented"
+              density="cosy"
+              className="grid h-9 w-full grid-cols-3 gap-0.5 p-1 lg:inline-flex lg:w-auto"
+            >
+              <TabsTrigger
+                variant="segmented"
+                size="sm"
+                value="all"
+                className="gap-1.5 px-2 sm:px-3"
+              >
+                <span>All</span>
+                <span
+                  className="min-w-[1.25rem] rounded-md bg-background/60 px-1 py-px text-center text-[10px] font-medium tabular-nums text-muted-foreground shadow-sm"
+                  aria-hidden
+                >
+                  {totalAgents}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                variant="segmented"
+                size="sm"
+                value="online"
+                className="gap-1.5 px-2 sm:px-3"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-green-400"
+                    aria-hidden
+                  />
+                  Online
+                </span>
+                <span
+                  className="min-w-[1.25rem] rounded-md bg-background/60 px-1 py-px text-center text-[10px] font-medium tabular-nums text-muted-foreground shadow-sm"
+                  aria-hidden
+                >
+                  {onlineAgents}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                variant="segmented"
+                size="sm"
+                value="offline"
+                className="gap-1.5 px-2 sm:px-3"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-red-400"
+                    aria-hidden
+                  />
+                  Offline
+                </span>
+                <span
+                  className="min-w-[1.25rem] rounded-md bg-background/60 px-1 py-px text-center text-[10px] font-medium tabular-nums text-muted-foreground shadow-sm"
+                  aria-hidden
+                >
+                  {offlineAgents}
+                </span>
+              </TabsTrigger>
+            </TabsList>
+            {/* Radix associates triggers with panels; list below is the real content — keep panels inert */}
+            <TabsContent value="all" className="hidden" tabIndex={-1} />
+            <TabsContent value="online" className="hidden" tabIndex={-1} />
+            <TabsContent value="offline" className="hidden" tabIndex={-1} />
+          </Tabs>
+        </div>
+      )}
 
       {/* Error state */}
       {isError && (
@@ -482,13 +635,37 @@ export function AgentsPage() {
       )}
 
       {/* Agent list */}
-      {!isLoading && nodes.length > 0 && (
+      {!isLoading && nodes.length > 0 && filteredNodes.length > 0 && (
         <Card className="overflow-hidden p-0">
           <div className="divide-y divide-border">
-            {nodes.map((node) => (
+            {filteredNodes.map((node) => (
               <AgentRow key={node.id} node={node} />
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* Filtered empty */}
+      {!isLoading && !isError && nodes.length > 0 && filteredNodes.length === 0 && (
+        <Card className="border-dashed p-8 text-center">
+          <p className="text-sm font-medium text-foreground">No matching agents</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Try a different search or connection filter.
+          </p>
+          {hasActiveFilters && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              onClick={() => {
+                setSearchQuery("");
+                setStatusFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
         </Card>
       )}
     </div>

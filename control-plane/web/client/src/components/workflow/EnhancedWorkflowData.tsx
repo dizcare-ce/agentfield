@@ -5,6 +5,7 @@ import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { UnifiedDataPanel } from "../ui/UnifiedDataPanel";
 import { UnifiedJsonViewer } from "../ui/UnifiedJsonViewer";
+import { JsonHighlightedPre } from "../ui/json-syntax-highlight";
 import {
   ResizableSplitPane,
   useResponsiveSplitPane,
@@ -811,9 +812,10 @@ export function EnhancedWorkflowData({
                                     Payload
                                   </span>
                                   {typeof payloadData === "string" ? (
-                                    <pre className="text-xs whitespace-pre-wrap bg-background border border-border/50 rounded px-3 py-2">
-                                      {payloadData}
-                                    </pre>
+                                    <JsonHighlightedPre
+                                      text={payloadData}
+                                      className="rounded border border-border/50 bg-background px-3 py-2 text-xs"
+                                    />
                                   ) : (
                                     <UnifiedJsonViewer
                                       data={payloadData}
@@ -831,9 +833,10 @@ export function EnhancedWorkflowData({
                                   <span className="font-semibold text-foreground uppercase tracking-wide">
                                     Response
                                   </span>
-                                  <pre className="whitespace-pre-wrap break-words bg-background border border-border/50 rounded px-3 py-2 text-muted-foreground">
-                                    {event.response_body}
-                                  </pre>
+                                  <JsonHighlightedPre
+                                    text={event.response_body}
+                                    className="rounded border border-border/50 bg-background px-3 py-2 text-xs text-muted-foreground"
+                                  />
                                 </div>
                               )}
                             </div>

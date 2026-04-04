@@ -180,7 +180,7 @@ export function SmartStringRenderer({
                               );
                             },
                             pre: ({children}) => (
-                              <pre className="bg-muted p-3 rounded text-xs overflow-auto border border-border mb-2 font-mono text-foreground">
+                              <pre className="json-hl-root bg-muted p-3 rounded text-xs overflow-auto border border-border mb-2 font-mono">
                                 {children}
                               </pre>
                             ),
@@ -220,7 +220,7 @@ export function SmartStringRenderer({
                         </ReactMarkdown>
                       </div>
                     ) : isCode ? (
-                      <pre className="text-xs font-mono text-foreground whitespace-pre-wrap">
+                      <pre className="json-hl-root text-xs font-mono whitespace-pre-wrap">
                         {content}
                       </pre>
                     ) : (

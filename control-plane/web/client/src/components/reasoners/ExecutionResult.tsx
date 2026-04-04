@@ -4,6 +4,7 @@ import { Badge } from '../ui/badge';
 import { Alert } from '../ui/alert';
 import type { ExecutionResponse } from '../../types/execution';
 import { getStatusLabel, isFailureStatus, isSuccessStatus, isTimeoutStatus } from '../../utils/status';
+import { JsonHighlightedPre } from '@/components/ui/json-syntax-highlight';
 
 interface ExecutionResultProps {
   result?: ExecutionResponse | null;
@@ -156,9 +157,10 @@ export function ExecutionResult({ result, error, loading }: ExecutionResultProps
           </div>
 
           <div className="relative">
-            <pre className="bg-background border rounded-lg p-4 text-sm overflow-auto max-h-96 font-mono">
-              {JSON.stringify(result.result, null, 2)}
-            </pre>
+            <JsonHighlightedPre
+              data={result.result}
+              className="max-h-96 overflow-auto rounded-lg border border-border bg-background p-4 text-sm"
+            />
           </div>
         </div>
       )}

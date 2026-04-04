@@ -13,6 +13,7 @@ import { SegmentedControl, type SegmentedControlOption } from '../ui/segmented-c
 import { Badge } from '../ui/badge';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { JsonHighlightedPre } from '@/components/ui/json-syntax-highlight';
 
 interface JsonModalProps {
   isOpen: boolean;
@@ -50,9 +51,14 @@ export function JsonModal({ isOpen, onClose, content, path, title }: JsonModalPr
   const renderContent = () => {
     if (viewMode === 'raw') {
       return (
-        <pre className="bg-muted p-6 rounded-lg text-sm overflow-auto font-mono border border-border max-h-[70vh] text-foreground">
-          {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
-        </pre>
+        <JsonHighlightedPre
+          text={
+            typeof content === 'string'
+              ? content
+              : JSON.stringify(content, null, 2)
+          }
+          className="bg-muted p-6 rounded-lg text-sm overflow-auto font-mono border border-border max-h-[70vh]"
+        />
       );
     }
 
@@ -83,7 +89,7 @@ export function JsonModal({ isOpen, onClose, content, path, title }: JsonModalPr
                   );
                 },
                 pre: ({children}) => (
-                  <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto border border-border mb-4 font-mono text-foreground">
+                  <pre className="json-hl-root bg-muted p-4 rounded-lg text-sm overflow-auto border border-border mb-4 font-mono">
                     {children}
                   </pre>
                 ),
@@ -141,9 +147,10 @@ export function JsonModal({ isOpen, onClose, content, path, title }: JsonModalPr
 
     // For non-string content, show formatted JSON
     return (
-      <pre className="bg-muted p-6 rounded-lg text-sm overflow-auto font-mono border border-border max-h-[70vh] whitespace-pre-wrap break-words text-foreground">
-        {JSON.stringify(content, null, 2)}
-      </pre>
+      <JsonHighlightedPre
+        data={content}
+        className="bg-muted p-6 rounded-lg text-sm overflow-auto font-mono border border-border max-h-[70vh] break-words"
+      />
     );
   };
 

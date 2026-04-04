@@ -2,16 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowDown,
+  ArrowLeftRight,
   ArrowUp,
   ArrowUpDown,
-  Braces,
   Copy,
   Play,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useRuns, useCancelExecution } from "@/hooks/queries";
+import { useRuns, useCancelExecution, useAgents } from "@/hooks/queries";
 import type { WorkflowSummary } from "@/types/workflows";
-import { getStatusLabel, normalizeExecutionStatus } from "@/utils/status";
+import {
+  getStatusLabel,
+  normalizeExecutionStatus,
+  type CanonicalStatus,
+} from "@/utils/status";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -41,7 +45,28 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useSidebar } from "@/components/ui/sidebar";
 import { getExecutionDetails } from "@/services/executionsApi";
+import {
+  JsonHighlightedPre,
+  formatTruncatedFormattedJson,
+} from "@/components/ui/json-syntax-highlight";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -240,15 +265,7 @@ function hasMeaningfulPayload(value: unknown): boolean {
 }
 
 function formatPreviewJson(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string" && value.trim() === "") return "—";
-  try {
-    const raw = JSON.stringify(value, null, 2);
-    if (raw.length <= PREVIEW_JSON_MAX) return raw;
-    return `${raw.slice(0, PREVIEW_JSON_MAX)}\n\n… truncated (${raw.length.toLocaleString()} chars total)`;
-  } catch {
-    return String(value);
-  }
+  return formatTruncatedFormattedJson(value, PREVIEW_JSON_MAX);
 }
 
 function RunPreviewIoPanel({
@@ -295,14 +312,12 @@ function RunPreviewIoPanel({
           </Button>
         ) : null}
       </div>
-      <pre
+      <JsonHighlightedPre
+        text={body}
         className={cn(
-          "m-0 max-h-36 min-h-0 overflow-auto p-2 font-mono text-[10px] leading-snug text-foreground/90",
-          "whitespace-pre-wrap break-all [overflow-wrap:anywhere]",
+          "max-h-36 min-h-0 overflow-auto p-2 font-mono text-[10px] leading-snug",
         )}
-      >
-        {body}
-      </pre>
+      />
     </div>
   );
 }
@@ -418,13 +433,167 @@ function StatusMenuDot({ canonical }: { canonical: CanonicalStatus }) {
   );
 }
 
-const PAGE_SIZE = 50;
+/** Page numbers to render (1-based), with ellipsis when there are gaps. */
+function getPaginationPages(
+  current: number,
+  total: number,
+): Array<number | "ellipsis"> {
+  if (total < 1) return [];
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const set = new Set([1, total, current, current - 1, current + 1]);
+  const nums = [...set].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out: Array<number | "ellipsis"> = [];
+  let prev = 0;
+  for (const p of nums) {
+    if (p - prev > 1) out.push("ellipsis");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
+interface RunsPaginationBarProps {
+  placement: "top" | "bottom";
+  totalCount: number;
+  totalPages: number;
+  page: number;
+  pageSize: number;
+  pageRowCount: number;
+  isFetching: boolean;
+  setPage: React.Dispatch<React.SetStateAction<number>>;
+  setPageSize: (n: number) => void;
+}
+
+function RunsPaginationBar({
+  placement,
+  totalCount,
+  totalPages,
+  page,
+  pageSize,
+  pageRowCount,
+  isFetching,
+  setPage,
+  setPageSize,
+}: RunsPaginationBarProps) {
+  if (totalCount <= 0 || totalPages <= 0) return null;
+
+  const rowsPerPageLabel =
+    placement === "top"
+      ? "Rows per page (above table)"
+      : "Rows per page (below table)";
+  const paginationNavLabel =
+    placement === "top"
+      ? "Runs list pages, above table"
+      : "Runs list pages, below table";
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+        placement === "top" && "border-b border-border/70 pb-3",
+        placement === "bottom" && "pt-3",
+      )}
+    >
+      <p className="text-center text-[11px] text-muted-foreground sm:text-left tabular-nums">
+        Showing{" "}
+        <span className="font-medium text-foreground">
+          {totalCount === 0 ? 0 : (page - 1) * pageSize + 1}
+        </span>
+        –
+        <span className="font-medium text-foreground">
+          {totalCount === 0 ? 0 : (page - 1) * pageSize + pageRowCount}
+        </span>{" "}
+        of <span className="font-medium text-foreground">{totalCount}</span>{" "}
+        run{totalCount === 1 ? "" : "s"}
+      </p>
+
+      <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-4">
+        <div className="flex items-center gap-2">
+          <span className="whitespace-nowrap text-[11px] text-muted-foreground">
+            Rows per page
+          </span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => setPageSize(Number(v))}
+          >
+            <SelectTrigger
+              className="h-8 w-[4.25rem] text-xs"
+              aria-label={rowsPerPageLabel}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <SelectItem key={n} value={String(n)} className="text-xs">
+                  {n}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Pagination
+          className="mx-0 w-auto justify-center sm:justify-end"
+          aria-label={paginationNavLabel}
+        >
+          <PaginationContent className="flex-wrap justify-center gap-0.5 sm:justify-end">
+            <PaginationItem>
+              <PaginationPrevious
+                disabled={page <= 1 || isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              />
+            </PaginationItem>
+            {getPaginationPages(page, totalPages).map((item, i) =>
+              item === "ellipsis" ? (
+                <PaginationEllipsis key={`${placement}-e-${i}`} />
+              ) : (
+                <PaginationLink
+                  key={`${placement}-p-${item}`}
+                  isActive={item === page}
+                  disabled={isFetching}
+                  aria-label={`Page ${item}`}
+                  onClick={() => setPage(item)}
+                >
+                  {item}
+                </PaginationLink>
+              ),
+            )}
+            <PaginationItem>
+              <PaginationNext
+                disabled={page >= totalPages || isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      </div>
+    </div>
+  );
+}
 
 // ─── main component ────────────────────────────────────────────────────────────
 
 export function RunsPage() {
   const navigate = useNavigate();
   const cancelMutation = useCancelExecution();
+  const agentsQuery = useAgents();
+  const { state: sidebarState, isMobile } = useSidebar();
+
+  /** Match main content horizontal inset (sidebar + p-6) so the bar centers over the table column, not the viewport. */
+  const bulkContentInset = useMemo(() => {
+    const pad = "1.5rem";
+    if (isMobile) {
+      return { left: pad, right: pad } as const;
+    }
+    const w =
+      sidebarState === "collapsed" ? "var(--sidebar-width-icon)" : "var(--sidebar-width)";
+    return { left: `calc(${w} + ${pad})`, right: pad } as const;
+  }, [isMobile, sidebarState]);
 
   // filter state
   const [timeRange, setTimeRange] = useState("all");
@@ -452,9 +621,9 @@ export function RunsPage() {
   const [sortBy, setSortBy] = useState("latest_activity");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // pagination state
+  // pagination state (server-backed; default 25 rows — common for ops dashboards)
   const [page, setPage] = useState(1);
-  const [allRuns, setAllRuns] = useState<WorkflowSummary[]>([]);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   // selection state
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -467,7 +636,6 @@ export function RunsPage() {
     searchTimer.current = setTimeout(() => {
       setDebouncedSearch(value);
       setPage(1);
-      setAllRuns([]);
     }, 300);
   }, []);
 
@@ -491,7 +659,6 @@ export function RunsPage() {
       prev.sortOrder !== sortOrder
     ) {
       setPage(1);
-      setAllRuns([]);
       prevFiltersRef.current = {
         timeRange,
         statusFilterKey,
@@ -516,45 +683,38 @@ export function RunsPage() {
       status: apiStatus,
       search: debouncedSearch || undefined,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
       sortBy,
       sortOrder,
     }),
-    [timeRange, apiStatus, debouncedSearch, page, sortBy, sortOrder],
+    [timeRange, apiStatus, debouncedSearch, page, pageSize, sortBy, sortOrder],
   );
 
   const { data, isLoading, isFetching, isError, error } = useRuns(filters);
 
-  // accumulate pages
+  const pageRows = useMemo(() => data?.workflows ?? [], [data?.workflows]);
+  const totalCount = data?.total_count ?? 0;
+  const totalPages = Math.max(0, data?.total_pages ?? 0);
+  const loadingInitial = isLoading && !data;
+
+  // Reset to page 1 when page size changes (avoid landing past last page).
+  const prevPageSize = useRef(pageSize);
   useEffect(() => {
-    if (!data?.workflows) return;
-    if (page === 1) {
-      setAllRuns(data.workflows);
-    } else {
-      setAllRuns((prev) => {
-        const existingIds = new Set(prev.map((r) => r.run_id));
-        const newRuns = data.workflows.filter((r) => !existingIds.has(r.run_id));
-        return [...prev, ...newRuns];
-      });
+    if (prevPageSize.current !== pageSize) {
+      prevPageSize.current = pageSize;
+      setPage(1);
     }
-  }, [data, page]);
+  }, [pageSize]);
 
-  const hasMore = data?.has_more ?? false;
-  const loadingInitial = isLoading && page === 1;
-  const loadingMore = isFetching && page > 1;
-
-  // derive unique agent IDs for the agent filter
-  const agentIds = useMemo(() => {
-    const ids = new Set(
-      allRuns.map((r) => r.agent_id || r.agent_name).filter(Boolean) as string[],
-    );
-    return Array.from(ids).sort();
-  }, [allRuns]);
-
-  const agentMultiOptions = useMemo(
-    () => agentIds.map((id) => ({ value: id, label: id })),
-    [agentIds],
-  );
+  // Registered agents (stable filter list; not tied to the current result page).
+  const agentMultiOptions = useMemo(() => {
+    const nodes = agentsQuery.data?.nodes ?? [];
+    return [...nodes]
+      .map((n) => n.id)
+      .filter(Boolean)
+      .sort()
+      .map((id) => ({ value: id, label: id }));
+  }, [agentsQuery.data?.nodes]);
 
   const statusMultiOptions = useMemo(
     () =>
@@ -585,7 +745,6 @@ export function RunsPage() {
     setDebouncedSearch("");
     setSelected(new Set());
     setPage(1);
-    setAllRuns([]);
   }, []);
 
   const handleStatusesFilterChange = useCallback(
@@ -605,7 +764,7 @@ export function RunsPage() {
 
   /** Server applies status when exactly one is selected; otherwise narrow here (multi-status OR, agents OR). */
   const filteredRuns = useMemo(() => {
-    let rows = allRuns;
+    let rows = pageRows;
     if (selectedStatuses.size > 1) {
       rows = rows.filter((r) =>
         selectedStatuses.has(normalizeExecutionStatus(r.status)),
@@ -618,7 +777,7 @@ export function RunsPage() {
       });
     }
     return rows;
-  }, [allRuns, selectedStatuses, selectedAgents]);
+  }, [pageRows, selectedStatuses, selectedAgents]);
 
   // row click
   const handleRowClick = useCallback(
@@ -661,7 +820,6 @@ export function RunsPage() {
     (setter: (v: string) => void) => (value: string) => {
       setter(value);
       setPage(1);
-      setAllRuns([]);
     },
     [],
   );
@@ -676,7 +834,6 @@ export function RunsPage() {
         setSortOrder("desc");
       }
       setPage(1);
-      setAllRuns([]);
     },
     [sortBy],
   );
@@ -712,7 +869,7 @@ export function RunsPage() {
   );
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-3", selected.size > 0 && "pb-24")}>
       {/* Page heading */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
@@ -750,7 +907,7 @@ export function RunsPage() {
               searchPlaceholder="Find agents…"
               emptyMessage={
                 agentMultiOptions.length === 0
-                  ? "No agents in loaded runs yet."
+                  ? "No registered agents yet."
                   : "No agent matches."
               }
               options={agentMultiOptions}
@@ -790,52 +947,26 @@ export function RunsPage() {
         </div>
       </Card>
 
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-2 pb-2">
-          <span className="text-xs text-muted-foreground">
-            {selected.size} selected
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            disabled={selected.size !== 2}
-            onClick={() => {
-              const ids = Array.from(selected);
-              if (ids.length === 2) {
-                navigate(`/runs/compare?a=${ids[0]}&b=${ids[1]}`);
-              }
-            }}
-          >
-            Compare Selected ({selected.size})
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs text-destructive hover:text-destructive"
-            disabled={cancelMutation.isPending}
-            onClick={async () => {
-              for (const runId of selected) {
-                const run = allRuns.find((r) => r.run_id === runId);
-                if (
-                  run?.root_execution_id &&
-                  (run.status === "running" || run.status === "pending")
-                ) {
-                  await cancelMutation.mutateAsync(run.root_execution_id);
-                }
-              }
-              setSelected(new Set());
-            }}
-          >
-            Cancel Running
-          </Button>
-        </div>
-      )}
+      <RunsPaginationBar
+        placement="top"
+        totalCount={totalCount}
+        totalPages={totalPages}
+        page={page}
+        pageSize={pageSize}
+        pageRowCount={pageRows.length}
+        isFetching={isFetching}
+        setPage={setPage}
+        setPageSize={setPageSize}
+      />
 
       {/* Table */}
       <TooltipProvider delayDuration={400}>
-      <div className="rounded-lg border border-border bg-card">
+      <div
+        className={cn(
+          "rounded-lg border border-border bg-card transition-opacity",
+          isFetching && "opacity-[0.72]",
+        )}
+      >
         <Table className="text-xs">
           <TableHeader>
             <TableRow>
@@ -853,11 +984,11 @@ export function RunsPage() {
               {/* Target + short run id (full id via copy) */}
               <TableHead
                 className="h-8 px-3 text-[11px] font-medium text-muted-foreground min-w-0"
-                title="Hover the {} icon next to a reasoner to preview input / output without leaving the list."
+                title="Hover the input/output icon next to a reasoner to preview input / output without leaving the list."
               >
                 <span className="inline-flex items-center gap-1.5">
                   Target
-                  <Braces
+                  <ArrowLeftRight
                     className="size-3 shrink-0 opacity-45"
                     aria-hidden
                   />
@@ -891,9 +1022,9 @@ export function RunsPage() {
                     <Play className="size-8 text-muted-foreground/30 mb-3" />
                     <p className="text-sm font-medium text-muted-foreground">No runs found</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {allRuns.length > 0 &&
+                      {pageRows.length > 0 &&
                       (selectedStatuses.size > 0 || selectedAgents.size > 0)
-                        ? "No rows match the current status or agent filters. Try clearing filters or loading more runs."
+                        ? "No rows match the current status or agent filters on this page. Try clearing filters or another page."
                         : timeRange !== "all"
                           ? "Try expanding the time range"
                           : "Execute a reasoner to create your first run"}
@@ -917,20 +1048,85 @@ export function RunsPage() {
       </div>
       </TooltipProvider>
 
-      {/* Load more */}
-      {hasMore && (
-        <div className="flex justify-center pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs h-8"
-            disabled={loadingMore}
-            onClick={() => setPage((p) => p + 1)}
+      <RunsPaginationBar
+        placement="bottom"
+        totalCount={totalCount}
+        totalPages={totalPages}
+        page={page}
+        pageSize={pageSize}
+        pageRowCount={pageRows.length}
+        isFetching={isFetching}
+        setPage={setPage}
+        setPageSize={setPageSize}
+      />
+
+      {/* Floating bulk bar: fixed strip matches main content width; card centered within that strip (over the table). */}
+      {selected.size > 0 ? (
+        <div
+          className="pointer-events-none fixed z-50 flex justify-center"
+          style={{
+            ...bulkContentInset,
+            bottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
+          }}
+        >
+          <Card
+            variant="default"
+            interactive={false}
+            className="pointer-events-auto w-full max-w-2xl border-border bg-card text-card-foreground shadow-lg"
+            role="toolbar"
+            aria-label="Bulk actions for selected runs"
           >
-            {loadingMore ? "Loading…" : "Load more"}
-          </Button>
+            <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <p
+                className="text-center text-sm text-muted-foreground sm:text-left"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span className="font-medium tabular-nums text-foreground">
+                  {selected.size}
+                </span>{" "}
+                run{selected.size === 1 ? "" : "s"} selected
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
+                <Button
+                  size="sm"
+                  variant={selected.size === 2 ? "default" : "secondary"}
+                  className="h-8 text-xs"
+                  disabled={selected.size !== 2}
+                  onClick={() => {
+                    const ids = Array.from(selected);
+                    if (ids.length === 2) {
+                      navigate(`/runs/compare?a=${ids[0]}&b=${ids[1]}`);
+                    }
+                  }}
+                >
+                  Compare selected ({selected.size})
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-8 text-xs"
+                  disabled={cancelMutation.isPending}
+                  onClick={async () => {
+                    for (const runId of selected) {
+                      const run = filteredRuns.find((r) => r.run_id === runId);
+                      if (
+                        run?.root_execution_id &&
+                        (run.status === "running" || run.status === "pending")
+                      ) {
+                        await cancelMutation.mutateAsync(run.root_execution_id);
+                      }
+                    }
+                    setSelected(new Set());
+                  }}
+                >
+                  Cancel running
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1000,7 +1196,7 @@ function RunRow({ run, isSelected, onRowClick, onToggleSelect }: RunRowProps) {
                   aria-label="Preview run input and output"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Braces className="size-3.5" strokeWidth={2} aria-hidden />
+                  <ArrowLeftRight className="size-3.5" strokeWidth={2} aria-hidden />
                 </button>
               </HoverCardTrigger>
               <HoverCardContent

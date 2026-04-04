@@ -1,7 +1,7 @@
 import {
   LayoutDashboard,
   Play,
-  Bot,
+  Server,
   FlaskConical,
   Settings,
 } from "lucide-react";
@@ -19,7 +19,7 @@ export const navigation = [
   },
   {
     title: "Agents",
-    icon: Bot,
+    icon: Server,
     path: "/agents",
   },
   {

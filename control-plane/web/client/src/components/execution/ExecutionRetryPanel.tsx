@@ -270,7 +270,7 @@ export function ExecutionRetryPanel({ execution }: ExecutionRetryPanelProps) {
                 {renderCopyAction(curlCommand, "Copy")}
               </div>
               <div className="relative">
-                <pre className="bg-muted/50 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-32">
+                <pre className="json-hl-root bg-muted/50 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-32">
                   <code>{curlCommand}</code>
                 </pre>
               </div>
@@ -289,7 +289,7 @@ export function ExecutionRetryPanel({ execution }: ExecutionRetryPanelProps) {
                 {renderCopyAction(pythonCode, "Copy")}
               </div>
               <div className="relative">
-                <pre className="bg-muted/50 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-32">
+                <pre className="json-hl-root bg-muted/50 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-32">
                   <code>{pythonCode}</code>
                 </pre>
               </div>

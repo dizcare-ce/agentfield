@@ -19,15 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
+import { ReasonerNodeCombobox } from "../components/ui/reasoner-node-combobox";
 import { Separator } from "../components/ui/separator";
 import {
   Table,
@@ -50,6 +42,7 @@ import {
 import { reasonersApi } from "../services/reasonersApi";
 import type { ReasonerWithNode, ReasonersResponse } from "../types/reasoners";
 import { normalizeExecutionStatus } from "../utils/status";
+import { JsonHighlightedPre } from "../components/ui/json-syntax-highlight";
 
 interface RecentRun {
   id: string;
@@ -165,20 +158,6 @@ export function PlaygroundPage() {
       cancelled = true;
     };
   }, []);
-
-  // ── grouped reasoners for the Select ──────────────────────────────────────
-  const groupedReasoners = useMemo(() => {
-    if (!reasonersData?.reasoners) return {} as Record<string, ReasonerWithNode[]>;
-    return reasonersData.reasoners.reduce<Record<string, ReasonerWithNode[]>>(
-      (acc, r) => {
-        const key = r.node_id;
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(r);
-        return acc;
-      },
-      {}
-    );
-  }, [reasonersData]);
 
   // ── load selected reasoner details ───────────────────────────────────────
   useEffect(() => {
@@ -333,16 +312,6 @@ export function PlaygroundPage() {
     }
   }
 
-  // ── result display helpers ────────────────────────────────────────────────
-  const resultJson = useMemo(() => {
-    if (result === null || result === undefined) return null;
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  }, [result]);
-
   const inputPlaceholder = useMemo(() => {
     if (!selectedReasoner?.input_schema?.properties) return '{\n  \n}';
     const keys = Object.keys(selectedReasoner.input_schema.properties);
@@ -362,49 +331,33 @@ export function PlaygroundPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Playground</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Select a reasoner, provide input, execute it and inspect the result.
+            Pick an agent node (service), then a reasoner (thinking endpoint) or
+            skill (deterministic API), provide input, execute, and inspect the result.
           </p>
         </div>
       </div>
 
-      {/* ── Reasoner selector ────────────────────────────────────────────── */}
+      {/* ── Agent node · skill selector ─────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">
-          Reasoner:
+          Reasoner / skill:
         </span>
-        <Select
-          value={selectedId ?? ""}
+        <ReasonerNodeCombobox
+          reasoners={reasonersData?.reasoners ?? []}
+          value={selectedId}
           onValueChange={handleReasonerChange}
-          disabled={loadingReasoners}
-        >
-          <SelectTrigger className="w-[320px]">
-            <SelectValue
-              placeholder={
-                loadingReasoners ? "Loading reasoners…" : "Select a reasoner"
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(groupedReasoners).map(([nodeId, reasoners]) => (
-              <SelectGroup key={nodeId}>
-                <SelectLabel className="text-xs text-muted-foreground uppercase tracking-wider">
-                  {nodeId}
-                </SelectLabel>
-                {reasoners.map((r) => (
-                  <SelectItem key={r.reasoner_id} value={r.reasoner_id}>
-                    {r.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-            {!loadingReasoners &&
-              Object.keys(groupedReasoners).length === 0 && (
-                <SelectItem value="__none__" disabled>
-                  No reasoners available
-                </SelectItem>
-              )}
-          </SelectContent>
-        </Select>
+          disabled={
+            loadingReasoners ||
+            (reasonersData?.reasoners?.length ?? 0) === 0
+          }
+          loading={loadingReasoners}
+          className="w-[min(100%,24rem)] max-w-md"
+          placeholder={
+            !loadingReasoners && (reasonersData?.reasoners?.length ?? 0) === 0
+              ? "No skills available"
+              : "Select agent node · skill"
+          }
+        />
 
         {selectedReasoner && (
           <Badge variant="secondary" className="text-xs font-mono">
@@ -460,9 +413,10 @@ export function PlaygroundPage() {
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
                             Input Schema
                           </p>
-                          <pre className="text-[10px] font-mono bg-muted rounded-md p-2 max-h-32 overflow-auto">
-                            {JSON.stringify(selectedReasoner.input_schema, null, 2)}
-                          </pre>
+                          <JsonHighlightedPre
+                            data={selectedReasoner.input_schema}
+                            className="rounded-md bg-muted p-2 text-[10px] max-h-32 overflow-auto"
+                          />
                         </div>
                       )}
                       {selectedReasoner.output_schema && (
@@ -470,9 +424,10 @@ export function PlaygroundPage() {
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
                             Output Schema
                           </p>
-                          <pre className="text-[10px] font-mono bg-muted rounded-md p-2 max-h-32 overflow-auto">
-                            {JSON.stringify(selectedReasoner.output_schema, null, 2)}
-                          </pre>
+                          <JsonHighlightedPre
+                            data={selectedReasoner.output_schema}
+                            className="rounded-md bg-muted p-2 text-[10px] max-h-32 overflow-auto"
+                          />
                         </div>
                       )}
                       {!selectedReasoner.input_schema && !selectedReasoner.output_schema && (
@@ -569,7 +524,7 @@ export function PlaygroundPage() {
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 flex-1">
-            <div className="flex-1 min-h-[200px] rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-sm whitespace-pre-wrap overflow-auto">
+            <div className="flex-1 min-h-[200px] rounded-md border border-border bg-muted/30 px-3 py-2 text-sm overflow-auto">
               {executing ? (
                 <span className="text-muted-foreground flex items-center gap-2 mt-1">
                   <InProgress className="h-4 w-4 animate-spin" />
@@ -577,8 +532,8 @@ export function PlaygroundPage() {
                 </span>
               ) : resultError ? (
                 <span className="text-destructive">{resultError}</span>
-              ) : resultJson ? (
-                resultJson
+              ) : result !== null && result !== undefined ? (
+                <JsonHighlightedPre data={result} className="text-sm" />
               ) : (
                 <span className="text-muted-foreground">
                   (waiting for execution…)

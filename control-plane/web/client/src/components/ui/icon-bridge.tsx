@@ -11,10 +11,8 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   BarChart3,
-  Bell,
   Bot,
   Braces,
-  Brain,
   Bug,
   Calendar,
   CheckCircle2,
@@ -112,6 +110,8 @@ import {
   ArrowUpNarrowWide,
   LayoutGrid,
   HardDrive,
+  Lightbulb,
+  Server,
 } from "lucide-react";
 
 export type IconComponent = LucideIcon;
@@ -155,10 +155,20 @@ export { RotateCcw as RotateCcw };
 export { ArrowDown as CollapseAll };
 export { ArrowUp as ExpandAll };
 
-// Bot / Robot / AI
+// Bot / Robot
 export { Bot };
-export { Brain as Cognitive };
-export { Brain as WatsonxAi };
+
+/**
+ * Agent nodes — deployable agent processes (treat like microservices).
+ * Use for fleet / node rows, nav, combobox node column — not for reasoners or skills.
+ */
+export { Server as AgentNodeIcon };
+
+// Reasoners — LLM-capable / “thinking” API endpoints (non-deterministic).
+export { Lightbulb };
+export { Lightbulb as ReasonerIcon };
+
+// Skills — deterministic callable APIs (ƒ); pair visually with ReasonerIcon in lists.
 
 // Calendar / Time
 export { Calendar };
@@ -274,8 +284,8 @@ export { Target as LocateFixed };
 export { Target };
 export { Scan };
 
-// Function
 export { FunctionSquare as Function };
+export { FunctionSquare as SkillIcon };
 
 // Git
 export { GitBranch };
@@ -309,7 +319,6 @@ export { Info as Information };
 // Layers / Stack
 export { Layers };
 export { Layers as Stack };
-export { Layers as Server };
 
 // Launch / Rocket
 export { Rocket as Launch };

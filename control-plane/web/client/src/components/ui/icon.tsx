@@ -20,12 +20,21 @@ import {
   Github,
   HelpCircle,
   Clock,
+  Server,
+  Lightbulb,
+  FunctionSquare,
 } from "lucide-react";
 
 const icons = {
   activity: Activity,
   dashboard: LayoutGrid,
   "data-center": Layers,
+  /** Agent nodes (microservice-style processes) */
+  "agent-node": Server,
+  /** Thinking / LLM-capable API endpoints */
+  reasoner: Lightbulb,
+  /** Deterministic callable APIs */
+  skill: FunctionSquare,
   function: Cpu,
   run: Play,
   "flow-data": Workflow,

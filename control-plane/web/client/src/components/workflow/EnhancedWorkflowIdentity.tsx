@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge, StatusBadge } from "../ui/badge";
 import { Separator } from "../ui/separator";
 import { CopyButton } from "../ui/copy-button";
+import { JsonHighlightedPre } from "../ui/json-syntax-highlight";
 import { cn } from "../../lib/utils";
 import {
   getStatusLabel,
@@ -801,9 +802,10 @@ export function EnhancedWorkflowIdentity({ workflow, vcChain }: EnhancedWorkflow
 
                         {documentPreview && (
                           <div className="mt-4 max-h-64 overflow-auto rounded-lg bg-background p-3 text-xs">
-                            <pre className="font-mono text-muted-foreground whitespace-pre-wrap">
-                              {documentPreview}
-                            </pre>
+                            <JsonHighlightedPre
+                              text={documentPreview}
+                              className="text-xs"
+                            />
                           </div>
                         )}
                       </div>

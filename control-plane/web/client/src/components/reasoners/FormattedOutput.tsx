@@ -4,6 +4,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { UnifiedJsonViewer } from "@/components/ui/UnifiedJsonViewer";
+import { JsonHighlightedPre } from "@/components/ui/json-syntax-highlight";
 import type { CanonicalStatus } from "../../utils/status";
 import { getStatusLabel } from "../../utils/status";
 
@@ -76,9 +77,10 @@ export function FormattedOutput({
 
         {/* Raw JSON Display */}
         <div className="relative">
-          <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto max-h-96 border">
-            {JSON.stringify(data, null, 2)}
-          </pre>
+          <JsonHighlightedPre
+            data={data}
+            className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-sm"
+          />
         </div>
 
         {/* Execution Info */}
@@ -159,9 +161,10 @@ export function FormattedOutput({
       {viewMode === "json" ? (
         <Card>
           <CardContent className="p-4">
-            <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto max-h-96 border">
-              {JSON.stringify(data, null, 2)}
-            </pre>
+            <JsonHighlightedPre
+              data={data}
+              className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-sm"
+            />
           </CardContent>
         </Card>
       ) : (

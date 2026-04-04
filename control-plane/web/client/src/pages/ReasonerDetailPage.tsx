@@ -22,6 +22,7 @@ import {
 import { FormattedOutput } from "../components/reasoners/FormattedOutput";
 import { PerformanceChart } from "../components/reasoners/PerformanceChart";
 import { ReasonerStatusDot as StatusIndicator } from "../components/reasoners/ReasonerStatusDot";
+import { JsonHighlightedPre } from "../components/ui/json-syntax-highlight";
 import { Alert } from "../components/ui/alert";
 import { Button } from "../components/ui/button";
 import {
@@ -379,9 +380,10 @@ export function ReasonerDetailPage() {
                 </CardHeader>
                 <CardContent>
                   {reasoner.input_schema ? (
-                    <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto scrollbar-thin border border-border">
-                      {JSON.stringify(reasoner.input_schema, null, 2)}
-                    </pre>
+                    <JsonHighlightedPre
+                      data={reasoner.input_schema}
+                      className="rounded-lg border border-border bg-muted p-4 text-sm scrollbar-thin overflow-auto"
+                    />
                   ) : (
                     <p className="text-muted-foreground">
                       No input schema available
@@ -401,9 +403,10 @@ export function ReasonerDetailPage() {
                 </CardHeader>
                 <CardContent>
                   {reasoner.output_schema ? (
-                    <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto scrollbar-thin border border-border">
-                      {JSON.stringify(reasoner.output_schema, null, 2)}
-                    </pre>
+                    <JsonHighlightedPre
+                      data={reasoner.output_schema}
+                      className="rounded-lg border border-border bg-muted p-4 text-sm scrollbar-thin overflow-auto"
+                    />
                   ) : (
                     <p className="text-muted-foreground">
                       No output schema available

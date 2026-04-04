@@ -13,10 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Function,
-  Tools,
   Copy,
   Identification,
+  ReasonerIcon,
+  SkillIcon,
 } from "@/components/ui/icon-bridge";
 import { cn } from "@/lib/utils";
 import type { ReasonerDefinition, SkillDefinition } from "@/types/agentfield";
@@ -146,13 +146,13 @@ export function ReasonersSkillsTable({
   const getTypeIcon = (type: "reasoner" | "skill" | "agent") => {
     switch (type) {
       case "reasoner":
-        return <Function className="w-4 h-4 text-accent-primary" />;
+        return <ReasonerIcon className="w-4 h-4 text-accent-primary" />;
       case "skill":
-        return <Tools className="w-4 h-4 text-accent-secondary" />;
+        return <SkillIcon className="w-4 h-4 text-accent-secondary" />;
       case "agent":
         return <Identification className="w-4 h-4 text-blue-500" />;
       default:
-        return <Function className="w-4 h-4 text-accent-primary" />;
+        return <ReasonerIcon className="w-4 h-4 text-accent-primary" />;
     }
   };
 
@@ -175,15 +175,16 @@ export function ReasonersSkillsTable({
       <Card className={cn("w-full", className)}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Function className="w-5 h-5 text-muted-foreground" />
+            <ReasonerIcon className="h-5 w-5 text-muted-foreground" />
+            <SkillIcon className="h-5 w-5 text-muted-foreground" />
             Reasoners & Skills
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-center py-8 text-muted-foreground">
             <div className="flex items-center justify-center gap-2 mb-2">
-              <Function className="w-8 h-8 opacity-50" />
-              <Tools className="w-8 h-8 opacity-50" />
+              <ReasonerIcon className="h-8 w-8 opacity-50" />
+              <SkillIcon className="h-8 w-8 opacity-50" />
             </div>
             <p className="text-sm">No reasoners or skills available</p>
           </div>
@@ -197,7 +198,8 @@ export function ReasonersSkillsTable({
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2">
-            <Function className="w-5 h-5 text-muted-foreground" />
+            <ReasonerIcon className="h-5 w-5 text-muted-foreground" />
+            <SkillIcon className="h-5 w-5 text-muted-foreground" />
             Reasoners & Skills
             <Badge variant="outline" className="ml-2 text-xs">
               {filteredItems.length}

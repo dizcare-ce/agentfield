@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useRunDAG, useStepDetail } from "@/hooks/queries";
 import { formatDuration } from "@/components/RunTrace";
 import { normalizeExecutionStatus } from "@/utils/status";
@@ -10,10 +11,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -22,57 +22,129 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertTriangle, ArrowLeft, ChevronDown, Equal, ExternalLink, Minus } from "lucide-react";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
+import type { WorkflowExecution } from "@/types/executions";
+import type { CanonicalStatus } from "@/utils/status";
+import { JsonHighlightedPre } from "@/components/ui/json-syntax-highlight";
+import {
+  extractReasonerInputLayers,
+  formatOutputUsageHint,
+} from "@/utils/reasonerCompareExtract";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function statusVariant(
-  status: string,
-): "default" | "destructive" | "secondary" | "outline" {
-  const canonical = normalizeExecutionStatus(status);
-  switch (canonical) {
-    case "succeeded":
-      return "default";
-    case "failed":
-    case "timeout":
-      return "destructive";
-    default:
-      return "secondary";
-  }
+/** Maps workflow status to ui/badge StatusBadge variant (same as workflow identity). */
+type UiRunStatusBadge = "success" | "failed" | "running" | "pending" | "degraded" | "unknown";
+
+const CANONICAL_TO_RUN_STATUS_BADGE: Record<CanonicalStatus, UiRunStatusBadge> = {
+  pending: "pending",
+  queued: "pending",
+  waiting: "pending",
+  paused: "degraded",
+  running: "running",
+  succeeded: "success",
+  failed: "failed",
+  cancelled: "unknown",
+  timeout: "failed",
+  unknown: "unknown",
+};
+
+function runStatusToUiBadge(status: string): UiRunStatusBadge {
+  return CANONICAL_TO_RUN_STATUS_BADGE[normalizeExecutionStatus(status)] ?? "unknown";
 }
 
-function StatusDot({ status }: { status?: string }) {
-  if (!status) return <span className="text-muted-foreground text-[11px]">—</span>;
-  const canonical = normalizeExecutionStatus(status);
+/** Dot-only status for dense step rows (label in tooltip). */
+function StatusCue({ status }: { status?: string }) {
+  const label = status ? normalizeExecutionStatus(status) : "missing";
+  const canonical = status ? normalizeExecutionStatus(status) : "";
   const color =
     canonical === "succeeded"
       ? "bg-green-500"
       : canonical === "failed" || canonical === "timeout"
-        ? "bg-red-500"
+        ? "bg-destructive"
         : canonical === "running"
-          ? "bg-blue-500"
-          : "bg-muted-foreground";
-
-  const symbol =
-    canonical === "succeeded"
-      ? "✓"
-      : canonical === "failed" || canonical === "timeout"
-        ? "✗"
-        : "·";
+          ? "bg-primary"
+          : "bg-muted-foreground/50";
 
   return (
-    <div className="flex items-center gap-1">
-      <div className={cn("size-1.5 rounded-full shrink-0", color)} />
-      <span className={cn(
-        "text-[11px] font-mono",
-        canonical === "succeeded" ? "text-green-500" : canonical === "failed" || canonical === "timeout" ? "text-red-500" : "text-muted-foreground",
-      )}>
-        {symbol}
-      </span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "inline-block size-2 shrink-0 rounded-full",
+            !status && "bg-border",
+            status && color,
+          )}
+          aria-label={label}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs capitalize">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
+}
+
+/** Compact comparison cue: icons only, meaning in tooltip. */
+function RowCompareCue({
+  diverged,
+  extra,
+  missingSide,
+}: {
+  diverged: boolean;
+  extra: boolean;
+  missingSide: "a" | "b" | null;
+}) {
+  const tip = diverged
+    ? "Status differs between runs"
+    : extra
+      ? missingSide === "a"
+        ? "No step in run A at this index"
+        : missingSide === "b"
+          ? "No step in run B at this index"
+          : "No step in either run at this index"
+      : "Same status";
+
+  const node = diverged ? (
+    <AlertTriangle className="size-3.5 shrink-0 text-amber-500" aria-hidden />
+  ) : extra ? (
+    <Minus className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+  ) : (
+    <Equal className="size-3.5 shrink-0 text-muted-foreground/25" aria-hidden />
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={tip}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {node}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="max-w-xs text-xs">
+        {tip}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Compact run id for dense headers (full id in title/tooltip). */
+function formatCompareRunId(runId: string): string {
+  return runId.length <= 14 ? runId : `${runId.slice(0, 10)}…${runId.slice(-4)}`;
 }
 
 function durationDeltaLabel(msA?: number, msB?: number): string | null {
@@ -86,83 +158,340 @@ function durationDeltaLabel(msA?: number, msB?: number): string | null {
 
 // ─── Step I/O diff section ────────────────────────────────────────────────────
 
+const compareJsonBlockClass =
+  "max-h-[min(42vh,22rem)] overflow-auto rounded-md border border-border/60 bg-muted/50 p-3 text-[11px] leading-relaxed";
+
+function formatBytesCompact(n?: number): string | null {
+  if (n == null || n <= 0) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10_240 ? 1 : 0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatStepWhen(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function CompareStepPanel({
+  label,
+  step,
+  detail,
+  runId,
+  workflowName,
+}: {
+  label: "A" | "B";
+  step: WorkflowDAGLightweightNode | undefined;
+  detail: UseQueryResult<WorkflowExecution>;
+  runId: string;
+  workflowName: string | undefined;
+}) {
+  const ex = detail.data;
+  const startedAt = ex?.started_at ?? step?.started_at;
+  const completedAt = ex?.completed_at ?? step?.completed_at;
+  const durationMs = ex?.duration_ms ?? step?.duration_ms;
+  const statusRaw = ex?.status ?? (step?.status ? normalizeExecutionStatus(step.status) : undefined);
+  const statusStr = statusRaw ?? "unknown";
+
+  const layers = extractReasonerInputLayers(ex?.input_data);
+  const usageHint = formatOutputUsageHint(ex?.output_data);
+
+  const hasEx = Boolean(ex);
+  const hasInputPayload = ex?.input_data != null;
+  const hasOutputPayload = ex?.output_data != null;
+  const hasErr = Boolean(ex?.error_message);
+  const notes = ex?.notes ?? [];
+  const inBytes = formatBytesCompact(ex?.input_size);
+  const outBytes = formatBytesCompact(ex?.output_size);
+
+  const defaultTab = hasErr
+    ? "error"
+    : hasInputPayload
+      ? "input"
+      : hasOutputPayload
+        ? "output"
+        : notes.length > 0
+          ? "notes"
+          : "input";
+
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:p-4",
+        label === "B" ? "border-l-[3px] border-l-secondary" : "border-l-[3px] border-l-primary",
+      )}
+    >
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+              Run {label}
+            </Badge>
+            {workflowName?.trim() ? (
+              <span
+                className="truncate text-xs font-medium text-foreground"
+                title={workflowName}
+              >
+                {workflowName}
+              </span>
+            ) : null}
+          </div>
+          <p
+            className="truncate font-mono text-[11px] text-muted-foreground"
+            title={step?.reasoner_id}
+          >
+            {step?.reasoner_id ?? "—"}
+          </p>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="max-w-[min(100%,11rem)] shrink-0 truncate text-right font-mono text-[10px] text-muted-foreground">
+              {formatCompareRunId(runId)}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-md">
+            <p className="break-all font-mono text-xs">{runId}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
+      {!step && !ex ? (
+        <p className="text-xs text-muted-foreground">No step on this side.</p>
+      ) : null}
+
+      {(step || ex) && (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusBadge
+              status={runStatusToUiBadge(statusStr)}
+              size="sm"
+              showIcon={false}
+              className="h-5 text-[10px]"
+            >
+              {statusStr}
+            </StatusBadge>
+            {durationMs != null && durationMs > 0 ? (
+              <Badge variant="secondary" className="h-5 font-mono text-[10px] font-normal">
+                {formatDuration(durationMs)}
+              </Badge>
+            ) : null}
+            {formatStepWhen(startedAt) ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="h-5 max-w-[9rem] truncate text-[10px] font-normal">
+                    {formatStepWhen(startedAt)}
+                    {completedAt ? ` → ${formatStepWhen(completedAt)}` : ""}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  <div>Started: {startedAt ?? "—"}</div>
+                  <div>Completed: {completedAt ?? "—"}</div>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            {ex?.agent_node_id ? (
+              <Badge variant="outline" className="h-5 max-w-[8rem] truncate text-[10px] font-normal">
+                {ex.agent_node_id}
+              </Badge>
+            ) : null}
+            {ex?.workflow_depth != null && ex.workflow_depth > 0 ? (
+              <Badge variant="outline" className="h-5 text-[10px] font-normal">
+                depth {ex.workflow_depth}
+              </Badge>
+            ) : null}
+            {ex != null && ex.retry_count > 0 ? (
+              <Badge variant="outline" className="h-5 text-[10px] font-normal">
+                retries {ex.retry_count}
+              </Badge>
+            ) : null}
+            {inBytes ? (
+              <Badge variant="outline" className="h-5 text-[10px] font-normal">
+                in {inBytes}
+              </Badge>
+            ) : null}
+            {outBytes ? (
+              <Badge variant="outline" className="h-5 text-[10px] font-normal">
+                out {outBytes}
+              </Badge>
+            ) : null}
+            {usageHint ? (
+              <Badge variant="secondary" className="h-5 max-w-[14rem] truncate text-[10px] font-normal">
+                {usageHint}
+              </Badge>
+            ) : null}
+          </div>
+
+          {step && !hasEx && detail.isFetched && !detail.isLoading ? (
+            <p className="rounded-md border border-dashed border-border/80 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Execution details are not available for this step. Open the run to inspect I/O.
+            </p>
+          ) : null}
+
+          {hasEx && (layers.prose.length > 0 || layers.meta.length > 0) ? (
+            <div className="rounded-lg border border-border/80 bg-muted/25 p-3">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Reasoner context
+              </p>
+              {layers.meta.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {layers.meta.map((m) => (
+                    <Tooltip key={m.key}>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="h-5 max-w-[11rem] truncate text-[10px] font-normal">
+                          <span className="text-muted-foreground">{m.label}:</span>{" "}
+                          <span className="font-mono">{m.value}</span>
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-md break-all text-xs">{m.value}</TooltipContent>
+                    </Tooltip>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-2">
+                {layers.prose.map((p) => (
+                  <div key={p.key} className="min-w-0">
+                    <p className="text-[10px] font-medium text-muted-foreground">{p.label}</p>
+                    <div
+                      className="mt-1 max-h-28 overflow-y-auto rounded-md border border-border/50 bg-background/80 px-2.5 py-2 text-xs leading-snug text-foreground"
+                      title={p.text}
+                    >
+                      {p.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {hasEx ? (
+          <Tabs defaultValue={defaultTab} className="min-w-0">
+            <TabsList variant="soft" className="h-8 w-full justify-start gap-0.5 p-1 sm:w-auto">
+              <TabsTrigger variant="soft" size="sm" value="input" disabled={!hasEx} className="text-[11px]">
+                Input JSON
+              </TabsTrigger>
+              <TabsTrigger variant="soft" size="sm" value="output" disabled={!hasEx} className="text-[11px]">
+                Output
+              </TabsTrigger>
+              {notes.length > 0 ? (
+                <TabsTrigger variant="soft" size="sm" value="notes" className="text-[11px]">
+                  Notes ({notes.length})
+                </TabsTrigger>
+              ) : null}
+              {hasErr ? (
+                <TabsTrigger variant="soft" size="sm" value="error" className="text-[11px] text-destructive">
+                  Error
+                </TabsTrigger>
+              ) : null}
+            </TabsList>
+            <TabsContent value="input" className="mt-2">
+              <JsonHighlightedPre
+                data={ex?.input_data}
+                className={compareJsonBlockClass}
+              />
+            </TabsContent>
+            <TabsContent value="output" className="mt-2">
+              {hasErr ? (
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  This step failed; open the Error tab for the message. Raw output (if any) below.
+                </p>
+              ) : null}
+              <JsonHighlightedPre
+                data={ex?.output_data}
+                className={compareJsonBlockClass}
+              />
+            </TabsContent>
+            <TabsContent value="notes" className="mt-2 space-y-2">
+              {notes.map((note, i) => (
+                <div key={i} className="rounded-md border border-border/60 bg-muted/40 p-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {new Date(note.timestamp).toLocaleString()}
+                  </span>
+                  <p className="mt-1 whitespace-pre-wrap break-words">{note.message}</p>
+                  {note.tags?.length ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {note.tags.map((tag) => (
+                        <Badge key={tag} variant="outline" className="h-4 text-[9px]">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </TabsContent>
+            <TabsContent value="error" className="mt-2">
+              <pre
+                className={cn(
+                  compareJsonBlockClass,
+                  "bg-destructive/10 font-mono text-destructive",
+                )}
+              >
+                {ex?.error_message ?? "—"}
+              </pre>
+            </TabsContent>
+          </Tabs>
+          ) : null}
+
+          {ex?.execution_id ? (
+            <p className="text-[10px] text-muted-foreground">
+              <span className="font-medium text-foreground/80">Execution</span>{" "}
+              <span className="font-mono">{ex.execution_id}</span>
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 function StepDiff({
   stepA,
   stepB,
-  index,
+  runIdA,
+  runIdB,
+  workflowNameA,
+  workflowNameB,
 }: {
   stepA?: WorkflowDAGLightweightNode;
   stepB?: WorkflowDAGLightweightNode;
-  index: number;
+  runIdA: string;
+  runIdB: string;
+  workflowNameA?: string;
+  workflowNameB?: string;
 }) {
   const detailA = useStepDetail(stepA?.execution_id);
   const detailB = useStepDetail(stepB?.execution_id);
 
-  const label = stepA?.reasoner_id ?? stepB?.reasoner_id ?? "—";
-  const stepNum = index + 1;
-
   return (
-    <div className="mt-3 rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
-      <p className="text-[10px] font-medium text-amber-400 uppercase tracking-wider mb-2">
-        Step I/O Diff — Step #{stepNum} · {label}
-      </p>
-
-      {(detailA.isLoading || detailB.isLoading) ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-32 w-full" />
+    <div className="space-y-3">
+      {detailA.isLoading || detailB.isLoading ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Skeleton className="min-h-[20rem] w-full rounded-lg" />
+          <Skeleton className="min-h-[20rem] w-full rounded-lg" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {/* Run A */}
-          <div className="flex flex-col gap-2">
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Input (Run A)</p>
-              <pre className="text-[10px] font-mono bg-background/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap break-all">
-                {detailA.data?.input_data
-                  ? JSON.stringify(detailA.data.input_data, null, 2).slice(0, 500)
-                  : stepA ? "—" : "— (no step)"}
-              </pre>
-            </div>
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Output (Run A)</p>
-              <pre className={cn(
-                "text-[10px] font-mono rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap break-all",
-                detailA.data?.error_message ? "bg-destructive/10 text-destructive" : "bg-background/50",
-              )}>
-                {detailA.data?.error_message
-                  ? detailA.data.error_message
-                  : detailA.data?.output_data
-                    ? JSON.stringify(detailA.data.output_data, null, 2).slice(0, 500)
-                    : stepA ? "—" : "— (no step)"}
-              </pre>
-            </div>
-          </div>
-
-          {/* Run B */}
-          <div className="flex flex-col gap-2">
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Input (Run B)</p>
-              <pre className="text-[10px] font-mono bg-background/50 rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap break-all">
-                {detailB.data?.input_data
-                  ? JSON.stringify(detailB.data.input_data, null, 2).slice(0, 500)
-                  : stepB ? "—" : "— (no step)"}
-              </pre>
-            </div>
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Output (Run B)</p>
-              <pre className={cn(
-                "text-[10px] font-mono rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap break-all",
-                detailB.data?.error_message ? "bg-destructive/10 text-destructive" : "bg-background/50",
-              )}>
-                {detailB.data?.error_message
-                  ? detailB.data.error_message
-                  : detailB.data?.output_data
-                    ? JSON.stringify(detailB.data.output_data, null, 2).slice(0, 500)
-                    : stepB ? "—" : "— (no step)"}
-              </pre>
-            </div>
-          </div>
+        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+          <CompareStepPanel
+            label="A"
+            step={stepA}
+            detail={detailA}
+            runId={runIdA}
+            workflowName={workflowNameA}
+          />
+          <CompareStepPanel
+            label="B"
+            step={stepB}
+            detail={detailB}
+            runId={runIdB}
+            workflowName={workflowNameB}
+          />
         </div>
       )}
     </div>
@@ -174,6 +503,7 @@ function StepDiff({
 function RunSummaryCard({
   runId,
   label,
+  workflowName,
   status,
   stepCount,
   failureCount,
@@ -183,6 +513,7 @@ function RunSummaryCard({
 }: {
   runId: string;
   label: "A" | "B";
+  workflowName?: string;
   status: string;
   stepCount: number;
   failureCount: number;
@@ -191,61 +522,87 @@ function RunSummaryCard({
   isB?: boolean;
 }) {
   const navigate = useNavigate();
-  const shortId = runId.slice(0, 12);
+  const shortId = formatCompareRunId(runId);
 
   return (
-    <Card className={cn(
-      "flex-1",
-      isB && deltaLabel && deltaLabel.startsWith("+") && "border-amber-500/20",
-    )}>
-      <CardHeader className="pb-2 pt-3 px-4">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Run {label}
-          </CardTitle>
+    <Card
+      className={cn(
+        "flex-1 overflow-hidden border-l-4",
+        isB ? "border-l-secondary" : "border-l-primary",
+      )}
+    >
+      <CardHeader className="gap-3 space-y-0 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge variant="outline" className="shrink-0 font-mono">
+              {label}
+            </Badge>
+            <CardTitle className="truncate leading-none">
+              {workflowName ? workflowName : `Run ${label}`}
+            </CardTitle>
+          </div>
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 text-[10px] text-muted-foreground gap-1 px-1.5"
+            className="h-8 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
             onClick={() => navigate(`/runs/${runId}`)}
           >
-            <ExternalLink className="size-3" />
+            <ExternalLink className="size-3.5" />
             Detail
           </Button>
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          <Badge variant={statusVariant(status)} className="text-[10px] px-1.5 h-5">
-            {normalizeExecutionStatus(status)}
-          </Badge>
-          <span className="text-xs font-mono text-muted-foreground">{shortId}</span>
+        <div className="space-y-1">
+          <p
+            className="truncate font-mono text-xs text-muted-foreground"
+            title={runId}
+          >
+            {shortId}
+          </p>
+          {workflowName ? (
+            <p className="text-xs text-muted-foreground">Run {label}</p>
+          ) : null}
         </div>
+        <StatusBadge
+          status={runStatusToUiBadge(status)}
+          size="sm"
+          showIcon={false}
+          className="w-fit"
+        >
+          {normalizeExecutionStatus(status)}
+        </StatusBadge>
       </CardHeader>
-      <CardContent className="px-4 pb-3">
+      <CardContent className="pb-4 pt-0">
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Steps</p>
-            <p className="text-sm font-semibold">{stepCount}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Steps
+            </p>
+            <p className="text-sm font-semibold tabular-nums">{stepCount}</p>
           </div>
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Failures</p>
-            <p className={cn("text-sm font-semibold", failureCount > 0 && "text-destructive")}>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Failures
+            </p>
+            <p
+              className={cn(
+                "text-sm font-semibold tabular-nums",
+                failureCount > 0 && "text-destructive",
+              )}
+            >
               {failureCount > 0 ? failureCount : "—"}
             </p>
           </div>
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Duration</p>
-            <div className="flex items-center justify-center gap-1">
-              <p className="text-sm font-semibold">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Duration
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-1">
+              <p className="text-sm font-semibold tabular-nums">
                 {durationMs != null ? formatDuration(durationMs) : "—"}
               </p>
-              {deltaLabel && (
-                <span className={cn(
-                  "text-[10px] font-medium",
-                  deltaLabel.startsWith("+") ? "text-amber-400" : "text-green-500",
-                )}>
-                  ({deltaLabel})
-                </span>
-              )}
+              {deltaLabel ? (
+                <span className="text-xs text-muted-foreground">({deltaLabel})</span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -266,22 +623,22 @@ export function ComparisonPage() {
   const dagA = useRunDAG(runIdA);
   const dagB = useRunDAG(runIdB);
 
-  const [selectedDivergedIndex, setSelectedDivergedIndex] = useState<number | null>(null);
+  const [expandedStepIndex, setExpandedStepIndex] = useState<number | null>(null);
 
   // ─── Loading ──────────────────────────────────────────────────────────────
 
   if (dagA.isLoading || dagB.isLoading) {
     return (
-      <div className="flex flex-col gap-4 h-[calc(100vh-8rem)]">
-        <div className="flex items-center justify-between flex-shrink-0">
+      <div className="flex flex-col gap-4 pb-6">
+        <div className="flex items-center justify-between">
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-8 w-20" />
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-32 w-full" />
+        <div className="grid grid-cols-2 gap-3">
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-28 w-full rounded-xl" />
         </div>
-        <Skeleton className="flex-1 w-full" />
+        <Skeleton className="min-h-[24rem] w-full rounded-xl" />
       </div>
     );
   }
@@ -340,184 +697,241 @@ export function ComparisonPage() {
 
   const deltaLabel = durationDeltaLabel(durationMsA, durationMsB);
 
-  const divergedStep =
-    selectedDivergedIndex != null
-      ? { a: stepsA[selectedDivergedIndex], b: stepsB[selectedDivergedIndex], index: selectedDivergedIndex }
-      : null;
-
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] gap-4">
-      {/* ─── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-shrink-0">
-        <h1 className="text-xl font-semibold tracking-tight">Compare Runs</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => navigate("/runs")}
-        >
-          <ArrowLeft className="size-3 mr-1.5" />
-          Back
-        </Button>
-      </div>
-
-      {/* ─── Summary cards ───────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-10 bg-background pb-3 flex-shrink-0">
-      <div className="grid grid-cols-2 gap-4">
-        <RunSummaryCard
-          runId={runIdA}
-          label="A"
-          status={dataA.workflow_status}
-          stepCount={stepsA.length}
-          failureCount={failureCountA}
-          durationMs={durationMsA}
-        />
-        <RunSummaryCard
-          runId={runIdB}
-          label="B"
-          status={dataB.workflow_status}
-          stepCount={stepsB.length}
-          failureCount={failureCountB}
-          durationMs={durationMsB}
-          deltaLabel={deltaLabel}
-          isB
-        />
-      </div>
-      </div>
-
-      <Separator className="flex-shrink-0" />
-
-      {/* ─── Step comparison + diff ───────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-2 flex-shrink-0">
-          Step Comparison
-          {maxLen > 0 && (
-            <span className="ml-2 normal-case text-muted-foreground/60 font-normal">
-              — click any row to inspect step I/O diff
-            </span>
-          )}
-        </p>
-
-        <div className="flex-1 min-h-0 rounded-md border border-border overflow-hidden">
-          <ScrollArea className="h-full">
-            <Table className="text-xs">
-              <TableHeader>
-                <TableRow className="h-8">
-                  <TableHead className="px-2 text-[10px] w-8">#</TableHead>
-                  {/* Run A columns */}
-                  <TableHead className="px-2 text-[10px] w-[22%]">
-                    <span className="text-muted-foreground">A ·</span>{" "}
-                    <span className="font-mono text-[10px]">{runIdA.slice(0, 8)}</span>
-                  </TableHead>
-                  <TableHead className="px-2 text-[10px] w-16">Status</TableHead>
-                  {/* Run B columns */}
-                  <TableHead className="px-2 text-[10px] w-[22%]">
-                    <span className="text-muted-foreground">B ·</span>{" "}
-                    <span className="font-mono text-[10px]">{runIdB.slice(0, 8)}</span>
-                  </TableHead>
-                  <TableHead className="px-2 text-[10px] w-16">Status</TableHead>
-                  {/* Delta */}
-                  <TableHead className="px-2 text-[10px] w-24">Diff</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {maxLen === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground text-xs py-8">
-                      No steps available for comparison
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  Array.from({ length: maxLen }).map((_, i) => {
-                    const a = stepsA[i];
-                    const b = stepsB[i];
-
-                    const statusA = normalizeExecutionStatus(a?.status);
-                    const statusB = normalizeExecutionStatus(b?.status);
-
-                    const bothPresent = !!a && !!b;
-                    const diverged = bothPresent && statusA !== statusB;
-                    const extra = !a || !b;
-
-                    const isSelected = selectedDivergedIndex === i;
-
-                    return (
-                      <TableRow
-                        key={i}
-                        className={cn(
-                          "h-8 transition-colors cursor-pointer",
-                          diverged && "bg-amber-500/5 hover:bg-amber-500/10",
-                          isSelected && "bg-amber-500/10 ring-inset ring-1 ring-amber-500/30",
-                          extra && "opacity-60",
-                          !diverged && !isSelected && "hover:bg-muted/30",
-                        )}
-                        onClick={() => {
-                          setSelectedDivergedIndex(isSelected ? null : i);
-                        }}
-                      >
-                        {/* Index */}
-                        <TableCell className="px-2 py-1 text-[11px] text-muted-foreground/60 tabular-nums">
-                          {i + 1}
-                        </TableCell>
-
-                        {/* Reasoner A */}
-                        <TableCell className="px-2 py-1 text-xs font-mono max-w-0 truncate">
-                          <span className="truncate block" title={a?.reasoner_id}>
-                            {a?.reasoner_id ?? <span className="text-muted-foreground/40 italic">—</span>}
-                          </span>
-                        </TableCell>
-
-                        {/* Status A */}
-                        <TableCell className="px-2 py-1">
-                          <StatusDot status={a?.status} />
-                        </TableCell>
-
-                        {/* Reasoner B */}
-                        <TableCell className="px-2 py-1 text-xs font-mono max-w-0 truncate">
-                          <span className="truncate block" title={b?.reasoner_id}>
-                            {b?.reasoner_id ?? <span className="text-muted-foreground/40 italic">—</span>}
-                          </span>
-                        </TableCell>
-
-                        {/* Status B */}
-                        <TableCell className="px-2 py-1">
-                          <StatusDot status={b?.status} />
-                        </TableCell>
-
-                        {/* Diff label */}
-                        <TableCell className="px-2 py-1">
-                          {diverged ? (
-                            <span className="text-[10px] text-amber-400 font-medium">
-                              {isSelected ? "▼ diverged" : "◀ diverged"}
-                            </span>
-                          ) : extra ? (
-                            <span className="text-[10px] text-muted-foreground/50 italic">
-                              {!a ? "extra (B)" : "extra (A)"}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/30">same</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-
-            {/* ─── Output diff panel ─────────────────────────────────────── */}
-            {divergedStep != null && (
-              <div className="px-3 pb-3">
-                <StepDiff
-                  stepA={divergedStep.a}
-                  stepB={divergedStep.b}
-                  index={divergedStep.index}
-                />
-              </div>
-            )}
-          </ScrollArea>
+    <TooltipProvider delayDuration={250}>
+      <div className="flex flex-col gap-4 pb-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold tracking-tight">Compare Runs</h1>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => navigate("/runs")}
+          >
+            <ArrowLeft className="mr-1.5 size-3" />
+            Back
+          </Button>
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <RunSummaryCard
+            runId={runIdA}
+            label="A"
+            workflowName={dataA.workflow_name}
+            status={dataA.workflow_status}
+            stepCount={stepsA.length}
+            failureCount={failureCountA}
+            durationMs={durationMsA}
+          />
+          <RunSummaryCard
+            runId={runIdB}
+            label="B"
+            workflowName={dataB.workflow_name}
+            status={dataB.workflow_status}
+            stepCount={stepsB.length}
+            failureCount={failureCountB}
+            durationMs={durationMsB}
+            deltaLabel={deltaLabel}
+            isB
+          />
+        </div>
+
+        <Separator />
+
+        <Card className="flex min-h-0 flex-col">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Steps</CardTitle>
+            <p className="text-xs font-normal text-muted-foreground">
+              Expand a row for side-by-side metadata, reasoner context (goal / prompts / start tip when
+              present in input), and tabbed full JSON. Dots = status; last column = alignment (hover).
+            </p>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+            <div className="min-h-[12rem] flex-1 overflow-y-auto border-t">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-14 px-2 py-2 text-xs font-medium text-muted-foreground">
+                      #
+                    </TableHead>
+                    <TableHead
+                      className="min-w-0 px-2 py-2 text-xs font-medium"
+                      title={runIdA}
+                    >
+                      <span className="text-muted-foreground">A</span>
+                      <span className="ml-1 font-mono text-[10px] font-normal text-muted-foreground/80">
+                        {formatCompareRunId(runIdA)}
+                      </span>
+                    </TableHead>
+                    <TableHead
+                      className="min-w-0 px-2 py-2 text-xs font-medium"
+                      title={runIdB}
+                    >
+                      <span className="text-muted-foreground">B</span>
+                      <span className="ml-1 font-mono text-[10px] font-normal text-muted-foreground/80">
+                        {formatCompareRunId(runIdB)}
+                      </span>
+                    </TableHead>
+                    <TableHead className="w-12 px-0 py-2 text-center">
+                      <span className="sr-only">Compare</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {maxLen === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-10 text-center text-xs text-muted-foreground"
+                      >
+                        No steps available for comparison
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    Array.from({ length: maxLen }).map((_, i) => {
+                      const a = stepsA[i];
+                      const b = stepsB[i];
+
+                      const statusA = normalizeExecutionStatus(a?.status);
+                      const statusB = normalizeExecutionStatus(b?.status);
+
+                      const bothPresent = !!a && !!b;
+                      const diverged = bothPresent && statusA !== statusB;
+                      const extra = !a || !b;
+                      const missingSide =
+                        !a && !b ? null : !a ? "a" : !b ? "b" : null;
+
+                      const isExpanded = expandedStepIndex === i;
+                      const reasonerLabel =
+                        a?.reasoner_id ?? b?.reasoner_id ?? "—";
+
+                      return (
+                        <Fragment key={i}>
+                          <TableRow
+                            data-state={isExpanded ? "selected" : undefined}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isExpanded}
+                            aria-label={`Step ${i + 1}, ${reasonerLabel}. ${isExpanded ? "Expanded" : "Collapsed"}. Press to toggle.`}
+                            className={cn(
+                              "cursor-pointer border-b border-border/60",
+                              isExpanded && "bg-muted/60",
+                              !isExpanded && "hover:bg-muted/40",
+                              diverged && !isExpanded && "bg-amber-500/[0.04]",
+                            )}
+                            onClick={() => {
+                              setExpandedStepIndex(isExpanded ? null : i);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setExpandedStepIndex(isExpanded ? null : i);
+                              }
+                            }}
+                          >
+                            <TableCell className="px-2 py-2 align-middle">
+                              <div className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+                                <ChevronDown
+                                  className={cn(
+                                    "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                                    isExpanded && "rotate-180",
+                                  )}
+                                  aria-hidden
+                                />
+                                <span>{i + 1}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="max-w-0 px-2 py-2 align-middle">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className="min-w-0 flex-1 truncate font-mono text-xs"
+                                  title={a?.reasoner_id}
+                                >
+                                  {a?.reasoner_id ?? (
+                                    <span className="text-muted-foreground/50">—</span>
+                                  )}
+                                </span>
+                                <StatusCue status={a?.status} />
+                              </div>
+                            </TableCell>
+                            <TableCell className="max-w-0 px-2 py-2 align-middle">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className="min-w-0 flex-1 truncate font-mono text-xs"
+                                  title={b?.reasoner_id}
+                                >
+                                  {b?.reasoner_id ?? (
+                                    <span className="text-muted-foreground/50">—</span>
+                                  )}
+                                </span>
+                                <StatusCue status={b?.status} />
+                              </div>
+                            </TableCell>
+                            <TableCell className="w-12 px-0 py-0 align-middle">
+                              <RowCompareCue
+                                diverged={diverged}
+                                extra={extra}
+                                missingSide={missingSide}
+                              />
+                            </TableCell>
+                          </TableRow>
+                          <TableRow className="border-b border-border/60 hover:bg-transparent">
+                            <TableCell colSpan={4} className="p-0">
+                              <Collapsible open={isExpanded}>
+                                <CollapsibleContent className="overflow-hidden">
+                                  <div
+                                    className="border-t border-border bg-muted/30 px-3 py-3 sm:px-4 sm:py-4"
+                                    role="region"
+                                    aria-label={`Step ${i + 1} comparison details for runs A and B`}
+                                  >
+                                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                      <p className="text-xs text-muted-foreground">
+                                        <span className="font-medium text-foreground">
+                                          Step comparison
+                                        </span>
+                                        <span className="text-muted-foreground/70"> · </span>
+                                        <span className="font-mono text-[11px]">
+                                          Step {i + 1} · {reasonerLabel}
+                                        </span>
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 shrink-0 text-xs"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setExpandedStepIndex(null);
+                                        }}
+                                      >
+                                        Collapse
+                                      </Button>
+                                    </div>
+                                    <div className="max-h-[min(70vh,48rem)] overflow-y-auto">
+                                      <StepDiff
+                                        stepA={a}
+                                        stepB={b}
+                                        runIdA={runIdA}
+                                        runIdB={runIdB}
+                                        workflowNameA={dataA.workflow_name}
+                                        workflowNameB={dataB.workflow_name}
+                                      />
+                                    </div>
+                                  </div>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

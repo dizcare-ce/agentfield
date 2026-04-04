@@ -5,7 +5,7 @@ import type { ReasonerCardProps } from '../../types/reasoners';
 import { ReasonerStatusDot } from './ReasonerStatusDot';
 import { CompositeDIDStatus } from '../did/DIDStatusBadge';
 import { useDIDStatus } from '../../hooks/useDIDInfo';
-import { Bot, Layers, Timer, Tag, Flash, CheckCircle, BarChart3, Identification } from '@/components/ui/icon-bridge';
+import { ReasonerIcon, Layers, Timer, Tag, Flash, CheckCircle, BarChart3, Identification } from '@/components/ui/icon-bridge';
 import { Card } from '@/components/ui/card';
 
 export function ReasonerCard({ reasoner, onClick }: ReasonerCardProps) {
@@ -80,7 +80,7 @@ export function ReasonerCard({ reasoner, onClick }: ReasonerCardProps) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-            <Bot className="h-4 w-4" />
+            <ReasonerIcon className="h-4 w-4" aria-hidden />
           </div>
           <div className="min-w-0 space-y-1">
             <h3

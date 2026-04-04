@@ -20,33 +20,7 @@ import { Copy, Check, ShieldAlert, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { retryExecutionWebhook } from "@/services/executionsApi";
 import { formatDuration } from "./RunTrace";
-
-// ─── Simple JSON syntax highlighter ──────────────────────────────────────────
-
-function JsonHighlight({ data }: { data: unknown }) {
-  const json = JSON.stringify(data, null, 2);
-  const highlighted = json
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    // Keys
-    .replace(/"([^"]+)":/g, '<span class="text-blue-400 dark:text-blue-300">"$1"</span>:')
-    // String values
-    .replace(/: "([^"]*)"(,?)/g, ': <span class="text-green-500 dark:text-green-400">"$1"</span>$2')
-    // Number values
-    .replace(/: (-?\d+\.?\d*)(,?)/g, ': <span class="text-amber-500 dark:text-amber-400">$1</span>$2')
-    // Boolean values
-    .replace(/: (true|false)(,?)/g, ': <span class="text-purple-500 dark:text-purple-400">$1</span>$2')
-    // Null values
-    .replace(/: (null)(,?)/g, ': <span class="text-red-400 dark:text-red-300">$1</span>$2');
-
-  return (
-    <pre
-      className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-all"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
-  );
-}
+import { JsonHighlightedPre } from "@/components/ui/json-syntax-highlight";
 
 // ─── Copy button with transient check icon ────────────────────────────────────
 
@@ -168,7 +142,10 @@ export function StepDetail({ executionId }: { executionId: string }) {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="mt-2 rounded-md bg-muted p-3 overflow-auto max-h-64">
-                <JsonHighlight data={execution.input_data} />
+                <JsonHighlightedPre
+                  data={execution.input_data}
+                  className="text-xs font-mono leading-relaxed"
+                />
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -190,7 +167,10 @@ export function StepDetail({ executionId }: { executionId: string }) {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="mt-2 rounded-md bg-muted p-3 overflow-auto max-h-64">
-                <JsonHighlight data={execution.output_data} />
+                <JsonHighlightedPre
+                  data={execution.output_data}
+                  className="text-xs font-mono leading-relaxed"
+                />
               </div>
             </CollapsibleContent>
           </Collapsible>

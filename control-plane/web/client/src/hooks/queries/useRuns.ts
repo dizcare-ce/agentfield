@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getWorkflowsSummary } from "../../services/workflowsApi";
 import type { WorkflowsResponse } from "../../types/workflows";
 
@@ -31,6 +31,7 @@ export function useRuns(filters: RunsFilters = {}) {
 
   return useQuery<WorkflowsResponse>({
     queryKey: ["runs", filters],
+    placeholderData: keepPreviousData,
     queryFn: () =>
       getWorkflowsSummary(
         {

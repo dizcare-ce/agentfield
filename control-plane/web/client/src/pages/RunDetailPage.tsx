@@ -8,11 +8,20 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RotateCcw, Copy, Download } from "lucide-react";
+import {
+  BadgeCheck,
+  ChevronDown,
+  Copy,
+  FileJson,
+  Link2,
+  RotateCcw,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -202,24 +211,63 @@ export function RunDetailPage() {
             Copy ID
           </Button>
 
-          {/* Export dropdown */}
+          {/* Export run provenance (VC chain + audit bundle) */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 text-xs">
-                <Download className="size-3 mr-1" />
-                Export
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-auto min-h-7 gap-2 py-1 px-2.5 text-left shadow-none"
+                aria-label="Export this run: verifiable credential chain or audit JSON"
+              >
+                <BadgeCheck
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-hidden
+                />
+                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="text-xs font-medium leading-none">
+                    Export run
+                  </span>
+                  <span className="text-[10px] font-normal leading-tight text-muted-foreground">
+                    VC chain & audit
+                  </span>
+                </span>
+                <ChevronDown
+                  className="size-3.5 shrink-0 opacity-60"
+                  aria-hidden
+                />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Provenance for this run
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
+                className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
                 onClick={() =>
                   window.open(`/api/v1/did/workflow/${runId}/vc-chain`, "_blank")
                 }
               >
-                Export VC Chain
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Link2 className="size-4 shrink-0" />
+                  VC credential chain
+                </span>
+                <span className="pl-6 text-xs text-muted-foreground">
+                  Open the W3C VC chain in a new tab
+                </span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExportAudit}>
-                Export Audit Log
+              <DropdownMenuItem
+                className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
+                onClick={handleExportAudit}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <FileJson className="size-4 shrink-0" />
+                  Audit bundle (JSON)
+                </span>
+                <span className="pl-6 text-xs text-muted-foreground">
+                  DAG, run id, and export timestamp
+                </span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

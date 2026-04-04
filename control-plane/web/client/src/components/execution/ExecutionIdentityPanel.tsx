@@ -11,6 +11,7 @@ import { VerifiableCredentialBadge } from "../vc";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { downloadExecutionVCBundle } from "../../services/vcApi";
 import { CopyButton } from "../ui/copy-button";
+import { JsonHighlightedPre } from "../ui/json-syntax-highlight";
 
 interface ExecutionIdentityPanelProps {
   execution: WorkflowExecution;
@@ -374,9 +375,10 @@ export function ExecutionIdentityPanel({
                     badge={<Badge variant="secondary" className="text-xs">JSON</Badge>}
                   >
                     <div className="p-4">
-                      <pre className="bg-muted/50 p-4 rounded-lg text-xs font-mono overflow-auto max-h-64">
-                        <code>{JSON.stringify(vcStatus.vc_document, null, 2)}</code>
-                      </pre>
+                      <JsonHighlightedPre
+                        data={vcStatus.vc_document}
+                        className="max-h-64 overflow-auto rounded-lg bg-muted/50 p-4 text-xs"
+                      />
                       <div className="mt-2 flex justify-end">
                         <CopyButton
                           value={JSON.stringify(vcStatus.vc_document, null, 2)}

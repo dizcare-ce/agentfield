@@ -1,4 +1,4 @@
-import { Activity, Bot, Layers } from "lucide-react";
+import { Server, CircleAlert, CircleCheck, Layers } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -59,12 +59,17 @@ export function HealthStrip({ className }: HealthStripProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex items-center gap-1 sm:gap-1.5">
-              <Activity
-                className={cn(
-                  "size-3.5 shrink-0",
-                  llmOk ? "text-green-500" : "text-destructive",
-                )}
-              />
+              {llmOk ? (
+                <CircleCheck
+                  className="size-3.5 shrink-0 text-green-500"
+                  aria-hidden
+                />
+              ) : (
+                <CircleAlert
+                  className="size-3.5 shrink-0 text-destructive"
+                  aria-hidden
+                />
+              )}
               <span className="hidden text-muted-foreground lg:inline">
                 LLM
               </span>
@@ -86,11 +91,12 @@ export function HealthStrip({ className }: HealthStripProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex items-center gap-1 sm:gap-1.5">
-              <Bot
+              <Server
                 className={cn(
                   "size-3.5 shrink-0",
                   onlineCount > 0 ? "text-green-500" : "text-muted-foreground",
                 )}
+                aria-hidden
               />
               <span className="hidden text-muted-foreground lg:inline">
                 Agents

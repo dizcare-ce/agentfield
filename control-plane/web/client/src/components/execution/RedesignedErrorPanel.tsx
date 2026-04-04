@@ -2,7 +2,7 @@ import { AlertTriangle } from "@/components/ui/icon-bridge";
 import type { WorkflowExecution } from "../../types/executions";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { CopyButton } from "../ui/copy-button";
-
+import { JsonHighlightedPre } from "../ui/json-syntax-highlight";
 
 interface RedesignedErrorPanelProps {
   execution: WorkflowExecution;
@@ -105,9 +105,10 @@ export function RedesignedErrorPanel({ execution }: RedesignedErrorPanelProps) {
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                   Context
                 </span>
-                <pre className="text-xs font-mono text-foreground mt-2 p-3 bg-muted/50 rounded-md overflow-x-auto">
-                  {JSON.stringify(errorData.context, null, 2)}
-                </pre>
+                <JsonHighlightedPre
+                  data={errorData.context}
+                  className="mt-2 overflow-x-auto rounded-md bg-muted/50 p-3 text-xs"
+                />
               </div>
             )}
           </div>

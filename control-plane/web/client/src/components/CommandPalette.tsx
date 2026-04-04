@@ -12,7 +12,7 @@ import {
 import {
   LayoutDashboard,
   Play,
-  Bot,
+  Server,
   FlaskConical,
   Settings,
   Search,
@@ -56,7 +56,7 @@ export function CommandPalette() {
             Runs
           </CommandItem>
           <CommandItem onSelect={() => runAction(() => navigate("/agents"))}>
-            <Bot className="mr-2 size-4" />
+            <Server className="mr-2 size-4" />
             Agents
           </CommandItem>
           <CommandItem

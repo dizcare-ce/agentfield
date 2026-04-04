@@ -39,8 +39,8 @@ import {
   AlertTriangle,
   Timer,
   GitCommit,
-  Cpu,
-  Server,
+  ReasonerIcon,
+  AgentNodeIcon,
 } from "@/components/ui/icon-bridge";
 import {
   ResponsiveContainer,
@@ -857,7 +857,7 @@ function ReasonerActivityPanel({
     <Card variant="surface" interactive={false} className="flex h-full flex-col">
       <CardHeader className="space-y-4 p-5 pb-2">
         <CardTitle className="flex items-center gap-2">
-          <Cpu className="h-4 w-4" /> Reasoner activity
+          <ReasonerIcon className="h-4 w-4" /> Reasoner activity
         </CardTitle>
         <div className="grid grid-cols-3 gap-2 text-center text-sm text-muted-foreground uppercase tracking-wide text-muted-foreground">
           <StatusCounter
@@ -906,7 +906,7 @@ function ReasonerRow({ reasoner }: { reasoner: ReasonerSummary }) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Badge variant="metadata" className="inline-flex items-center gap-1">
-            <Zap className="h-3 w-3" />
+            <ReasonerIcon className="h-3 w-3" />
             {reasoner.reasonerId}
           </Badge>
           <Badge
@@ -939,7 +939,7 @@ function ReasonerRow({ reasoner }: { reasoner: ReasonerSummary }) {
               key={agent.id}
               className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/30 px-2 py-1 text-[10px]"
             >
-              <Server className="h-3 w-3" />
+              <AgentNodeIcon className="h-3 w-3" />
               {agent.id}
               {agent.lastHeartbeat && (
                 <span className="text-[9px] text-muted-foreground">

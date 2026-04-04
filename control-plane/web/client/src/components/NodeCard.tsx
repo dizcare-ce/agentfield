@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import {
+  AgentNodeIcon,
   ChevronRight,
-  Code,
-  Tools,
+  ReasonerIcon,
+  SkillIcon,
   Clock,
   Identification,
   Layers,
@@ -317,6 +318,12 @@ const NodeCard = memo(
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span
+                className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground"
+                aria-hidden="true"
+              >
+                <AgentNodeIcon className="size-4 shrink-0" />
+              </span>
               <span className={statusDotClass} aria-hidden="true" />
               <span
                 className={cn(
@@ -444,13 +451,13 @@ const NodeCard = memo(
 
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <Code className="h-4 w-4" aria-hidden="true" />
+            <ReasonerIcon className="h-4 w-4" aria-hidden="true" />
             <span>
               {reasonerCount} reasoner{reasonerCount === 1 ? "" : "s"}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Tools className="h-4 w-4" aria-hidden="true" />
+            <SkillIcon className="h-4 w-4" aria-hidden="true" />
             <span>
               {skillCount} skill{skillCount === 1 ? "" : "s"}
             </span>
