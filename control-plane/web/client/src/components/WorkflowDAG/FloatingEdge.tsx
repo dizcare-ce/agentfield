@@ -60,25 +60,27 @@ function FloatingEdge({ id, source, target, style = {}, data, sourceX = 0, sourc
   const getStatusStyle = () => {
     const baseStyle = {
       stroke: (() => {
+        // CSS vars store raw HSL components (e.g. "142 76% 36%"), so we must
+        // wrap them in hsl() for SVG stroke attributes.
         switch (canonicalStatus) {
           case "succeeded":
-            return "var(--status-success)";
+            return "hsl(var(--status-success))";
           case "failed":
-            return "var(--status-error)";
+            return "hsl(var(--status-error))";
           case "running":
-            return "var(--status-info)";
+            return "hsl(var(--status-info))";
           case "pending":
           case "queued":
-            return "var(--status-warning)";
+            return "hsl(var(--status-warning))";
           default:
-            return "color-mix(in srgb, var(--muted-foreground) 65%, transparent)";
+            return "hsl(var(--muted-foreground))";
         }
       })(),
       strokeWidth: 2,
       strokeLinecap: "round" as const,
       strokeLinejoin: "round" as const,
       filter:
-        "drop-shadow(0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent))",
+        "drop-shadow(0 1px 2px rgba(255,255,255,0.08))",
     };
 
     switch (canonicalStatus) {
@@ -129,17 +131,17 @@ function FloatingEdge({ id, source, target, style = {}, data, sourceX = 0, sourc
   } else if (emphasis === 'focus') {
     edgeStyle.opacity = 1;
     edgeStyle.strokeWidth = Math.max(Number(edgeStyle.strokeWidth ?? 2.5), 3.6);
-    edgeStyle.filter = `${edgeStyle.filter || ''} drop-shadow(0 0 6px color-mix(in srgb, var(--status-success) 45%, transparent))`.trim();
+    edgeStyle.filter = `${edgeStyle.filter || ''} drop-shadow(0 0 6px rgba(34,197,94,0.4))`.trim();
   } else if (emphasis === 'search') {
     edgeStyle.opacity = Math.max(Number(edgeStyle.opacity ?? 0.85), 0.9);
     edgeStyle.strokeWidth = Math.max(Number(edgeStyle.strokeWidth ?? 2.4), 3);
-    edgeStyle.filter = `${edgeStyle.filter || ''} drop-shadow(0 0 6px color-mix(in srgb, var(--status-info) 40%, transparent))`.trim();
+    edgeStyle.filter = `${edgeStyle.filter || ''} drop-shadow(0 0 6px rgba(59,130,246,0.4))`.trim();
   }
 
   // Use edge id in marker id to avoid duplicate-id conflicts across edges
   const markerKey = `${id}-${canonicalStatus}`;
   const enhancedMarkerEnd = `url(#arrowclosed-${markerKey})`;
-  const strokeColor = (edgeStyle.stroke as string) || "var(--muted-foreground)";
+  const strokeColor = (edgeStyle.stroke as string) || "hsl(var(--muted-foreground))";
 
   return (
     <>
