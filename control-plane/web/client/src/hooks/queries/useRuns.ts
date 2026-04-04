@@ -13,6 +13,8 @@ export interface RunsFilters {
   workflow?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  /** When set, polls the runs list (e.g. dashboard while workflows are active). */
+  refetchInterval?: number | false;
 }
 
 export function useRuns(filters: RunsFilters = {}) {
@@ -27,11 +29,13 @@ export function useRuns(filters: RunsFilters = {}) {
     workflow,
     sortBy = "latest_activity",
     sortOrder = "desc",
+    refetchInterval = false,
   } = filters;
 
   return useQuery<WorkflowsResponse>({
     queryKey: ["runs", filters],
     placeholderData: keepPreviousData,
+    refetchInterval,
     queryFn: () =>
       getWorkflowsSummary(
         {

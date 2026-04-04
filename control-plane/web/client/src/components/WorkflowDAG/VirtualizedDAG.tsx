@@ -13,7 +13,8 @@ import {
 } from "@xyflow/react";
 import React, { useCallback, useMemo, useRef, type CSSProperties } from "react";
 
-import { AgentLegend } from "./AgentLegend";
+import { AgentLegend, type AgentLegendLayout } from "./AgentLegend";
+import { WorkflowGraphControls } from "./WorkflowGraphControls";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 
 interface VirtualizedDAGProps {
@@ -29,6 +30,7 @@ interface VirtualizedDAGProps {
   selectedAgent: string | null;
   onExpandGraph?: () => void;
   style?: CSSProperties;
+  graphLayout?: AgentLegendLayout;
 }
 
 export function VirtualizedDAG({
@@ -43,10 +45,11 @@ export function VirtualizedDAG({
   selectedAgent,
   onExpandGraph,
   style,
+  graphLayout = "fullscreen",
 }: VirtualizedDAGProps) {
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
-  const { fitView, setViewport } = useReactFlow();
+  const { fitView, setViewport, zoomIn, zoomOut } = useReactFlow();
 
   const defaultViewport = useMemo(
     () => ({ x: 0, y: 0, zoom: 0.8 }),
@@ -185,6 +188,16 @@ export function VirtualizedDAG({
 
       <Panel position="top-left" className="z-10">
         <AgentLegend
+          layout={graphLayout}
+          onFitView={() =>
+            void fitView({
+              padding: 0.2,
+              includeHiddenNodes: false,
+              duration: 220,
+            })
+          }
+          onZoomIn={() => void zoomIn({ duration: 200 })}
+          onZoomOut={() => void zoomOut({ duration: 200 })}
           onAgentFilter={onAgentFilter}
           selectedAgent={selectedAgent}
           compact={nodes.length <= 20}
@@ -192,6 +205,7 @@ export function VirtualizedDAG({
           onExpandGraph={onExpandGraph}
         />
       </Panel>
+      <WorkflowGraphControls show={graphLayout === "fullscreen"} />
     </ReactFlow>
   );
 }

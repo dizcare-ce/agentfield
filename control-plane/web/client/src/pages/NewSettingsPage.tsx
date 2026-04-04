@@ -43,8 +43,7 @@ import {
 } from "@/services/observabilityWebhookApi";
 import { getDIDSystemStatus } from "@/services/didApi";
 import { formatRelativeTime } from "@/utils/dateFormat";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/ui/v1";
+import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,7 +77,7 @@ function GeneralTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">API Endpoint</CardTitle>
-          <CardDescription>
+          <CardDescription className="text-muted-foreground">
             Point your agents to this URL using the <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">AGENTFIELD_SERVER</code> environment variable.
           </CardDescription>
         </CardHeader>
@@ -94,7 +93,7 @@ function GeneralTab() {
               onClick={handleCopy}
             >
               {copied ? (
-                <CheckCircle className="size-3 text-green-500" />
+                <CheckCircle className="size-3 text-status-success" />
               ) : (
                 <Copy className="size-3" />
               )}
@@ -110,7 +109,9 @@ function GeneralTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">Quick Start</CardTitle>
-          <CardDescription>Configure your agent to connect to this instance.</CardDescription>
+          <CardDescription className="text-muted-foreground">
+            Configure your agent to connect to this instance.
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="rounded-md bg-muted px-3 py-2">
@@ -321,10 +322,10 @@ function ObservabilityTab() {
         </Alert>
       )}
       {success && (
-        <Alert className="border-green-500 bg-green-500/10">
-          <CheckCircle className="h-4 w-4 text-green-500" />
-          <AlertTitle className="text-green-500">Success</AlertTitle>
-          <AlertDescription className="text-green-600">{success}</AlertDescription>
+        <Alert variant="success">
+          <CheckCircle className="h-4 w-4" />
+          <AlertTitle>Success</AlertTitle>
+          <AlertDescription className="text-status-success/90">{success}</AlertDescription>
         </Alert>
       )}
 
@@ -335,7 +336,7 @@ function ObservabilityTab() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Observability Webhook</CardTitle>
-                <CardDescription>
+                <CardDescription className="text-muted-foreground">
                   Forward execution events, agent lifecycle events, and node status updates to an external endpoint.
                 </CardDescription>
               </div>
@@ -380,8 +381,12 @@ function ObservabilityTab() {
               <div className="flex items-center gap-2">
                 <Label htmlFor="obs-secret">HMAC Secret (Optional)</Label>
                 {config?.has_secret && (
-                  <Badge variant="outline" className="text-green-600 border-green-600">
-                    <CheckCircle className="h-3 w-3 mr-1" />
+                  <Badge
+                    variant="outline"
+                    showIcon={false}
+                    className="gap-1 border-status-success/40 text-status-success"
+                  >
+                    <CheckCircle className="h-3 w-3 shrink-0" />
                     Configured
                   </Badge>
                 )}
@@ -485,19 +490,20 @@ function ObservabilityTab() {
         <Card>
           <CardHeader>
             <CardTitle>Forwarder Status</CardTitle>
-            <CardDescription>Real-time status of the event forwarder</CardDescription>
+            <CardDescription className="text-muted-foreground">
+              Real-time status of the event forwarder
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Status</span>
               {status?.enabled ? (
-                <Badge variant="default" className="bg-green-500">
-                  <CheckCircle className="h-3 w-3 mr-1" />
+                <Badge variant="success" className="font-sans tracking-normal">
                   Active
                 </Badge>
               ) : (
-                <Badge variant="secondary">
-                  <XCircle className="h-3 w-3 mr-1" />
+                <Badge variant="secondary" showIcon={false} className="gap-1">
+                  <XCircle className="h-3 w-3 shrink-0" />
                   Inactive
                 </Badge>
               )}
@@ -526,9 +532,10 @@ function ObservabilityTab() {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Dead Letter Queue</span>
                 <span
-                  className={`text-sm font-mono font-medium ${
-                    (status?.dead_letter_count ?? 0) > 0 ? "text-amber-500" : ""
-                  }`}
+                  className={cn(
+                    "text-sm font-mono font-medium",
+                    (status?.dead_letter_count ?? 0) > 0 && "text-status-warning"
+                  )}
                 >
                   {status?.dead_letter_count?.toLocaleString() ?? 0}
                 </span>
@@ -550,7 +557,7 @@ function ObservabilityTab() {
                     size="sm"
                     onClick={handleClearDlq}
                     disabled={redriving || clearingDlq}
-                    className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   >
                     {clearingDlq ? (
                       <Renew className="h-3 w-3 mr-1 animate-spin" />
@@ -575,7 +582,7 @@ function ObservabilityTab() {
             {status?.last_error && (
               <div className="pt-2 border-t">
                 <span className="text-sm text-muted-foreground">Last Error</span>
-                <p className="text-sm text-red-500 mt-1 font-mono text-xs break-all">
+                <p className="mt-1 break-all font-mono text-xs text-status-error">
                   {status.last_error}
                 </p>
               </div>
@@ -601,7 +608,7 @@ function ObservabilityTab() {
       <Card>
         <CardHeader>
           <CardTitle>Event Types</CardTitle>
-          <CardDescription>
+          <CardDescription className="text-muted-foreground">
             All of the following event types are forwarded to your webhook endpoint
           </CardDescription>
         </CardHeader>
@@ -703,15 +710,15 @@ function IdentityTab() {
       <Card>
         <CardHeader>
           <CardTitle>Identity & Trust</CardTitle>
-          <CardDescription>
+          <CardDescription className="text-muted-foreground">
             Cryptographic identity and verifiable credentials configuration.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {/* VC enabled indicator */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Verifiable Credentials</p>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 space-y-1">
+              <Label className="text-sm font-medium">Verifiable Credentials</Label>
               <p className="text-xs text-muted-foreground">Generate W3C VCs for each execution</p>
             </div>
             <Badge variant="secondary">Enabled</Badge>
@@ -720,23 +727,24 @@ function IdentityTab() {
           <Separator />
 
           {/* DID system status */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">DID System Status</p>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 space-y-1">
+              <Label className="text-sm font-medium">DID System Status</Label>
               <p className="text-xs text-muted-foreground">Decentralised identity infrastructure</p>
             </div>
             {loadingDid ? (
-              <Badge variant="outline">
-                <Renew className="h-3 w-3 mr-1 animate-spin" />
+              <Badge variant="outline" showIcon={false} className="gap-1 shrink-0">
+                <Renew className="h-3 w-3 shrink-0 animate-spin" />
                 Checking...
               </Badge>
             ) : didStatus === "ok" || didStatus === "active" ? (
-              <Badge variant="default" className="bg-green-500">
-                <CheckCircle className="h-3 w-3 mr-1" />
+              <Badge variant="success" className="shrink-0 font-sans tracking-normal">
                 Online
               </Badge>
             ) : (
-              <Badge variant="secondary">{didStatus}</Badge>
+              <Badge variant="secondary" className="shrink-0 capitalize">
+                {didStatus}
+              </Badge>
             )}
           </div>
 
@@ -744,22 +752,29 @@ function IdentityTab() {
 
           {/* Server DID */}
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Server DID</p>
+            <Label htmlFor="server-did" className="text-sm font-medium">
+              Server DID
+            </Label>
             {loadingDid ? (
-              <p className="text-xs text-muted-foreground font-mono">Loading...</p>
+              <p className="font-mono text-xs text-muted-foreground">Loading...</p>
             ) : serverDid ? (
               <div className="flex items-center gap-2">
-                <code className="text-xs font-mono bg-muted px-2 py-1 rounded flex-1 break-all">
-                  {serverDid}
-                </code>
+                <Input
+                  id="server-did"
+                  readOnly
+                  value={serverDid}
+                  className="min-h-9 flex-1 font-mono text-xs"
+                />
                 <Button
+                  type="button"
                   variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0"
+                  size="icon-sm"
+                  className="shrink-0"
                   onClick={handleCopyDid}
+                  aria-label={didCopied ? "Copied" : "Copy server DID"}
                 >
                   {didCopied ? (
-                    <CheckCircle className="size-3 text-green-500" />
+                    <CheckCircle className="size-3 text-status-success" />
                   ) : (
                     <Copy className="size-3" />
                   )}
@@ -794,7 +809,9 @@ function AboutTab() {
     <Card>
       <CardHeader>
         <CardTitle>About AgentField</CardTitle>
-        <CardDescription>Platform version and runtime information.</CardDescription>
+        <CardDescription className="text-muted-foreground">
+          Platform version and runtime information.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex justify-between text-sm">

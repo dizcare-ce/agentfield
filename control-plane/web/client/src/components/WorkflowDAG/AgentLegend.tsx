@@ -3,6 +3,9 @@ import {
   ChevronUp,
   Filter,
   Maximize2,
+  Minus,
+  Plus,
+  Scan,
   Search,
 } from "@/components/ui/icon-bridge";
 import type { Node } from "@xyflow/react";
@@ -19,6 +22,11 @@ import {
   CardTitle,
 } from "../ui/card";
 import { Input } from "../ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../ui/popover";
 import { Separator } from "../ui/separator";
 import { AgentBadge, AgentColorDot } from "./AgentBadge";
 
@@ -39,6 +47,8 @@ interface WorkflowDAGNode {
   task_name?: string;
 }
 
+export type AgentLegendLayout = "embedded" | "fullscreen";
+
 interface AgentLegendProps {
   className?: string;
   onAgentFilter?: (agentName: string | null) => void;
@@ -47,6 +57,14 @@ interface AgentLegendProps {
   nodes?: Node[];
   /** Opens the graph in full viewport (parent provides overlay chrome). */
   onExpandGraph?: () => void;
+  /**
+   * `embedded` = small graph pane: dense bar, agents in a popover, viewport actions inline.
+   * `fullscreen` = expanded graph: full card layout (default).
+   */
+  layout?: AgentLegendLayout;
+  onFitView?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
 }
 
 export function AgentLegend({
@@ -56,9 +74,14 @@ export function AgentLegend({
   compact = false,
   nodes = [],
   onExpandGraph,
+  layout = "fullscreen",
+  onFitView,
+  onZoomIn,
+  onZoomOut,
 }: AgentLegendProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [agentsOpen, setAgentsOpen] = useState(false);
 
   const workflowAgents = useMemo(() => {
     const agentSet = new Set<string>();
@@ -101,10 +124,167 @@ export function AgentLegend({
         className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
         onClick={onExpandGraph}
         aria-label="Expand graph to full screen"
+        title="Expand graph"
       >
         <Maximize2 className="size-4" />
       </Button>
     ) : null;
+
+  const hasViewportActions = onFitView && onZoomIn && onZoomOut;
+
+  if (layout === "embedded") {
+    const summaryTitle = agentColors.map((a) => a.name).join(", ");
+
+    const embeddedAgentRow = (agent: (typeof agentColors)[0]) => (
+      <button
+        key={agent.name}
+        type="button"
+        onClick={() => {
+          onAgentFilter?.(selectedAgent === agent.name ? null : agent.name);
+          setAgentsOpen(false);
+        }}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+          "hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          selectedAgent === agent.name && "bg-accent text-accent-foreground",
+        )}
+      >
+        <AgentBadge agentName={agent.name} size="sm" showTooltip={false} />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium leading-tight text-foreground">
+          {agent.name}
+        </span>
+        {selectedAgent === agent.name ? (
+          <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+        ) : null}
+      </button>
+    );
+
+    return (
+      <Card
+        className={cn(
+          "max-w-[min(100%,min(360px,calc(100vw-2rem)))] border-border/80 bg-card/95 shadow-md backdrop-blur-sm",
+          className,
+        )}
+      >
+        <div className="flex items-center gap-0.5 px-1 py-1 sm:gap-1 sm:px-1.5">
+          <Popover open={agentsOpen} onOpenChange={setAgentsOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 gap-1 rounded-md px-1.5 text-muted-foreground hover:text-foreground sm:h-8 sm:px-2",
+                  selectedAgent && "text-foreground ring-1 ring-primary/35",
+                )}
+                aria-label={`Agents: ${agentColors.length}. ${summaryTitle}`}
+                title={summaryTitle}
+              >
+                <Filter className="size-3 shrink-0 opacity-70 sm:size-3.5" />
+                <div className="flex items-center pr-0.5" aria-hidden>
+                  <div className="flex shrink-0 -space-x-1">
+                    {agentColors.slice(0, 5).map((agent) => (
+                      <AgentColorDot
+                        key={agent.name}
+                        agentName={agent.name}
+                        size={9}
+                        className="ring-2 ring-card"
+                      />
+                    ))}
+                  </div>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className="h-4 min-w-4 shrink-0 px-1 text-[9px] font-semibold tabular-nums sm:h-5 sm:text-[10px]"
+                >
+                  {agentColors.length}
+                </Badge>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-2" align="start" sideOffset={6}>
+              <p className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Agents
+              </p>
+              <div className="max-h-52 space-y-0.5 overflow-y-auto">
+                {agentColors.map((agent) => embeddedAgentRow(agent))}
+              </div>
+              {selectedAgent ? (
+                <div className="mt-2 border-t border-border/60 pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-full text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      onAgentFilter?.(null);
+                      setAgentsOpen(false);
+                    }}
+                  >
+                    Clear filter
+                  </Button>
+                </div>
+              ) : null}
+            </PopoverContent>
+          </Popover>
+
+          <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+
+          <div className="ml-auto flex shrink-0 items-center gap-px">
+            {hasViewportActions ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+                  onClick={onFitView}
+                  aria-label="Fit graph to view"
+                  title="Fit graph to view"
+                >
+                  <Scan className="size-3.5 sm:size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+                  onClick={onZoomIn}
+                  aria-label="Zoom in"
+                  title="Zoom in"
+                >
+                  <Plus className="size-3.5 sm:size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+                  onClick={onZoomOut}
+                  aria-label="Zoom out"
+                  title="Zoom out"
+                >
+                  <Minus className="size-3.5 sm:size-4" />
+                </Button>
+              </>
+            ) : null}
+            {onExpandGraph != null ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground sm:h-8 sm:w-8"
+                onClick={onExpandGraph}
+                aria-label="Expand graph to full screen"
+                title="Expand graph"
+              >
+                <Maximize2 className="size-3.5 sm:size-4" />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   const agentRow = (agent: (typeof agentColors)[0]) => (
     <button
@@ -139,7 +319,7 @@ export function AgentLegend({
           className,
         )}
       >
-        <CardHeader className="flex flex-row items-center gap-2 space-y-0 border-b border-border/60 px-3 py-2.5">
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0 border-b border-border/60 p-0 px-3 py-2.5">
           <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
             <Filter className="size-3.5 shrink-0 text-muted-foreground" />
             <CardTitle className="truncate text-center text-sm font-semibold leading-none text-foreground">
@@ -151,7 +331,7 @@ export function AgentLegend({
           </div>
           {expandButton}
         </CardHeader>
-        <CardContent className="space-y-1 p-2">
+        <CardContent className="space-y-1 p-2 pt-2">
           {agentColors.map((agent) => agentRow(agent))}
         </CardContent>
         {selectedAgent ? (
@@ -178,7 +358,7 @@ export function AgentLegend({
         className,
       )}
     >
-      <CardHeader className="flex flex-row items-center gap-2 space-y-0 border-b border-border/60 px-3 py-2.5">
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0 border-b border-border/60 p-0 px-3 py-2.5">
         <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
           <Filter className="size-3.5 shrink-0 text-muted-foreground" />
           <CardTitle className="text-center text-sm font-semibold leading-none text-foreground">

@@ -18,13 +18,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { AgentLegend } from "./AgentLegend";
+import { WorkflowGraphControls } from "./WorkflowGraphControls";
 import FloatingConnectionLine from "./FloatingConnectionLine";
 import FloatingEdge from "./FloatingEdge";
 import { NodeDetailSidebar } from "./NodeDetailSidebar";
 import { VirtualizedDAG } from "./VirtualizedDAG";
 import { WorkflowNode } from "./WorkflowNode";
 import { LayoutManager, type AllLayoutType } from "./layouts/LayoutManager";
-import { WorkflowDeckGLView } from "./DeckGLView";
+import {
+  WorkflowDeckGLView,
+  WorkflowDeckGraphControls,
+  type WorkflowDeckGLViewHandle,
+} from "./DeckGLView";
 import { buildDeckGraph, type DeckGraphData } from "./DeckGLGraph";
 
 import { getWorkflowDAG } from "../../services/workflowsApi";
@@ -375,7 +380,8 @@ function WorkflowDAGViewerInner({
     externalLoading !== undefined ? externalLoading : internalLoading;
   const error = externalError !== undefined ? externalError : internalError;
 
-  const { fitView, setViewport, getNodes, fitBounds } = useReactFlow();
+  const { fitView, setViewport, getNodes, fitBounds, zoomIn, zoomOut } =
+    useReactFlow();
   const viewportRef = useRef<{ x: number; y: number; zoom: number }>({
     x: 0,
     y: 0,
@@ -1309,6 +1315,24 @@ function decorateEdgesWithStatus(
 
   const shouldUseDeckGL = nodes.length >= LARGE_GRAPH_LAYOUT_THRESHOLD;
 
+  const graphLayout = graphExpanded ? "fullscreen" : "embedded";
+
+  const handleFitView = useCallback(() => {
+    void fitView({
+      padding: 0.2,
+      includeHiddenNodes: false,
+      duration: 220,
+    });
+  }, [fitView]);
+
+  const handleZoomIn = useCallback(() => {
+    void zoomIn({ duration: 200 });
+  }, [zoomIn]);
+
+  const handleZoomOut = useCallback(() => {
+    void zoomOut({ duration: 200 });
+  }, [zoomOut]);
+
   // Apply viewport only after React Flow has committed measured nodes. Running fitView /
   // setViewport inside processDAGData right after setNodes() races the render and often
   // fits an empty graph, leaving the real nodes off-screen.
@@ -1366,6 +1390,7 @@ function decorateEdgesWithStatus(
   ]);
 
   const flowContainerRef = useRef<HTMLDivElement>(null);
+  const deckGlRef = useRef<WorkflowDeckGLViewHandle>(null);
   const lastFlowHeightRef = useRef(0);
 
   // React Flow measures the pane on mount; if the flex parent had no height yet (e.g. after
@@ -1432,13 +1457,24 @@ function decorateEdgesWithStatus(
                 }}
               >
                 <WorkflowDeckGLView
+                  ref={deckGlRef}
                   nodes={deckGraphData.nodes}
                   edges={deckGraphData.edges}
                   onNodeClick={handleDeckNodeClick}
                 />
 
+                {graphExpanded ? (
+                  <div className="absolute bottom-4 right-4 z-30">
+                    <WorkflowDeckGraphControls deckRef={deckGlRef} />
+                  </div>
+                ) : null}
+
                 <div className="absolute left-4 top-4 z-30">
                   <AgentLegend
+                    layout={graphLayout}
+                    onFitView={() => deckGlRef.current?.fitToContent()}
+                    onZoomIn={() => deckGlRef.current?.zoomIn()}
+                    onZoomOut={() => deckGlRef.current?.zoomOut()}
                     onAgentFilter={handleAgentFilter}
                     selectedAgent={selectedAgent}
                     compact={false}
@@ -1510,6 +1546,7 @@ function decorateEdgesWithStatus(
                 style={{ width: "100%", height: "100%", minHeight: 280 }}
                 threshold={PERFORMANCE_THRESHOLD}
                 workflowId={workflowId}
+                graphLayout={graphLayout}
                 onAgentFilter={handleAgentFilter}
                 selectedAgent={selectedAgent}
                 onExpandGraph={() => setGraphExpanded(true)}
@@ -1561,6 +1598,10 @@ function decorateEdgesWithStatus(
                 {/* Agent Legend */}
                 <Panel position="top-left" className="z-30">
                   <AgentLegend
+                    layout={graphLayout}
+                    onFitView={handleFitView}
+                    onZoomIn={handleZoomIn}
+                    onZoomOut={handleZoomOut}
                     onAgentFilter={handleAgentFilter}
                     selectedAgent={selectedAgent}
                     compact={nodes.length <= 20}
@@ -1568,6 +1609,7 @@ function decorateEdgesWithStatus(
                     onExpandGraph={() => setGraphExpanded(true)}
                   />
                 </Panel>
+                <WorkflowGraphControls show={graphExpanded} />
               </ReactFlow>
             )}
             </div>
