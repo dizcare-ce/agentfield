@@ -29,7 +29,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { Upload, ShieldCheck, AlertTriangle, Info } from "lucide-react";
+import { Upload, FileCheck2, AlertTriangle, Info } from "lucide-react";
 
 export function VerifyProvenancePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,14 +97,14 @@ export function VerifyProvenancePage() {
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold tracking-tight md:text-xl">
-            Verify provenance
+            Audit provenance
           </h1>
           <HoverCard openDelay={200} closeDelay={80}>
             <HoverCardTrigger asChild>
               <button
                 type="button"
                 className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="How verification works"
+                aria-label="How audit works"
               >
                 <Info className="size-4" aria-hidden />
               </button>
@@ -164,7 +164,7 @@ export function VerifyProvenancePage() {
               type="file"
               accept=".json,application/json"
               className="sr-only"
-              aria-label="Browse for JSON file to verify"
+              aria-label="Browse for JSON file to audit"
               onChange={onFileInputChange}
             />
             <button
@@ -216,7 +216,7 @@ export function VerifyProvenancePage() {
               disabled={loading}
               className="w-full sm:w-auto"
             >
-              {loading ? "Verifying…" : "Verify"}
+              {loading ? "Running audit…" : "Run audit"}
             </Button>
             {error && (
               <Alert variant="destructive">
@@ -231,7 +231,7 @@ export function VerifyProvenancePage() {
         <Card className="border-border/80 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
+              <FileCheck2 className="size-4 text-muted-foreground" aria-hidden />
               Result
             </CardTitle>
             <CardDescription>
@@ -241,18 +241,18 @@ export function VerifyProvenancePage() {
           <CardContent className="flex flex-col gap-4">
             {!result && !loading && (
               <p className="text-sm text-muted-foreground">
-                Run verification to see issuer resolution, per-execution signature status, tamper
-                signals, and scores.
+                Run an audit to see issuer resolution, per-execution signature status, tamper signals,
+                and scores.
               </p>
             )}
             {loading && (
-              <p className="text-sm text-muted-foreground">Running verification…</p>
+              <p className="text-sm text-muted-foreground">Running audit…</p>
             )}
             {result && (
               <>
                 <Alert variant={result.valid ? "default" : "destructive"}>
                   <AlertTitle className="flex flex-wrap items-center gap-2">
-                    {result.valid ? "Verification passed" : "Verification failed"}
+                    {result.valid ? "Audit passed" : "Audit failed"}
                     <Badge variant={result.valid ? "secondary" : "destructive"}>
                       {result.type}
                     </Badge>
@@ -384,7 +384,7 @@ export function VerifyProvenancePage() {
         <Link to="/runs" className="underline underline-offset-2">
           Runs
         </Link>{" "}
-        → Export provenance → download, then verify here.
+        → Export provenance → download, then audit here.
       </p>
     </div>
   );

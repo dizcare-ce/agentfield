@@ -4,8 +4,8 @@ import {
   Server,
   FlaskConical,
   Settings,
-  Shield,
-  ShieldCheck,
+  KeyRound,
+  FileCheck2,
 } from "lucide-react";
 
 export const navigation = [
@@ -30,14 +30,14 @@ export const navigation = [
     path: "/playground",
   },
   {
-    title: "Verify",
-    icon: ShieldCheck,
-    path: "/verify",
+    title: "Access management",
+    icon: KeyRound,
+    path: "/access",
   },
   {
-    title: "Access management",
-    icon: Shield,
-    path: "/access",
+    title: "Audit",
+    icon: FileCheck2,
+    path: "/verify",
   },
   {
     title: "Settings",
