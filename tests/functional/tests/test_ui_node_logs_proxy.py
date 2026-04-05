@@ -9,6 +9,7 @@ import json
 
 import pytest
 
+from agentfield import node_logs
 from utils import run_agent_server, unique_node_id
 
 
@@ -21,6 +22,7 @@ async def test_ui_proxies_node_process_logs(async_http_client, make_test_agent):
     @agent.reasoner()
     async def noisy():
         print("log-proxy-marker-stdout", flush=True)
+        node_logs.get_ring().append("stdout", "log-proxy-marker-stdout", 64 * 1024)
         return {"ok": True}
 
     async with run_agent_server(agent):
