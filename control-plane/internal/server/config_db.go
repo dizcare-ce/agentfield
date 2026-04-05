@@ -94,6 +94,21 @@ func mergeDBConfig(target, dbCfg *config.Config) {
 	if dbCfg.AgentField.NodeLogProxy.MaxTailLines != 0 {
 		target.AgentField.NodeLogProxy.MaxTailLines = dbCfg.AgentField.NodeLogProxy.MaxTailLines
 	}
+	if dbCfg.AgentField.ExecutionLogs.RetentionPeriod != 0 {
+		target.AgentField.ExecutionLogs.RetentionPeriod = dbCfg.AgentField.ExecutionLogs.RetentionPeriod
+	}
+	if dbCfg.AgentField.ExecutionLogs.MaxEntriesPerExecution != 0 {
+		target.AgentField.ExecutionLogs.MaxEntriesPerExecution = dbCfg.AgentField.ExecutionLogs.MaxEntriesPerExecution
+	}
+	if dbCfg.AgentField.ExecutionLogs.MaxTailEntries != 0 {
+		target.AgentField.ExecutionLogs.MaxTailEntries = dbCfg.AgentField.ExecutionLogs.MaxTailEntries
+	}
+	if dbCfg.AgentField.ExecutionLogs.StreamIdleTimeout != 0 {
+		target.AgentField.ExecutionLogs.StreamIdleTimeout = dbCfg.AgentField.ExecutionLogs.StreamIdleTimeout
+	}
+	if dbCfg.AgentField.ExecutionLogs.MaxStreamDuration != 0 {
+		target.AgentField.ExecutionLogs.MaxStreamDuration = dbCfg.AgentField.ExecutionLogs.MaxStreamDuration
+	}
 
 	// Features
 	if dbCfg.Features.DID.Method != "" {
