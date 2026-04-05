@@ -16,7 +16,7 @@ import {
 import { AppSidebar } from "./AppSidebar";
 import { HealthStrip } from "./HealthStrip";
 import { CommandPalette } from "./CommandPalette";
-import { useSSEQuerySync } from "@/hooks/useSSEQuerySync";
+import { SSESyncProvider } from "@/hooks/useSSEQuerySync";
 
 const routeNames: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -130,13 +130,17 @@ function resolveHeaderCrumbs(
 }
 
 export function AppLayout() {
+  return (
+    <SSESyncProvider>
+      <AppLayoutShell />
+    </SSESyncProvider>
+  );
+}
+
+function AppLayoutShell() {
   const location = useLocation();
   const params = useParams();
   const header = resolveHeaderCrumbs(location.pathname, params);
-
-  // Wire SSE events to TanStack Query cache invalidation so all pages
-  // auto-refresh when runs or agent status changes.
-  useSSEQuerySync();
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -205,3 +209,4 @@ export function AppLayout() {
     </SidebarProvider>
   );
 }
+

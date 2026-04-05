@@ -1,6 +1,8 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { getWorkflowsSummary } from "../../services/workflowsApi";
 import type { WorkflowsResponse } from "../../types/workflows";
+import { useSSESync } from "../useSSEQuerySync";
 
 export interface RunsFilters {
   timeRange?: string;
@@ -18,6 +20,7 @@ export interface RunsFilters {
 }
 
 export function useRuns(filters: RunsFilters = {}) {
+  const { anyConnected } = useSSESync();
   const {
     timeRange,
     status,
@@ -29,8 +32,18 @@ export function useRuns(filters: RunsFilters = {}) {
     workflow,
     sortBy = "latest_activity",
     sortOrder = "desc",
-    refetchInterval = false,
+    refetchInterval: explicitRefetch,
   } = filters;
+
+  const refetchInterval = useMemo(() => {
+    if (explicitRefetch !== undefined) {
+      if (typeof explicitRefetch === "number") {
+        return anyConnected ? explicitRefetch : Math.min(explicitRefetch, 5_000);
+      }
+      return explicitRefetch;
+    }
+    return anyConnected ? false : 6_000;
+  }, [explicitRefetch, anyConnected]);
 
   return useQuery<WorkflowsResponse>({
     queryKey: ["runs", filters],

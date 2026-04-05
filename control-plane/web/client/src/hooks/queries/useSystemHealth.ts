@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getGlobalApiKey } from "../../services/api";
+import { useSSESync } from "../useSSEQuerySync";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/ui/v1";
 
@@ -50,17 +51,19 @@ async function fetchQueueStatus(): Promise<QueueStatusResponse> {
 }
 
 export function useLLMHealth() {
+  const { anyConnected } = useSSESync();
   return useQuery<LLMHealthResponse>({
     queryKey: ["llm-health"],
     queryFn: fetchLLMHealth,
-    refetchInterval: 5_000, // 5s
+    refetchInterval: anyConnected ? 5_000 : 3_000,
   });
 }
 
 export function useQueueStatus() {
+  const { anyConnected } = useSSESync();
   return useQuery<QueueStatusResponse>({
     queryKey: ["queue-status"],
     queryFn: fetchQueueStatus,
-    refetchInterval: 5_000,
+    refetchInterval: anyConnected ? 5_000 : 3_000,
   });
 }

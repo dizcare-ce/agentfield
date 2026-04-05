@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useSSESync } from "@/hooks/useSSEQuerySync";
 import { AlertTriangle, ArrowRight, CheckCircle, Layers } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -545,6 +546,7 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
 
 export function NewDashboardPage() {
   const navigate = useNavigate();
+  const { anyConnected } = useSSESync();
 
   const runsQuery = useRuns({
     timeRange: "all",
@@ -561,7 +563,7 @@ export function NewDashboardPage() {
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: getDashboardSummary,
-    refetchInterval: 30_000,
+    refetchInterval: anyConnected ? 30_000 : 15_000,
   });
 
   const unhealthyEndpoints =

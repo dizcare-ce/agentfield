@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getNodesSummary } from "../../services/api";
 import type { AgentNodeSummary } from "../../types/agentfield";
+import { useSSESync } from "../useSSEQuerySync";
 
 interface NodesSummaryResponse {
   nodes: AgentNodeSummary[];
@@ -8,9 +9,10 @@ interface NodesSummaryResponse {
 }
 
 export function useAgents() {
+  const { anyConnected } = useSSESync();
   return useQuery<NodesSummaryResponse>({
     queryKey: ["agents"],
     queryFn: () => getNodesSummary(),
-    refetchInterval: 10_000, // 10s for health updates
+    refetchInterval: anyConnected ? 10_000 : 5_000,
   });
 }
