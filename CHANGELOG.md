@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.64-rc.3] - 2026-04-05
+
+
+### Changed
+
+- Refactor: extract shared ErrorResponse helper to handlers/errors.go (#338) (42ddf3b)
+
+
+
+### Documentation
+
+- Docs: update README UTM links with granular tracking (#328)
+
+* docs: update all README UTM links with granular tracking IDs
+
+Replace generic utm_medium=referral with unique utm_id per link
+and add utm_campaign=github-readme consistently across all 35
+outbound links. This enables granular click attribution in analytics
+to see exactly which README section drives traffic.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: track UTM links reference file in assets
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: add HTML comment referencing UTM links file
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: update UTM links CSV with target URLs
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: clarify HTML comment about UTM link requirements
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: note that CSV target URLs are for reference only
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: OG <oktaygoktas@users.noreply.github.com>
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (6e4f258)
+
 ## [0.1.64-rc.2] - 2026-04-05
 
 
