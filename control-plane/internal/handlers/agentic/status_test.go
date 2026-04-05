@@ -115,6 +115,15 @@ func (m *mockStatusStorage) ListExecutionWebhookEventsBatch(ctx context.Context,
 func (m *mockStatusStorage) StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error {
 	return nil
 }
+func (m *mockStatusStorage) StoreExecutionLogEntry(ctx context.Context, entry *types.ExecutionLogEntry) error {
+	return nil
+}
+func (m *mockStatusStorage) ListExecutionLogEntries(ctx context.Context, executionID string, afterSeq *int64, limit int, levels []string, nodeIDs []string, sources []string, query string) ([]*types.ExecutionLogEntry, error) {
+	return nil, nil
+}
+func (m *mockStatusStorage) PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error {
+	return nil
+}
 func (m *mockStatusStorage) ListWorkflowExecutionEvents(ctx context.Context, executionID string, afterSeq *int64, limit int) ([]*types.WorkflowExecutionEvent, error) {
 	return nil, nil
 }
@@ -423,6 +432,9 @@ func (m *mockStatusStorage) GetExecutionEventBus() *events.ExecutionEventBus {
 }
 func (m *mockStatusStorage) GetWorkflowExecutionEventBus() *events.EventBus[*types.WorkflowExecutionEvent] {
 	return nil
+}
+func (m *mockStatusStorage) GetExecutionLogEventBus() *events.EventBus[*types.ExecutionLogEntry] {
+	return events.NewEventBus[*types.ExecutionLogEntry]()
 }
 func (m *mockStatusStorage) ListWorkflowVCStatusSummaries(ctx context.Context, workflowIDs []string) ([]*types.WorkflowVCStatusAggregation, error) {
 	return nil, nil

@@ -183,6 +183,15 @@ func (m *mockStorage) ListExecutionWebhookEventsBatch(ctx context.Context, execu
 func (m *mockStorage) StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error {
 	return nil
 }
+func (m *mockStorage) StoreExecutionLogEntry(ctx context.Context, entry *types.ExecutionLogEntry) error {
+	return nil
+}
+func (m *mockStorage) ListExecutionLogEntries(ctx context.Context, executionID string, afterSeq *int64, limit int, levels []string, nodeIDs []string, sources []string, query string) ([]*types.ExecutionLogEntry, error) {
+	return nil, nil
+}
+func (m *mockStorage) PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error {
+	return nil
+}
 func (m *mockStorage) ListWorkflowExecutionEvents(ctx context.Context, executionID string, afterSeq *int64, limit int) ([]*types.WorkflowExecutionEvent, error) {
 	return nil, nil
 }
@@ -311,6 +320,9 @@ func (m *mockStorage) PublishMemoryChange(ctx context.Context, event types.Memor
 func (m *mockStorage) GetExecutionEventBus() *events.ExecutionEventBus { return nil }
 func (m *mockStorage) GetWorkflowExecutionEventBus() *events.EventBus[*types.WorkflowExecutionEvent] {
 	return nil
+}
+func (m *mockStorage) GetExecutionLogEventBus() *events.EventBus[*types.ExecutionLogEntry] {
+	return events.NewEventBus[*types.ExecutionLogEntry]()
 }
 func (m *mockStorage) StoreDID(ctx context.Context, did string, didDocument, publicKey, privateKeyRef, derivationPath string) error {
 	return nil
