@@ -4,6 +4,7 @@ export * from './router/AgentRouter.js';
 export * from './context/ExecutionContext.js';
 export * from './context/ReasonerContext.js';
 export * from './context/SkillContext.js';
+export * from './observability/ExecutionLogger.js';
 export * from './ai/AIClient.js';
 export * from './ai/ToolCalling.js';
 export * from './memory/MemoryInterface.js';
