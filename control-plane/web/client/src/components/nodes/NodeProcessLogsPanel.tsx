@@ -19,10 +19,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SearchBar } from "@/components/ui/SearchBar";
 import {
   AlertCircle,
   ChevronDown,
@@ -43,6 +43,7 @@ import {
   type NodeLogEntry,
 } from "@/services/api";
 import { HintIcon } from "@/components/authorization/HintIcon";
+import { observabilityStyles } from "@/components/execution/observabilityStyles";
 
 const MAX_BUFFER = 5000;
 const DEFAULT_TAIL = "200";
@@ -363,8 +364,8 @@ export function NodeProcessLogsPanel({
   }, [filtered.length, live]);
 
   return (
-    <Card className={cn("border-border/80 shadow-sm", className)}>
-      <CardHeader className="space-y-4 p-4 pb-3 sm:p-6 sm:pb-3">
+    <Card className={cn(observabilityStyles.card, className)}>
+      <CardHeader className={observabilityStyles.processHeader}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -384,7 +385,7 @@ export function NodeProcessLogsPanel({
           </div>
 
           {/* Narrow: 2×2 grid + overflow menu. md+: single toolbar row (shadcn button group). */}
-          <div className="flex w-full min-w-0 flex-col gap-2 lg:w-auto lg:shrink-0 lg:max-w-full">
+          <div className={observabilityStyles.processActions}>
             <div className="hidden w-full grid-cols-2 gap-2 min-[400px]:grid md:hidden">
               <Button
                 type="button"
@@ -598,15 +599,15 @@ export function NodeProcessLogsPanel({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
-        <div className="grid gap-3 lg:grid-cols-[max-content_max-content_minmax(18rem,1fr)] lg:items-end">
+      <CardContent className={observabilityStyles.processContent}>
+        <div className={observabilityStyles.compactToolbarGrid}>
           <div
-            className="min-w-0 space-y-1.5"
+            className={observabilityStyles.filterGroup}
             role="group"
             aria-label="Filter by stdout or stderr"
           >
-            <div className="flex items-center gap-1">
-              <p className="text-xs font-medium text-muted-foreground">Stream</p>
+            <div className={observabilityStyles.filterLabelRow}>
+              <p className={observabilityStyles.filterLabel}>Stream</p>
               <HintIcon label="What the stream filter does">
                 Choose which process stream to inspect. Structured SDK logs usually appear on
                 stdout, while plain failures and stack traces often show up on stderr.
@@ -616,7 +617,7 @@ export function NodeProcessLogsPanel({
               value={streamFilter}
               onValueChange={(v) => setStreamFilter(v as StreamFilter)}
               size="sm"
-              className="w-full lg:w-auto"
+              className="w-full xl:w-auto"
               options={[
                 {
                   value: "all",
@@ -635,12 +636,12 @@ export function NodeProcessLogsPanel({
           </div>
 
           <div
-            className="min-w-0 space-y-1.5"
+            className={observabilityStyles.filterGroup}
             role="group"
             aria-label="Filter by line format"
           >
-            <div className="flex items-center gap-1">
-              <p className="text-xs font-medium text-muted-foreground">Format</p>
+            <div className={observabilityStyles.filterLabelRow}>
+              <p className={observabilityStyles.filterLabel}>Format</p>
               <HintIcon label="What the format filter does">
                 Structured lines are SDK-emitted JSON events with execution metadata. Plain lines
                 are raw stdout or stderr text from the node process.
@@ -650,7 +651,7 @@ export function NodeProcessLogsPanel({
               value={formatFilter}
               onValueChange={(v) => setFormatFilter(v as FormatFilter)}
               size="sm"
-              className="w-full lg:w-auto"
+              className="w-full xl:w-auto"
               options={[
                 {
                   value: "all",
@@ -668,33 +669,34 @@ export function NodeProcessLogsPanel({
             />
           </div>
 
-          <div className="min-w-0 space-y-1.5">
+          <div className={observabilityStyles.filterGroup}>
             <Label
               htmlFor={`${nodeId}-log-text-filter`}
-              className="text-xs text-muted-foreground"
+              className={observabilityStyles.filterLabel}
             >
               Search
             </Label>
-            <Input
+            <SearchBar
               id={`${nodeId}-log-text-filter`}
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={setFilter}
               placeholder="Text, execution, run, event, reasoner, source…"
-              className="h-9 border-border/80 bg-background text-sm"
+              size="sm"
+              inputClassName="border-border/80 bg-background"
               aria-label="Filter log lines by text"
             />
           </div>
         </div>
 
         {streamCounts.other > 0 ? (
-          <p className="text-[11px] text-muted-foreground">
+          <p className={observabilityStyles.helperText}>
             {streamCounts.other} line{streamCounts.other === 1 ? "" : "s"} on other streams, shown
             only in <span className="font-medium">All</span>.
           </p>
         ) : null}
 
         {filter.trim() !== "" || streamFilter !== "all" || formatFilter !== "all" ? (
-          <p className="text-[11px] text-muted-foreground">
+          <p className={observabilityStyles.helperText}>
             {filter.trim() !== "" ? (
               <>
                 <span className="font-medium tabular-nums text-foreground">
@@ -741,9 +743,9 @@ export function NodeProcessLogsPanel({
 
         <ScrollArea
           ref={scrollRef}
-          className="h-[min(420px,50vh)] w-full rounded-md border border-border/80 bg-muted/20"
+          className={observabilityStyles.processScroll}
         >
-          <div className="p-1.5 text-[10px] leading-tight sm:text-[11px]">
+          <div className={observabilityStyles.processScrollInner}>
             {filtered.length === 0 && !loadingTail ? (
               <p className="px-2 py-6 text-center text-muted-foreground text-xs">
                 No log lines yet. Try Refresh, or enable live tail if the agent
@@ -794,11 +796,11 @@ export function NodeProcessLogsPanel({
                     >
                       <div
                         className={cn(
-                          "grid grid-cols-1 items-start gap-x-2 gap-y-1 px-2 py-1 sm:grid-cols-[8.5rem_min-content_minmax(0,1fr)_auto] sm:gap-y-0",
+                          observabilityStyles.processStructuredRow,
                           ns === "stderr" && "bg-destructive/[0.04]"
                         )}
                       >
-                        <div className="flex min-w-0 max-w-full flex-nowrap items-baseline gap-x-1.5 truncate tabular-nums text-muted-foreground sm:w-full sm:max-w-[8.5rem]">
+                        <div className={cn(observabilityStyles.processTimestamp, "sm:w-full sm:max-w-[8.5rem]")}>
                           <time
                             dateTime={e.ts}
                             className="min-w-0 shrink truncate text-muted-foreground"
@@ -839,7 +841,7 @@ export function NodeProcessLogsPanel({
                               ) : null}
                             </span>
                           </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] text-muted-foreground">
+                          <div className={observabilityStyles.processMeta}>
                             {metadata.map((item) => (
                               <span key={`${e.seq}-${item.label}`} className="font-mono">
                                 {item.label}:{item.value}
@@ -849,7 +851,7 @@ export function NodeProcessLogsPanel({
                         </div>
 
                         {hasStructuredDetails(structured) ? (
-                          <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                          <CollapsibleTrigger className={observabilityStyles.detailTrigger}>
                             <ChevronRight className="h-3 w-3 group-data-[state=open]:hidden" />
                             <ChevronDown className="hidden h-3 w-3 group-data-[state=open]:block" />
                             details
@@ -872,11 +874,11 @@ export function NodeProcessLogsPanel({
                       key={`${e.seq}-${e.ts}-${i}`}
                       title={title}
                       className={cn(
-                        "grid grid-cols-1 items-start gap-x-2 gap-y-1 border-b border-border/30 py-1 last:border-b-0 sm:grid-cols-[9rem_min-content_minmax(0,1fr)] sm:gap-y-0 sm:py-0.5",
+                        observabilityStyles.processRow,
                         ns === "stderr" && "bg-destructive/[0.04]"
                       )}
                     >
-                      <div className="flex min-w-0 max-w-full flex-nowrap items-baseline gap-x-1.5 truncate tabular-nums text-muted-foreground sm:w-full sm:max-w-[9rem]">
+                      <div className={cn(observabilityStyles.processTimestamp, "sm:w-full sm:max-w-[9rem]")}>
                         <time
                           dateTime={e.ts}
                           className="min-w-0 shrink truncate text-muted-foreground"

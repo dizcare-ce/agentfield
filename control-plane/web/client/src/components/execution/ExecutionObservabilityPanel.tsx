@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { NodeProcessLogsPanel } from "@/components/nodes";
 import { getExecutionLogs, streamExecutionLogs } from "@/services/executionsApi";
 import type { ExecutionLogEntry, WorkflowExecution } from "@/types/executions";
+import { observabilityStyles } from "./observabilityStyles";
 
 const DEFAULT_TAIL = 250;
 const MAX_BUFFER = 1000;
@@ -219,9 +220,9 @@ export function ExecutionObservabilityPanel({
   );
 
   return (
-    <Card className={cn("border-border/80 shadow-sm", className)}>
-      <CardContent className="space-y-4 px-4 py-4 sm:px-6 sm:py-6">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] lg:items-center">
+    <Card className={cn(observabilityStyles.card, className)}>
+      <CardContent className={observabilityStyles.cardContent}>
+        <div className={observabilityStyles.toolbarGrid}>
           <SearchBar
             value={search}
             onChange={setSearch}
@@ -238,7 +239,7 @@ export function ExecutionObservabilityPanel({
               ...availableLevels.map((value) => ({ value, label: value })),
             ]}
             placeholder="All levels"
-            className="w-full lg:w-auto"
+            className="w-full xl:w-auto"
           />
 
           <FilterCombobox
@@ -250,7 +251,7 @@ export function ExecutionObservabilityPanel({
               ...availableNodeIds.map((value) => ({ value, label: value })),
             ]}
             placeholder="All nodes"
-            className="w-full lg:w-auto"
+            className="w-full xl:w-auto"
           />
 
           <FilterCombobox
@@ -262,10 +263,10 @@ export function ExecutionObservabilityPanel({
               ...availableSources.map((value) => ({ value, label: value })),
             ]}
             placeholder="All sources"
-            className="w-full lg:w-auto"
+            className="w-full xl:w-auto"
           />
 
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <div className={observabilityStyles.toolbarActions}>
             <Button
               variant="outline"
               size="sm"
@@ -305,9 +306,9 @@ export function ExecutionObservabilityPanel({
           </Alert>
         ) : null}
 
-        <div className="rounded-xl border border-border/70 bg-muted/20 p-3 sm:p-4">
-          <div className="mb-3 flex flex-col gap-2 border-b border-border/60 pb-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+        <div className={observabilityStyles.surface}>
+          <div className={observabilityStyles.summaryBar}>
+            <div className={observabilityStyles.summaryFilters}>
               <span className="font-medium">
                 Showing {logSummary.visible} of {logSummary.total} events
               </span>
@@ -333,7 +334,7 @@ export function ExecutionObservabilityPanel({
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className={observabilityStyles.summaryStats}>
               <Badge variant="secondary" className="font-mono">
                 {logSummary.total} events
               </Badge>
@@ -355,45 +356,45 @@ export function ExecutionObservabilityPanel({
             </div>
           </div>
 
-          <ScrollArea className="h-[30rem] pr-3">
+          <ScrollArea className={cn("h-[30rem]", observabilityStyles.scrollArea)}>
             {loading ? (
-              <div className="flex h-full min-h-[16rem] items-center justify-center text-sm text-muted-foreground">
+              <div className={observabilityStyles.loadingState}>
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading execution logs…
                 </div>
               </div>
             ) : filteredEntries.length === 0 ? (
-              <div className="flex min-h-[16rem] items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/80 px-6 text-center text-sm text-muted-foreground">
+              <div className={observabilityStyles.emptyState}>
                 No structured execution logs match the current filters yet.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border/70 bg-background/95">
+              <div className={observabilityStyles.structuredList}>
                 {filteredEntries.map((entry) => (
                   <Collapsible
                     key={`${entry.execution_id}-${entry.seq}-${entry.ts}`}
-                    className="border-b border-border/60 last:border-b-0"
+                    className={observabilityStyles.structuredRow}
                   >
-                    <div className="px-4 py-2.5">
+                    <div className={observabilityStyles.structuredRowInner}>
                       <div className="flex items-start gap-3">
-                        <span className="min-w-[5.5rem] pt-0.5 font-mono text-[11px] text-muted-foreground">
+                        <span className={observabilityStyles.structuredTimestamp}>
                           {formatTimestamp(entry.ts)}
                         </span>
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <div className={observabilityStyles.structuredMessageRow}>
                             <Badge
                               variant={levelVariant(entry.level)}
                               className="h-5 font-mono uppercase"
                             >
                               {entry.level}
                             </Badge>
-                            <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+                            <p className={observabilityStyles.structuredMessage}>
                               {entry.message}
                             </p>
                           </div>
 
-                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                          <div className={observabilityStyles.structuredMeta}>
                             <span className="font-mono">seq:{entry.seq}</span>
                             <span className="font-mono">node:{entry.agent_node_id}</span>
                             <span className="font-mono">source:{entry.source}</span>
@@ -407,7 +408,7 @@ export function ExecutionObservabilityPanel({
                         </div>
 
                         {hasAttributes(entry.attributes) ? (
-                          <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                          <CollapsibleTrigger className={observabilityStyles.detailTrigger}>
                             <ChevronRight className="h-3.5 w-3.5 group-data-[state=open]:hidden" />
                             <ChevronDown className="hidden h-3.5 w-3.5 group-data-[state=open]:block" />
                             attrs
@@ -417,7 +418,7 @@ export function ExecutionObservabilityPanel({
 
                       {hasAttributes(entry.attributes) ? (
                         <CollapsibleContent className="mt-2 pl-[calc(5.5rem+0.75rem)]">
-                          <div className="overflow-hidden rounded-lg border border-border/60 bg-muted/10">
+                          <div className={observabilityStyles.detailPanel}>
                             <UnifiedJsonViewer
                               data={entry.attributes}
                               searchable={false}
