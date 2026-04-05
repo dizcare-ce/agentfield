@@ -40,12 +40,15 @@ import { RunTrace, buildTraceTree, formatDuration } from "@/components/RunTrace"
 import { StepDetail } from "@/components/StepDetail";
 import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ExecutionObservabilityPanel } from "@/components/execution";
+import { normalizeExecutionStatus } from "@/utils/status";
 import type {
   WebhookFailurePreview,
   WebhookRunSummary,
   WorkflowDAGLightweightNode,
   WorkflowDAGLightweightResponse,
 } from "@/types/workflows";
+import type { WorkflowExecution } from "@/types/executions";
 import { retryExecutionWebhook } from "@/services/executionsApi";
 import {
   downloadWorkflowVCAuditFile,
@@ -494,6 +497,36 @@ export function RunDetailPage() {
   }
 
   const rootNode = dag.timeline.find((n) => n.workflow_depth === 0) ?? dag.timeline[0];
+  const rootExecution: WorkflowExecution = {
+    id: 0,
+    workflow_id: workflowIdForVc,
+    execution_id: rootNode?.execution_id ?? runId ?? "",
+    agentfield_request_id: "",
+    session_id: dag.session_id ?? undefined,
+    actor_id: dag.actor_id ?? undefined,
+    agent_node_id: rootNode?.agent_node_id ?? participants.ids[0] ?? "",
+    parent_workflow_id: undefined,
+    root_workflow_id: dag.root_workflow_id ?? runId ?? undefined,
+    workflow_depth: rootNode?.workflow_depth ?? 0,
+    reasoner_id: rootNode?.reasoner_id ?? "",
+    input_data: null,
+    output_data: null,
+    input_size: 0,
+    output_size: 0,
+    workflow_name: dag.workflow_name ?? undefined,
+    workflow_tags: [],
+    status: normalizeExecutionStatus(dag.workflow_status),
+    started_at: rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    completed_at: rootNode?.completed_at ?? undefined,
+    duration_ms: rootNode?.duration_ms ?? undefined,
+    error_message: undefined,
+    retry_count: 0,
+    created_at: rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    updated_at: rootNode?.completed_at ?? rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    notes: [],
+    webhook_registered: false,
+    webhook_events: [],
+  };
 
   const workflowId = dag.root_workflow_id || runId || "";
 
@@ -746,6 +779,13 @@ export function RunDetailPage() {
           />
         </div>
       </TooltipProvider>
+
+      {rootExecution.execution_id ? (
+        <ExecutionObservabilityPanel
+          className="mb-4"
+          execution={rootExecution}
+        />
+      ) : null}
 
       {/* ─── Content ────────────────────────────────────────────────────── */}
       {isSingleStep ? (

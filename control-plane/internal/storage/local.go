@@ -7788,6 +7788,8 @@ func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID
 		var runID, rootWorkflowID, parentExecutionID, reasonerID, eventType, sdkLanguage, spanID, stepID, errorCategory sql.NullString
 		var attributes sql.NullString
 		var attempt sql.NullInt64
+		var emittedAt sql.NullTime
+		var recordedAt sql.NullTime
 		if err := rows.Scan(
 			&entry.EventID,
 			&entry.ExecutionID,
@@ -7809,8 +7811,8 @@ func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID
 			&spanID,
 			&stepID,
 			&errorCategory,
-			&entry.EmittedAt,
-			&entry.RecordedAt,
+			&emittedAt,
+			&recordedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan execution log entry: %w", err)
 		}
@@ -7845,6 +7847,14 @@ func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID
 		if attempt.Valid {
 			value := int(attempt.Int64)
 			entry.Attempt = &value
+		}
+		if emittedAt.Valid {
+			entry.EmittedAt = emittedAt.Time
+		}
+		if recordedAt.Valid {
+			entry.RecordedAt = recordedAt.Time
+		} else {
+			entry.RecordedAt = entry.EmittedAt
 		}
 		if attributes.Valid {
 			entry.Attributes = json.RawMessage(attributes.String)

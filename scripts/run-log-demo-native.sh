@@ -14,6 +14,25 @@ TS_LOG="${DATA_DIR}/demo-ts.log"
 
 mkdir -p "${DATA_DIR}/keys"
 
+free_port() {
+  local port="$1"
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 0
+  fi
+  while read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    kill "${pid}" 2>/dev/null || true
+    sleep 1
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+  done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+}
+
+for port in 8080 8180 8001 8002 8003; do
+  free_port "${port}"
+done
+
 if [[ ! -x "${VENV}/bin/python" ]]; then
   echo "Creating venv at ${VENV} (Python 3.12+) and installing sdk/python..."
   if command -v python3.12 >/dev/null 2>&1; then
@@ -42,7 +61,8 @@ else
   nohup "${DATA_DIR}/agentfield-server" server \
     --port 8080 \
     --config "${REPO_ROOT}/tests/functional/docker/agentfield-test.yaml" \
-    --vc-execution >>"${CP_LOG}" 2>&1 &
+    --vc-execution \
+    --open=false >>"${CP_LOG}" 2>&1 &
   echo $! >"${DATA_DIR}/cp.pid"
   echo "Control plane PID $(cat "${DATA_DIR}/cp.pid") (log: ${CP_LOG})"
 fi
