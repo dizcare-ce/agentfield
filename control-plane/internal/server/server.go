@@ -25,13 +25,13 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/internal/handlers/admin"                  // Admin handlers
 	"github.com/Agent-Field/agentfield/control-plane/internal/handlers/agentic"                // Agentic API handlers
 	connectorpkg "github.com/Agent-Field/agentfield/control-plane/internal/handlers/connector" // Connector handlers
-	"github.com/Agent-Field/agentfield/control-plane/internal/server/apicatalog"               // API catalog
-	"github.com/Agent-Field/agentfield/control-plane/internal/server/knowledgebase"            // Knowledge base
 	"github.com/Agent-Field/agentfield/control-plane/internal/handlers/ui"                     // UI handlers
 	"github.com/Agent-Field/agentfield/control-plane/internal/infrastructure/communication"
 	"github.com/Agent-Field/agentfield/control-plane/internal/infrastructure/process"
 	infrastorage "github.com/Agent-Field/agentfield/control-plane/internal/infrastructure/storage"
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
+	"github.com/Agent-Field/agentfield/control-plane/internal/server/apicatalog"    // API catalog
+	"github.com/Agent-Field/agentfield/control-plane/internal/server/knowledgebase" // Knowledge base
 	"github.com/Agent-Field/agentfield/control-plane/internal/server/middleware"
 	"github.com/Agent-Field/agentfield/control-plane/internal/services" // Services
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
@@ -75,7 +75,7 @@ type AgentFieldServer struct {
 	tagVCVerifier       *services.TagVCVerifier
 	agentfieldHome      string
 	// LLM health monitoring
-	llmHealthMonitor       *services.LLMHealthMonitor
+	llmHealthMonitor *services.LLMHealthMonitor
 	// Cleanup service
 	cleanupService         *handlers.ExecutionCleanupService
 	payloadStore           services.PayloadStore
@@ -1151,8 +1151,11 @@ func (s *AgentFieldServer) setupRoutes() {
 				executions.POST("/note", handlers.AddExecutionNoteHandler(s.storage))
 				executions.GET("/:execution_id/notes", handlers.GetExecutionNotesHandler(s.storage))
 
-				// Execution log streaming (SSE)
-				execLogsHandler := ui.NewExecutionLogsHandler(s.llmHealthMonitor)
+				// Structured execution logs for the execution detail page
+				execLogsHandler := ui.NewExecutionLogsHandler(s.storage, s.llmHealthMonitor, func() config.ExecutionLogsConfig {
+					return s.config.AgentField.ExecutionLogs
+				})
+				executions.GET("/:execution_id/logs", execLogsHandler.GetExecutionLogsHandler)
 				executions.GET("/:execution_id/logs/stream", execLogsHandler.StreamExecutionLogsHandler)
 
 				// DID and VC management endpoints for executions
@@ -1163,7 +1166,9 @@ func (s *AgentFieldServer) setupRoutes() {
 			}
 
 			// LLM health status endpoint and execution queue status
-			llmHandler := ui.NewExecutionLogsHandler(s.llmHealthMonitor)
+			llmHandler := ui.NewExecutionLogsHandler(s.storage, s.llmHealthMonitor, func() config.ExecutionLogsConfig {
+				return s.config.AgentField.ExecutionLogs
+			})
 			uiAPI.GET("/llm/health", llmHandler.GetLLMHealthHandler)
 			uiAPI.GET("/queue/status", llmHandler.GetExecutionQueueStatusHandler)
 
@@ -1339,6 +1344,9 @@ func (s *AgentFieldServer) setupRoutes() {
 		agentAPI.GET("/executions/:execution_id", handlers.GetExecutionStatusHandler(s.storage))
 		agentAPI.POST("/executions/batch-status", handlers.BatchExecutionStatusHandler(s.storage))
 		agentAPI.POST("/executions/:execution_id/status", handlers.UpdateExecutionStatusHandler(s.storage, s.payloadStore, s.webhookDispatcher, s.config.AgentField.ExecutionQueue.AgentCallTimeout))
+		agentAPI.POST("/executions/:execution_id/logs", handlers.StructuredExecutionLogsHandler(s.storage, func() config.ExecutionLogsConfig {
+			return s.config.AgentField.ExecutionLogs
+		}))
 		agentAPI.POST("/executions/:execution_id/cancel", handlers.CancelExecutionHandler(s.storage))
 		agentAPI.POST("/executions/:execution_id/pause", handlers.PauseExecutionHandler(s.storage))
 		agentAPI.POST("/executions/:execution_id/resume", handlers.ResumeExecutionHandler(s.storage))

@@ -7,6 +7,7 @@ import type {
   ExecutionSummary,
   WorkflowExecution,
   ExecutionWebhookEvent,
+  ExecutionLogsResponse,
 } from "../types/executions";
 import type { EnhancedExecutionsResponse } from "../types/workflows";
 import type {
@@ -273,6 +274,91 @@ export async function getExecutionDetails(
     `/executions/${executionId}/details`,
   );
   return transformExecutionDetailsResponse(response);
+}
+
+export interface ExecutionLogFilters {
+  tail?: number;
+  afterSeq?: number;
+  levels?: string[];
+  nodeIds?: string[];
+  sources?: string[];
+  q?: string;
+}
+
+function buildExecutionLogsQuery(filters: ExecutionLogFilters = {}): string {
+  const params = new URLSearchParams();
+
+  if (typeof filters.tail === "number") {
+    params.set("tail", String(filters.tail));
+  }
+  if (typeof filters.afterSeq === "number") {
+    params.set("after_seq", String(filters.afterSeq));
+  }
+  for (const level of filters.levels ?? []) {
+    if (level) params.append("levels", level);
+  }
+  for (const nodeId of filters.nodeIds ?? []) {
+    if (nodeId) params.append("node_ids", nodeId);
+  }
+  for (const source of filters.sources ?? []) {
+    if (source) params.append("sources", source);
+  }
+  if (filters.q?.trim()) {
+    params.set("q", filters.q.trim());
+  }
+
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function getExecutionLogs(
+  executionId: string,
+  filters: ExecutionLogFilters = {},
+): Promise<ExecutionLogsResponse> {
+  return fetchWrapper<ExecutionLogsResponse>(
+    `/executions/${executionId}/logs${buildExecutionLogsQuery(filters)}`,
+  );
+}
+
+function buildExecutionLogsStreamUrl(
+  executionId: string,
+  filters: ExecutionLogFilters = {},
+): string {
+  const params = new URLSearchParams();
+
+  if (typeof filters.tail === "number") {
+    params.set("tail", String(filters.tail));
+  }
+  if (typeof filters.afterSeq === "number") {
+    params.set("since_seq", String(filters.afterSeq));
+  }
+  for (const level of filters.levels ?? []) {
+    if (level) params.append("levels", level);
+  }
+  for (const nodeId of filters.nodeIds ?? []) {
+    if (nodeId) params.append("node_ids", nodeId);
+  }
+  for (const source of filters.sources ?? []) {
+    if (source) params.append("sources", source);
+  }
+  if (filters.q?.trim()) {
+    params.set("q", filters.q.trim());
+  }
+
+  const apiKey = getGlobalApiKey();
+  if (apiKey) {
+    params.set("api_key", apiKey);
+  }
+
+  const query = params.toString();
+  return `${API_BASE_URL}/executions/${encodeURIComponent(executionId)}/logs/stream${query ? `?${query}` : ""}`;
+}
+
+export function streamExecutionLogs(
+  executionId: string,
+  filters: ExecutionLogFilters = {},
+): EventSource {
+  return new EventSource(buildExecutionLogsStreamUrl(executionId, filters));
 }
 
 export async function retryExecutionWebhook(

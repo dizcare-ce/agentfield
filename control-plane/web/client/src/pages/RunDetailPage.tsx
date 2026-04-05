@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BadgeCheck,
   ChevronDown,
@@ -40,12 +40,15 @@ import { RunTrace, buildTraceTree, formatDuration } from "@/components/RunTrace"
 import { StepDetail } from "@/components/StepDetail";
 import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ExecutionObservabilityPanel } from "@/components/execution";
+import { normalizeExecutionStatus } from "@/utils/status";
 import type {
   WebhookFailurePreview,
   WebhookRunSummary,
   WorkflowDAGLightweightNode,
   WorkflowDAGLightweightResponse,
 } from "@/types/workflows";
+import type { WorkflowExecution } from "@/types/executions";
 import { retryExecutionWebhook } from "@/services/executionsApi";
 import {
   downloadWorkflowVCAuditFile,
@@ -402,6 +405,7 @@ export function RunDetailPage() {
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"trace" | "graph">("trace");
+  const [surfaceTab, setSurfaceTab] = useState<"execution" | "logs">("execution");
 
   const participants = useMemo(() => {
     if (!dag) {
@@ -494,6 +498,52 @@ export function RunDetailPage() {
   }
 
   const rootNode = dag.timeline.find((n) => n.workflow_depth === 0) ?? dag.timeline[0];
+  const rootExecution: WorkflowExecution = {
+    id: 0,
+    workflow_id: workflowIdForVc,
+    execution_id: rootNode?.execution_id ?? runId ?? "",
+    agentfield_request_id: "",
+    session_id: dag.session_id ?? undefined,
+    actor_id: dag.actor_id ?? undefined,
+    agent_node_id: rootNode?.agent_node_id ?? participants.ids[0] ?? "",
+    parent_workflow_id: undefined,
+    root_workflow_id: dag.root_workflow_id ?? runId ?? undefined,
+    workflow_depth: rootNode?.workflow_depth ?? 0,
+    reasoner_id: rootNode?.reasoner_id ?? "",
+    input_data: null,
+    output_data: null,
+    input_size: 0,
+    output_size: 0,
+    workflow_name: dag.workflow_name ?? undefined,
+    workflow_tags: [],
+    status: normalizeExecutionStatus(dag.workflow_status),
+    started_at: rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    completed_at: rootNode?.completed_at ?? undefined,
+    duration_ms: rootNode?.duration_ms ?? undefined,
+    error_message: undefined,
+    retry_count: 0,
+    created_at: rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    updated_at: rootNode?.completed_at ?? rootNode?.started_at ?? dag.timeline[0]?.started_at ?? "",
+    notes: [],
+    webhook_registered: false,
+    webhook_events: [],
+  };
+  const selectedNode =
+    dag.timeline.find((node) => node.execution_id === selectedStepId) ?? rootNode;
+  const selectedExecution: WorkflowExecution = {
+    ...rootExecution,
+    execution_id: selectedNode?.execution_id ?? rootExecution.execution_id,
+    agent_node_id: selectedNode?.agent_node_id ?? rootExecution.agent_node_id,
+    workflow_depth: selectedNode?.workflow_depth ?? rootExecution.workflow_depth,
+    reasoner_id: selectedNode?.reasoner_id ?? rootExecution.reasoner_id,
+    status: normalizeExecutionStatus(selectedNode?.status ?? dag.workflow_status),
+    started_at: selectedNode?.started_at ?? rootExecution.started_at,
+    completed_at: selectedNode?.completed_at ?? rootExecution.completed_at,
+    duration_ms: selectedNode?.duration_ms ?? rootExecution.duration_ms,
+    created_at: selectedNode?.started_at ?? rootExecution.created_at,
+    updated_at:
+      selectedNode?.completed_at ?? selectedNode?.started_at ?? rootExecution.updated_at,
+  };
 
   const workflowId = dag.root_workflow_id || runId || "";
 
@@ -747,105 +797,137 @@ export function RunDetailPage() {
         </div>
       </TooltipProvider>
 
-      {/* ─── Content ────────────────────────────────────────────────────── */}
-      {isSingleStep ? (
-        // Single-step run: show step detail directly, fill remaining height
-        <Card className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
-          <CardContent className="p-0 flex-1 min-h-0 min-w-0">
-            {selectedStepId ? (
-              <StepDetail executionId={selectedStepId} />
-            ) : (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No step selected
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        // Multi-step run: flex split — grid auto-rows were collapsing h-full for React Flow on small screens
-        <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:items-stretch">
-          {/* Left: trace or graph panel */}
-          <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:min-w-0 lg:basis-0">
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                Steps
-              </span>
-              <Tabs
-                value={viewMode}
-                onValueChange={(v) => setViewMode(v as "trace" | "graph")}
-              >
-                <TabsList className="h-8" aria-label="Trace or graph view">
-                  <TabsTrigger value="trace" className="h-7 px-3 text-xs">
-                    Trace
-                  </TabsTrigger>
-                  <TabsTrigger value="graph" className="h-7 px-3 text-xs">
-                    Graph
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-            <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col p-0">
-              {viewMode === "graph" ? (
-                <div
-                  className="flex h-full min-h-[min(45vh,22rem)] min-w-0 flex-1 flex-col"
-                  style={{
-                    minHeight: "max(280px, min(45vh, 22rem))",
-                    width: "100%",
-                    flex: "1 1 0%",
-                  }}
-                >
-                  <ErrorBoundary>
-                    <WorkflowDAGViewer
-                      key={runId}
-                      className="h-full min-h-0 flex-1"
-                      workflowId={dag.root_workflow_id || runId || ""}
-                      dagData={dag}
-                      selectedNodeIds={selectedStepId ? [selectedStepId] : undefined}
-                      onExecutionClick={(execution) =>
-                        setSelectedStepId(execution.execution_id)
-                      }
-                    />
-                  </ErrorBoundary>
-                </div>
-              ) : (
-                <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                  {traceTree ? (
-                    <RunTrace
-                      node={traceTree}
-                      maxDuration={maxDuration}
-                      selectedId={selectedStepId}
-                      onSelect={setSelectedStepId}
-                      runStartedAt={
-                        dag.timeline.find((n) => n.workflow_depth === 0)
-                          ?.started_at ??
-                        dag.timeline[0]?.started_at ??
-                        ""
-                      }
-                    />
-                  ) : (
-                    <p className="p-4 text-xs text-muted-foreground">
-                      No steps to display
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Right: step detail panel */}
-          <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:min-w-0 lg:basis-0">
-            <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col p-0">
-              {selectedStepId ? (
-                <StepDetail executionId={selectedStepId} />
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  Select a step to view details
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      <Tabs
+        value={surfaceTab}
+        onValueChange={(value) => setSurfaceTab(value as "execution" | "logs")}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <div className="mb-3 flex min-w-0 items-center justify-between gap-3 border-b border-border/50 pb-3">
+          <TabsList className="h-9" aria-label="Run detail surface">
+            <TabsTrigger value="execution" className="px-4 text-sm">
+              Execution
+            </TabsTrigger>
+            <TabsTrigger value="logs" className="px-4 text-sm">
+              Logs
+            </TabsTrigger>
+          </TabsList>
         </div>
-      )}
+
+        <TabsContent value="logs" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+          {selectedExecution.execution_id ? (
+            <ExecutionObservabilityPanel
+              execution={selectedExecution}
+              relatedNodeIds={participants.ids}
+            />
+          ) : (
+            <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <CardContent className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+                Execution logs are unavailable for this run.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent
+          value="execution"
+          className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden"
+        >
+          {isSingleStep ? (
+            <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col p-0">
+                {selectedStepId ? (
+                  <StepDetail executionId={selectedStepId} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    No step selected
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:items-stretch">
+              <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:min-w-0 lg:basis-0">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Steps
+                  </span>
+                  <Tabs
+                    value={viewMode}
+                    onValueChange={(v) => setViewMode(v as "trace" | "graph")}
+                  >
+                    <TabsList className="h-8" aria-label="Trace or graph view">
+                      <TabsTrigger value="trace" className="h-7 px-3 text-xs">
+                        Trace
+                      </TabsTrigger>
+                      <TabsTrigger value="graph" className="h-7 px-3 text-xs">
+                        Graph
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+                <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col p-0">
+                  {viewMode === "graph" ? (
+                    <div
+                      className="flex h-full min-h-[min(45vh,22rem)] min-w-0 flex-1 flex-col"
+                      style={{
+                        minHeight: "max(280px, min(45vh, 22rem))",
+                        width: "100%",
+                        flex: "1 1 0%",
+                      }}
+                    >
+                      <ErrorBoundary>
+                        <WorkflowDAGViewer
+                          key={runId}
+                          className="h-full min-h-0 flex-1"
+                          workflowId={dag.root_workflow_id || runId || ""}
+                          dagData={dag}
+                          selectedNodeIds={selectedStepId ? [selectedStepId] : undefined}
+                          onExecutionClick={(execution) =>
+                            setSelectedStepId(execution.execution_id)
+                          }
+                        />
+                      </ErrorBoundary>
+                    </div>
+                  ) : (
+                    <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                      {traceTree ? (
+                        <RunTrace
+                          node={traceTree}
+                          maxDuration={maxDuration}
+                          selectedId={selectedStepId}
+                          onSelect={setSelectedStepId}
+                          runStartedAt={
+                            dag.timeline.find((n) => n.workflow_depth === 0)
+                              ?.started_at ??
+                            dag.timeline[0]?.started_at ??
+                            ""
+                          }
+                        />
+                      ) : (
+                        <p className="p-4 text-xs text-muted-foreground">
+                          No steps to display
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:min-w-0 lg:basis-0">
+                <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col p-0">
+                  {selectedStepId ? (
+                    <StepDetail executionId={selectedStepId} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      Select a step to view details
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

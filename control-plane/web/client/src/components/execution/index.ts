@@ -6,6 +6,7 @@ export { TechnicalDetailsPanel } from './TechnicalDetailsPanel';
 export { ExecutionTimeline } from './ExecutionTimeline';
 export { ExecutionDetailsLayout } from './ExecutionDetailsLayout';
 export { CollapsibleSection } from './CollapsibleSection';
+export { ExecutionObservabilityPanel } from './ExecutionObservabilityPanel';
 export { RedesignedInputDataPanel } from './InputDataPanel';
 export { RedesignedOutputDataPanel } from './OutputDataPanel';
 export { RedesignedErrorPanel } from './RedesignedErrorPanel';

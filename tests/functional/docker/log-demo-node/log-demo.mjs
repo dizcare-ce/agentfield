@@ -1,4 +1,10 @@
-import { Agent } from '@agentfield/sdk';
+let Agent;
+
+try {
+  ({ Agent } = await import('@agentfield/sdk'));
+} catch {
+  ({ Agent } = await import(new URL('../../../../sdk/typescript/dist/index.js', import.meta.url)));
+}
 
 const agentFieldUrl = process.env.AGENTFIELD_SERVER ?? 'http://localhost:8080';
 const nodeId = process.env.TS_AGENT_ID ?? 'demo-ts-logs';
