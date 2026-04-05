@@ -94,6 +94,35 @@ export interface ExecutionEvent {
   timestamp: string;
 }
 
+export interface ExecutionLogEntry {
+  event_id: number;
+  execution_id: string;
+  workflow_id: string;
+  run_id?: string;
+  root_workflow_id?: string;
+  parent_execution_id?: string;
+  seq: number;
+  agent_node_id: string;
+  reasoner_id?: string;
+  level: string;
+  source: string;
+  event_type?: string;
+  message: string;
+  attributes?: Record<string, unknown> | unknown[] | string | number | boolean | null;
+  system_generated?: boolean;
+  sdk_language?: string;
+  attempt?: number;
+  span_id?: string;
+  step_id?: string;
+  error_category?: string;
+  ts: string;
+  recorded_at: string;
+}
+
+export interface ExecutionLogsResponse {
+  entries: ExecutionLogEntry[];
+}
+
 export interface WorkflowExecution {
   id: number;
   workflow_id: string;

@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ResponsiveGrid } from "@/components/layout/ResponsiveGrid";
 import { ExecutionDetailsLayout } from "../components/execution/ExecutionDetailsLayout";
 import { ExecutionHeader } from "../components/execution/ExecutionHeader";
-import { ExecutionTimeline } from "../components/execution/ExecutionTimeline";
+import { ExecutionObservabilityPanel } from "../components/execution/ExecutionObservabilityPanel";
 import { InputDataPanel as RedesignedInputDataPanel } from "../components/execution/InputDataPanel";
 import { OutputDataPanel as RedesignedOutputDataPanel } from "../components/execution/OutputDataPanel";
 import { RedesignedErrorPanel } from "../components/execution/RedesignedErrorPanel";
@@ -186,9 +186,7 @@ export function ExecutionDetailPage() {
 
       <WorkflowBreadcrumb execution={execution} onNavigateBack={handleNavigateBack} />
 
-      <div className="rounded-lg border border-border bg-background p-4">
-        <ExecutionTimeline execution={execution} />
-      </div>
+      <ExecutionObservabilityPanel execution={execution} />
 
       <div className="space-y-4">
         <RedesignedInputDataPanel execution={execution} />
