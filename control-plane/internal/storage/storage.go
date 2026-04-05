@@ -71,6 +71,9 @@ type StorageProvider interface {
 	ListExecutionWebhookEventsBatch(ctx context.Context, executionIDs []string) (map[string][]*types.ExecutionWebhookEvent, error)
 	StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error
 	ListWorkflowExecutionEvents(ctx context.Context, executionID string, afterSeq *int64, limit int) ([]*types.WorkflowExecutionEvent, error)
+	StoreExecutionLogEntry(ctx context.Context, entry *types.ExecutionLogEntry) error
+	ListExecutionLogEntries(ctx context.Context, executionID string, afterSeq *int64, limit int, levels []string, nodeIDs []string, sources []string, query string) ([]*types.ExecutionLogEntry, error)
+	PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error
 
 	// Execution cleanup operations
 	CleanupOldExecutions(ctx context.Context, retentionPeriod time.Duration, batchSize int) (int, error)
@@ -165,6 +168,7 @@ type StorageProvider interface {
 	// Execution event bus for real-time updates
 	GetExecutionEventBus() *events.ExecutionEventBus
 	GetWorkflowExecutionEventBus() *events.EventBus[*types.WorkflowExecutionEvent]
+	GetExecutionLogEventBus() *events.EventBus[*types.ExecutionLogEntry]
 
 	// DID Registry operations
 	StoreDID(ctx context.Context, did string, didDocument, publicKey, privateKeyRef, derivationPath string) error

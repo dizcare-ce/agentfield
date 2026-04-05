@@ -481,6 +481,7 @@ type LocalStorage struct {
 	vectorStore               vectorStore
 	eventBus                  *events.ExecutionEventBus // Event bus for real-time updates
 	workflowExecutionEventBus *events.EventBus[*types.WorkflowExecutionEvent]
+	executionLogEventBus      *events.EventBus[*types.ExecutionLogEntry]
 }
 
 // NewLocalStorage creates a new instance of LocalStorage.
@@ -493,6 +494,7 @@ func NewLocalStorage(config LocalStorageConfig) *LocalStorage {
 		subscribers:               make(map[string][]chan types.MemoryChangeEvent),
 		eventBus:                  events.NewExecutionEventBus(),
 		workflowExecutionEventBus: events.NewEventBus[*types.WorkflowExecutionEvent](),
+		executionLogEventBus:      events.NewEventBus[*types.ExecutionLogEntry](),
 	}
 }
 
@@ -506,6 +508,7 @@ func NewPostgresStorage(config PostgresStorageConfig) *LocalStorage {
 		subscribers:               make(map[string][]chan types.MemoryChangeEvent),
 		eventBus:                  events.NewExecutionEventBus(),
 		workflowExecutionEventBus: events.NewEventBus[*types.WorkflowExecutionEvent](),
+		executionLogEventBus:      events.NewEventBus[*types.ExecutionLogEntry](),
 	}
 }
 
@@ -6193,6 +6196,11 @@ func (ls *LocalStorage) GetExecutionEventBus() *events.ExecutionEventBus {
 // GetWorkflowExecutionEventBus returns the bus for workflow execution events.
 func (ls *LocalStorage) GetWorkflowExecutionEventBus() *events.EventBus[*types.WorkflowExecutionEvent] {
 	return ls.workflowExecutionEventBus
+}
+
+// GetExecutionLogEventBus returns the bus for structured execution logs.
+func (ls *LocalStorage) GetExecutionLogEventBus() *events.EventBus[*types.ExecutionLogEntry] {
+	return ls.executionLogEventBus
 }
 
 // AgentField Server DID operations
