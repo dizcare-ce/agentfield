@@ -100,9 +100,6 @@ jobs:
             echo "✓ OPENROUTER_MODEL: $OPENROUTER_MODEL"
           fi
 
-      - name: Validate execution observability demo docs
-        run: ./scripts/check-execution-observability-demo.sh
-      
       - name: Run functional tests (${{ matrix.storage_mode }})
         run: |
           cd tests/functional

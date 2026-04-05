@@ -7,7 +7,6 @@ import type {
   ExecutionSummary,
   WorkflowExecution,
   ExecutionWebhookEvent,
-  ExecutionLogEntry,
   ExecutionLogsResponse,
 } from "../types/executions";
 import type { EnhancedExecutionsResponse } from "../types/workflows";
