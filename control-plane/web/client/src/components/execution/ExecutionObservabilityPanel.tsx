@@ -2,13 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Drawer,
   DrawerContent,
@@ -226,36 +220,7 @@ export function ExecutionObservabilityPanel({
 
   return (
     <Card className={cn("border-border/80 shadow-sm", className)}>
-      <CardHeader className="gap-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-2">
-            <CardTitle className="text-base sm:text-lg">Execution Observability</CardTitle>
-            <CardDescription className="max-w-3xl">
-              Follow the execution lifecycle, inspect correlated runtime logs, and open raw
-              node output for low-level debugging without leaving the execution page.
-            </CardDescription>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="font-mono">
-              {logSummary.total} events
-            </Badge>
-            <Badge variant="outline" className="font-mono">
-              {logSummary.nodes} node{logSummary.nodes === 1 ? "" : "s"}
-            </Badge>
-            <Badge variant="outline" className="font-mono">
-              {logSummary.system} system
-            </Badge>
-            {live ? (
-              <Badge variant="default" className="font-mono">Live</Badge>
-            ) : (
-              <Badge variant="secondary" className="font-mono">Snapshot</Badge>
-            )}
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
+      <CardContent className="space-y-4 px-4 py-4 sm:px-6 sm:py-6">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] lg:items-center">
           <SearchBar
             value={search}
@@ -341,12 +306,53 @@ export function ExecutionObservabilityPanel({
         ) : null}
 
         <div className="rounded-xl border border-border/70 bg-muted/20 p-3 sm:p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="font-medium">Showing {logSummary.visible} of {logSummary.total} events</span>
-            {search ? <Badge variant="outline" className="font-mono">Query: {search}</Badge> : null}
-            {levelFilter !== "all" ? <Badge variant="outline" className="font-mono">Level: {levelFilter}</Badge> : null}
-            {nodeFilter !== "all" ? <Badge variant="outline" className="font-mono">Node: {nodeFilter}</Badge> : null}
-            {sourceFilter !== "all" ? <Badge variant="outline" className="font-mono">Source: {sourceFilter}</Badge> : null}
+          <div className="mb-3 flex flex-col gap-2 border-b border-border/60 pb-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">
+                Showing {logSummary.visible} of {logSummary.total} events
+              </span>
+              {search ? (
+                <Badge variant="outline" className="font-mono">
+                  Query: {search}
+                </Badge>
+              ) : null}
+              {levelFilter !== "all" ? (
+                <Badge variant="outline" className="font-mono">
+                  Level: {levelFilter}
+                </Badge>
+              ) : null}
+              {nodeFilter !== "all" ? (
+                <Badge variant="outline" className="font-mono">
+                  Node: {nodeFilter}
+                </Badge>
+              ) : null}
+              {sourceFilter !== "all" ? (
+                <Badge variant="outline" className="font-mono">
+                  Source: {sourceFilter}
+                </Badge>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="font-mono">
+                {logSummary.total} events
+              </Badge>
+              <Badge variant="outline" className="font-mono">
+                {logSummary.nodes} node{logSummary.nodes === 1 ? "" : "s"}
+              </Badge>
+              <Badge variant="outline" className="font-mono">
+                {logSummary.system} system
+              </Badge>
+              {live ? (
+                <Badge variant="default" className="font-mono">
+                  Live
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="font-mono">
+                  Snapshot
+                </Badge>
+              )}
+            </div>
           </div>
 
           <ScrollArea className="h-[30rem] pr-3">
