@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.64-rc.4] - 2026-04-05
+
+
+### Changed
+
+- Refactor: replace emoji logging with structured zerolog in memory handler (#335)
+
+Convert all 18 emoji-based debug log statements to structured zerolog
+calls with typed fields (operation, scope, key, err, bytes). Log levels
+adjusted: Debug for normal flow, Error for failures, Warn for edge cases.
+No handler logic changed.
+
+Closes #114
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (208be41)
+
+
+
+### Documentation
+
+- Docs: add godoc comments to StorageProvider interface methods (#336) (799c4a2)
+
 ## [0.1.64-rc.3] - 2026-04-05
 
 
