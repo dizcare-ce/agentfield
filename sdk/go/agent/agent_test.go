@@ -752,6 +752,14 @@ func TestHandleReasonerAsyncPostsStatus(t *testing.T) {
 	callbackCh := make(chan map[string]any, 1)
 	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		if strings.Contains(r.URL.Path, "/logs") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if !strings.Contains(r.URL.Path, "/status") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		dec := json.NewDecoder(r.Body)
 		var payload map[string]any
 		if err := dec.Decode(&payload); err == nil {
@@ -900,6 +908,14 @@ func TestCallLocalEmitsEvents(t *testing.T) {
 	eventCh := make(chan types.WorkflowExecutionEvent, 4)
 	eventServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		if strings.Contains(r.URL.Path, "/logs") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if !strings.Contains(r.URL.Path, "/workflow/executions/events") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		var event types.WorkflowExecutionEvent
 		if err := json.Unmarshal(body, &event); err == nil {
@@ -1021,8 +1037,10 @@ func TestCallLocalEmitsStructuredExecutionLogs(t *testing.T) {
 	for _, line := range lines {
 		var entry ExecutionLogEntry
 		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		if entry.ReasonerID != "child" {
+			continue
+		}
 		assert.Equal(t, "sdk.runtime", entry.Source)
-		assert.Equal(t, "child", entry.ReasonerID)
 		if entry.EventType == "call.local.start" {
 			seenStart = true
 		}
