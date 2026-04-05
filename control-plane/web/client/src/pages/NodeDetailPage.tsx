@@ -335,7 +335,7 @@ function NodeDetailPageContent() {
       // Refresh data to get updated status
       fetchData(false);
     } catch (error: any) {
-      let errorMessage = `Failed to start agent ${nodeId}`;
+      const errorMessage = `Failed to start agent ${nodeId}`;
 
       // Handle specific error cases with clever messaging
       if (error.message?.includes("already running")) {
@@ -345,7 +345,7 @@ function NodeDetailPageContent() {
       } else if (error.message?.includes("port")) {
         showError(`🔌 Port conflict detected - please try again`);
       } else {
-        showError(error.message || errorMessage);
+        showError(errorMessage, error.message);
       }
 
       console.error(`Failed to start agent ${nodeId}:`, error);
@@ -365,7 +365,7 @@ function NodeDetailPageContent() {
       // Refresh data to get updated status
       fetchData(false);
     } catch (error: any) {
-      let errorMessage = `Failed to stop agent ${nodeId}`;
+      const errorMessage = `Failed to stop agent ${nodeId}`;
 
       // Handle specific error cases with clever messaging
       if (error.message?.includes("not running")) {
@@ -373,7 +373,7 @@ function NodeDetailPageContent() {
       } else if (error.message?.includes("not installed")) {
         showError(`📦 Agent ${nodeId} is not installed`);
       } else {
-        showError(error.message || errorMessage);
+        showError(errorMessage, error.message);
       }
 
       console.error(`Failed to stop agent ${nodeId}:`, error);
@@ -393,12 +393,12 @@ function NodeDetailPageContent() {
       // Refresh data to get updated status
       fetchData(false);
     } catch (error: any) {
-      let errorMessage = `Failed to reconcile agent ${nodeId}`;
+      const errorMessage = `Failed to reconcile agent ${nodeId}`;
 
       if (error.message?.includes("not installed")) {
         showError(`📦 Agent ${nodeId} is not installed`);
       } else {
-        showError(error.message || errorMessage);
+        showError(errorMessage, error.message);
       }
 
       console.error(`Failed to reconcile agent ${nodeId}:`, error);

@@ -128,7 +128,11 @@ export function AgentControlButton({
       await onToggle(config.action);
       setShowSuccess(true);
     } catch (error) {
-      console.error(`Failed to ${config.action} agent ${agentId}:`, error);
+      console.error("Failed to toggle agent action", {
+        action: config.action,
+        agentId,
+        error,
+      });
     } finally {
       setIsProcessing(false);
     }
