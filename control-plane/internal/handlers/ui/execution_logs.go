@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -196,8 +197,8 @@ func (h *ExecutionLogsHandler) StreamExecutionLogsHandler(c *gin.Context) {
 
 	streamCtx := c.Request.Context()
 	if cfg.MaxStreamDuration > 0 {
-		var cancel func()
-		streamCtx, cancel = contextWithTimeout(c.Request.Context(), cfg.MaxStreamDuration)
+		var cancel context.CancelFunc
+		streamCtx, cancel = context.WithTimeout(c.Request.Context(), cfg.MaxStreamDuration)
 		defer cancel()
 	}
 
@@ -261,27 +262,6 @@ func resetTimer(timer *time.Timer, d time.Duration) {
 		}
 	}
 	timer.Reset(d)
-}
-
-func contextWithTimeout(parent interface{ Done() <-chan struct{} }, d time.Duration) (<-chan struct{}, func()) {
-	type result struct {
-		done chan struct{}
-		stop chan struct{}
-	}
-	r := result{done: make(chan struct{}), stop: make(chan struct{})}
-	go func() {
-		timer := time.NewTimer(d)
-		defer timer.Stop()
-		select {
-		case <-parent.Done():
-		case <-timer.C:
-		case <-r.stop:
-			close(r.done)
-			return
-		}
-		close(r.done)
-	}()
-	return r.done, func() { close(r.stop) }
 }
 
 // GetExecutionQueueStatusHandler returns concurrency slot usage per agent and overall queue health.
