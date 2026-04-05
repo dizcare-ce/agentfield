@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -43,6 +42,7 @@ import {
   streamNodeLogsEntries,
   type NodeLogEntry,
 } from "@/services/api";
+import { HintIcon } from "@/components/authorization/HintIcon";
 
 const MAX_BUFFER = 5000;
 const DEFAULT_TAIL = "200";
@@ -290,6 +290,16 @@ export function NodeProcessLogsPanel({
     return { structured, plain, all: streamScoped.length };
   }, [streamScoped]);
 
+  const overallFormatCounts = useMemo(() => {
+    let structured = 0;
+    let plain = 0;
+    for (const entry of entries) {
+      if (parseStructuredProcessLog(entry.line)) structured += 1;
+      else plain += 1;
+    }
+    return { structured, plain, all: entries.length };
+  }, [entries]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return formatScoped;
@@ -356,7 +366,7 @@ export function NodeProcessLogsPanel({
     <Card className={cn("border-border/80 shadow-sm", className)}>
       <CardHeader className="space-y-4 p-4 pb-3 sm:p-6 sm:pb-3">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
-          <div className="min-w-0 flex-1 space-y-2">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <Terminal className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <CardTitle className="text-base font-semibold leading-none sm:text-sm sm:font-medium">
@@ -365,12 +375,12 @@ export function NodeProcessLogsPanel({
               <Badge variant="outline" className="font-mono text-[10px]">
                 NDJSON
               </Badge>
+              <HintIcon label="What process logs show">
+                NDJSON from the agent. Structured SDK lines surface correlation fields like
+                execution, run, source, and event inline while plain stdout and stderr stay
+                available for low-level debugging.
+              </HintIcon>
             </div>
-            <CardDescription className="text-xs leading-relaxed text-muted-foreground">
-              NDJSON from the agent. Structured SDK lines surface correlation fields like
-              execution, run, source, and event inline while plain stdout and stderr stay
-              available for low-level debugging.
-            </CardDescription>
           </div>
 
           {/* Narrow: 2×2 grid + overflow menu. md+: single toolbar row (shadcn button group). */}
@@ -589,18 +599,24 @@ export function NodeProcessLogsPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-3 px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+        <div className="grid gap-3 lg:grid-cols-[max-content_max-content_minmax(18rem,1fr)] lg:items-end">
           <div
-            className="min-w-0 flex-1 space-y-1.5"
+            className="min-w-0 space-y-1.5"
             role="group"
             aria-label="Filter by stdout or stderr"
           >
-            <p className="text-xs font-medium text-muted-foreground">Stream</p>
+            <div className="flex items-center gap-1">
+              <p className="text-xs font-medium text-muted-foreground">Stream</p>
+              <HintIcon label="What the stream filter does">
+                Choose which process stream to inspect. Structured SDK logs usually appear on
+                stdout, while plain failures and stack traces often show up on stderr.
+              </HintIcon>
+            </div>
             <SegmentedControl
               value={streamFilter}
               onValueChange={(v) => setStreamFilter(v as StreamFilter)}
               size="sm"
-              className="w-full sm:w-auto"
+              className="w-full lg:w-auto"
               options={[
                 {
                   value: "all",
@@ -617,26 +633,24 @@ export function NodeProcessLogsPanel({
               ]}
             />
           </div>
-          {streamCounts.other > 0 ? (
-            <p className="text-[11px] text-muted-foreground sm:pb-1">
-              {streamCounts.other} line{streamCounts.other === 1 ? "" : "s"} on
-              other streams (shown in All only)
-            </p>
-          ) : null}
-        </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <div
-            className="min-w-0 flex-1 space-y-1.5"
+            className="min-w-0 space-y-1.5"
             role="group"
             aria-label="Filter by line format"
           >
-            <p className="text-xs font-medium text-muted-foreground">Format</p>
+            <div className="flex items-center gap-1">
+              <p className="text-xs font-medium text-muted-foreground">Format</p>
+              <HintIcon label="What the format filter does">
+                Structured lines are SDK-emitted JSON events with execution metadata. Plain lines
+                are raw stdout or stderr text from the node process.
+              </HintIcon>
+            </div>
             <SegmentedControl
               value={formatFilter}
               onValueChange={(v) => setFormatFilter(v as FormatFilter)}
               size="sm"
-              className="w-full sm:w-auto"
+              className="w-full lg:w-auto"
               options={[
                 {
                   value: "all",
@@ -653,24 +667,31 @@ export function NodeProcessLogsPanel({
               ]}
             />
           </div>
+
+          <div className="min-w-0 space-y-1.5">
+            <Label
+              htmlFor={`${nodeId}-log-text-filter`}
+              className="text-xs text-muted-foreground"
+            >
+              Search
+            </Label>
+            <Input
+              id={`${nodeId}-log-text-filter`}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Text, execution, run, event, reasoner, source…"
+              className="h-9 border-border/80 bg-background text-sm"
+              aria-label="Filter log lines by text"
+            />
+          </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label
-            htmlFor={`${nodeId}-log-text-filter`}
-            className="text-xs text-muted-foreground"
-          >
-            Search in visible lines
-          </Label>
-          <Input
-            id={`${nodeId}-log-text-filter`}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Text, execution, run, event, reasoner, source…"
-            className="h-9 border-border/80 bg-background text-sm"
-            aria-label="Filter log lines by text"
-          />
-        </div>
+        {streamCounts.other > 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            {streamCounts.other} line{streamCounts.other === 1 ? "" : "s"} on other streams, shown
+            only in <span className="font-medium">All</span>.
+          </p>
+        ) : null}
 
         {filter.trim() !== "" || streamFilter !== "all" || formatFilter !== "all" ? (
           <p className="text-[11px] text-muted-foreground">
@@ -695,6 +716,19 @@ export function NodeProcessLogsPanel({
               </>
             )}
           </p>
+        ) : null}
+
+        {formatFilter === "structured" &&
+        filtered.length === 0 &&
+        overallFormatCounts.structured > 0 ? (
+          <Alert>
+            <AlertCircle className="size-4" />
+            <AlertTitle className="text-sm">Structured logs are available on a different stream</AlertTitle>
+            <AlertDescription className="text-xs">
+              The current stream filter is hiding them. Try <span className="font-medium">All</span>
+              {streamCounts.stdout > 0 ? " or Stdout" : ""} to inspect the structured SDK lines.
+            </AlertDescription>
+          </Alert>
         ) : null}
 
         {streamError ? (
