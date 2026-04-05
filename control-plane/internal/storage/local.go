@@ -2523,10 +2523,9 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 	var conditions []string
 	var args []interface{}
 
-	// Check if we need FTS5 search
+	// Check if we need search
 	var ftsJoin string
 	if filters.Search != nil && *filters.Search != "" {
-		// Sanitize search input to prevent FTS5 syntax errors
 		sanitizedSearch := sanitizeFTS5Query(*filters.Search)
 		if sanitizedSearch != "" {
 			if ls.ftsEnabled {
