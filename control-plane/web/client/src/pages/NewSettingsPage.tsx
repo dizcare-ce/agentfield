@@ -42,6 +42,10 @@ import {
   type ObservabilityWebhookRequest,
 } from "@/services/observabilityWebhookApi";
 import { getDIDSystemStatus } from "@/services/didApi";
+import {
+  getNodeLogProxySettings,
+  putNodeLogProxySettings,
+} from "@/services/api";
 import { formatRelativeTime } from "@/utils/dateFormat";
 import { cn } from "@/lib/utils";
 
@@ -839,6 +843,238 @@ function AboutTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Tab: Agent logs (control plane → node log proxy limits)
+// ---------------------------------------------------------------------------
+
+function NodeLogProxyTab() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [locks, setLocks] = useState<Record<string, boolean>>({});
+  const [connectTimeout, setConnectTimeout] = useState("");
+  const [streamIdleTimeout, setStreamIdleTimeout] = useState("");
+  const [maxStreamDuration, setMaxStreamDuration] = useState("");
+  const [maxTailLines, setMaxTailLines] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await getNodeLogProxySettings();
+      setLocks(r.env_locks ?? {});
+      const e = r.effective;
+      setConnectTimeout(e.connect_timeout);
+      setStreamIdleTimeout(e.stream_idle_timeout);
+      setMaxStreamDuration(e.max_stream_duration);
+      setMaxTailLines(String(e.max_tail_lines));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load settings");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!success) return;
+    const t = setTimeout(() => setSuccess(null), 4000);
+    return () => clearTimeout(t);
+  }, [success]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const maxLines = parseInt(maxTailLines, 10);
+    if (
+      !connectTimeout.trim() ||
+      !streamIdleTimeout.trim() ||
+      !maxStreamDuration.trim()
+    ) {
+      setError("Connect timeout, stream idle timeout, and max stream duration are required (Go duration strings, e.g. 30s, 5m).");
+      setSaving(false);
+      return;
+    }
+    if (!Number.isFinite(maxLines) || maxLines < 1) {
+      setError("Max tail lines must be a positive integer.");
+      setSaving(false);
+      return;
+    }
+    try {
+      await putNodeLogProxySettings({
+        connect_timeout: connectTimeout.trim(),
+        stream_idle_timeout: streamIdleTimeout.trim(),
+        max_stream_duration: maxStreamDuration.trim(),
+        max_tail_lines: maxLines,
+      });
+      setSuccess("Saved node log proxy limits.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const anyLock = Object.values(locks).some(Boolean);
+
+  if (loading) {
+    return (
+      <p className="text-sm text-muted-foreground">Loading log proxy settings…</p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {anyLock ? (
+        <Alert>
+          <AlertTitle className="text-sm">Environment overrides</AlertTitle>
+          <AlertDescription className="text-xs">
+            Some fields are locked by{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+              AGENTFIELD_NODE_LOG_PROXY_*
+            </code>{" "}
+            or{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+              AGENTFIELD_NODE_LOG_MAX_TAIL_LINES
+            </code>
+            . Unset them to edit from the UI.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {error ? (
+        <Alert variant="destructive">
+          <XCircle className="size-4" />
+          <AlertTitle className="text-sm">Error</AlertTitle>
+          <AlertDescription className="text-xs">{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {success ? (
+        <Alert>
+          <CheckCircle className="size-4 text-status-success" />
+          <AlertTitle className="text-sm">Saved</AlertTitle>
+          <AlertDescription className="text-xs">{success}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Node log proxy
+          </CardTitle>
+          <CardDescription className="text-muted-foreground text-xs">
+            Limits for the UI&apos;s{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+              GET /nodes/:id/logs
+            </code>{" "}
+            proxy to agent NDJSON logs (tail size, connect and stream timeouts).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="nlp-connect" className="text-xs">
+              Connect timeout
+            </Label>
+            <Input
+              id="nlp-connect"
+              value={connectTimeout}
+              onChange={(e) => setConnectTimeout(e.target.value)}
+              disabled={locks.connect_timeout}
+              className="font-mono text-sm h-9"
+              placeholder="e.g. 10s"
+            />
+            {locks.connect_timeout ? (
+              <Badge variant="secondary" className="w-fit text-[10px]">
+                env locked
+              </Badge>
+            ) : null}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nlp-idle" className="text-xs">
+              Stream idle timeout
+            </Label>
+            <Input
+              id="nlp-idle"
+              value={streamIdleTimeout}
+              onChange={(e) => setStreamIdleTimeout(e.target.value)}
+              disabled={locks.stream_idle_timeout}
+              className="font-mono text-sm h-9"
+            />
+            {locks.stream_idle_timeout ? (
+              <Badge variant="secondary" className="w-fit text-[10px]">
+                env locked
+              </Badge>
+            ) : null}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nlp-maxdur" className="text-xs">
+              Max stream duration
+            </Label>
+            <Input
+              id="nlp-maxdur"
+              value={maxStreamDuration}
+              onChange={(e) => setMaxStreamDuration(e.target.value)}
+              disabled={locks.max_stream_duration}
+              className="font-mono text-sm h-9"
+            />
+            {locks.max_stream_duration ? (
+              <Badge variant="secondary" className="w-fit text-[10px]">
+                env locked
+              </Badge>
+            ) : null}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nlp-tail" className="text-xs">
+              Max tail lines (per request)
+            </Label>
+            <Input
+              id="nlp-tail"
+              type="number"
+              min={1}
+              value={maxTailLines}
+              onChange={(e) => setMaxTailLines(e.target.value)}
+              disabled={locks.max_tail_lines}
+              className="font-mono text-sm h-9"
+            />
+            {locks.max_tail_lines ? (
+              <Badge variant="secondary" className="w-fit text-[10px]">
+                env locked
+              </Badge>
+            ) : null}
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-end gap-2 border-t bg-muted/20 py-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            disabled={saving}
+          >
+            <Renew className="size-3.5" />
+            <span className="ml-1.5">Reload</span>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void handleSave()}
+            disabled={saving || anyLock}
+          >
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page root
 // ---------------------------------------------------------------------------
 
@@ -861,6 +1097,9 @@ export function NewSettingsPage() {
           <TabsTrigger value="observability" variant="underline">
             Observability
           </TabsTrigger>
+          <TabsTrigger value="agent-logs" variant="underline">
+            Agent logs
+          </TabsTrigger>
           <TabsTrigger value="identity" variant="underline">
             Identity
           </TabsTrigger>
@@ -875,6 +1114,10 @@ export function NewSettingsPage() {
 
         <TabsContent value="observability" className="mt-6">
           <ObservabilityTab />
+        </TabsContent>
+
+        <TabsContent value="agent-logs" className="mt-6">
+          <NodeLogProxyTab />
         </TabsContent>
 
         <TabsContent value="identity" className="mt-6">

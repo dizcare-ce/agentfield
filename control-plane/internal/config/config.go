@@ -39,6 +39,33 @@ type AgentFieldConfig struct {
 	ExecutionCleanup ExecutionCleanupConfig `yaml:"execution_cleanup" mapstructure:"execution_cleanup"`
 	ExecutionQueue   ExecutionQueueConfig   `yaml:"execution_queue" mapstructure:"execution_queue"`
 	Approval         ApprovalConfig         `yaml:"approval" mapstructure:"approval"`
+	NodeLogProxy     NodeLogProxyConfig     `yaml:"node_log_proxy" mapstructure:"node_log_proxy"`
+}
+
+// NodeLogProxyConfig limits the control plane proxy to agent process logs (NDJSON).
+type NodeLogProxyConfig struct {
+	ConnectTimeout      time.Duration `yaml:"connect_timeout" mapstructure:"connect_timeout"`
+	StreamIdleTimeout   time.Duration `yaml:"stream_idle_timeout" mapstructure:"stream_idle_timeout"`
+	MaxStreamDuration   time.Duration `yaml:"max_stream_duration" mapstructure:"max_stream_duration"`
+	MaxTailLines        int           `yaml:"max_tail_lines" mapstructure:"max_tail_lines"`
+}
+
+// EffectiveNodeLogProxy returns proxy settings with defaults for zero values.
+func EffectiveNodeLogProxy(c NodeLogProxyConfig) NodeLogProxyConfig {
+	out := c
+	if out.ConnectTimeout <= 0 {
+		out.ConnectTimeout = 5 * time.Second
+	}
+	if out.StreamIdleTimeout <= 0 {
+		out.StreamIdleTimeout = 60 * time.Second
+	}
+	if out.MaxStreamDuration <= 0 {
+		out.MaxStreamDuration = 15 * time.Minute
+	}
+	if out.MaxTailLines <= 0 {
+		out.MaxTailLines = 10000
+	}
+	return out
 }
 
 // ApprovalConfig holds configuration for the execution approval workflow.
@@ -390,6 +417,28 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if val := os.Getenv("AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN"); val != "" {
 		cfg.Features.DID.Authorization.InternalToken = val
+	}
+
+	// Node log proxy (UI → agent NDJSON)
+	if val := os.Getenv("AGENTFIELD_NODE_LOG_PROXY_CONNECT_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.NodeLogProxy.ConnectTimeout = d
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_NODE_LOG_PROXY_STREAM_IDLE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.NodeLogProxy.StreamIdleTimeout = d
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_NODE_LOG_PROXY_MAX_DURATION"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.AgentField.NodeLogProxy.MaxStreamDuration = d
+		}
+	}
+	if val := os.Getenv("AGENTFIELD_NODE_LOG_MAX_TAIL_LINES"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			cfg.AgentField.NodeLogProxy.MaxTailLines = i
+		}
 	}
 
 	// Approval workflow overrides

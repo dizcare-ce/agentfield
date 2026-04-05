@@ -69,7 +69,7 @@ import type {
 } from "@/types/agentfield";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { EnhancedNodeDetailHeader } from "@/components/nodes";
+import { EnhancedNodeDetailHeader, NodeProcessLogsPanel } from "@/components/nodes";
 import { getNodeStatusPresentation } from "@/utils/node-status";
 
 /**
@@ -224,6 +224,7 @@ function NodeDetailPageContent() {
         "tools",
         "performance",
         "configuration",
+        "logs",
       ].includes(hash)
     ) {
       setActiveTab(hash);
@@ -805,6 +806,9 @@ function NodeDetailPageContent() {
             <AnimatedTabsTrigger value="configuration" className="gap-2 px-4">
               Configuration
             </AnimatedTabsTrigger>
+            <AnimatedTabsTrigger value="logs" className="gap-2 px-4">
+              Logs
+            </AnimatedTabsTrigger>
           </AnimatedTabsList>
             {mobileStatusRefreshButton}
           </div>
@@ -1048,6 +1052,17 @@ function NodeDetailPageContent() {
                   </AlertDescription>
                 </Alert>
               )}
+            </div>
+          </AnimatedTabsContent>
+
+          <AnimatedTabsContent
+            value="logs"
+            className="flex-1 overflow-y-auto"
+          >
+            <div className="flex flex-col gap-6 px-6 pb-6">
+              {nodeId ? (
+                <NodeProcessLogsPanel nodeId={nodeId} />
+              ) : null}
             </div>
           </AnimatedTabsContent>
         </AnimatedTabs>

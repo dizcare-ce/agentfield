@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { EndpointKindIconBox } from "@/components/ui/endpoint-kind-icon-box";
 import { EntityTag } from "@/components/ui/entity-tag";
+import { NodeProcessLogsPanel } from "@/components/nodes";
 import {
   AgentNodeIcon,
   ChevronRight,
@@ -510,13 +511,32 @@ function AgentRow({ node, tagSummary }: AgentRowProps) {
 
       {tagSummary ? <AgentAuthTagStrip summary={tagSummary} /> : null}
 
-      {/* Inline expanded reasoner rows */}
+      {/* Expanded: endpoints + process logs */}
       {open && (
-        <NodeReasonerList
-          nodeId={node.id}
-          reasonerCount={node.reasoner_count}
-          skillCount={node.skill_count}
-        />
+        <div className="border-t border-border bg-muted/15">
+          <Tabs defaultValue="endpoints" className="w-full">
+            <div className="px-4 pt-2 pb-1">
+              <TabsList variant="segmented" className="h-8 w-full max-w-md">
+                <TabsTrigger value="endpoints" className="text-xs">
+                  Endpoints
+                </TabsTrigger>
+                <TabsTrigger value="logs" className="text-xs">
+                  Process logs
+                </TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="endpoints" className="mt-0 focus-visible:outline-none">
+              <NodeReasonerList
+                nodeId={node.id}
+                reasonerCount={node.reasoner_count}
+                skillCount={node.skill_count}
+              />
+            </TabsContent>
+            <TabsContent value="logs" className="mt-0 px-4 pb-4 focus-visible:outline-none">
+              <NodeProcessLogsPanel nodeId={node.id} />
+            </TabsContent>
+          </Tabs>
+        </div>
       )}
     </>
   );

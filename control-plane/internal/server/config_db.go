@@ -82,6 +82,18 @@ func mergeDBConfig(target, dbCfg *config.Config) {
 	if dbCfg.AgentField.Approval.WebhookSecret != "" || dbCfg.AgentField.Approval.DefaultExpiryHours != 0 {
 		target.AgentField.Approval = dbCfg.AgentField.Approval
 	}
+	if dbCfg.AgentField.NodeLogProxy.ConnectTimeout != 0 {
+		target.AgentField.NodeLogProxy.ConnectTimeout = dbCfg.AgentField.NodeLogProxy.ConnectTimeout
+	}
+	if dbCfg.AgentField.NodeLogProxy.StreamIdleTimeout != 0 {
+		target.AgentField.NodeLogProxy.StreamIdleTimeout = dbCfg.AgentField.NodeLogProxy.StreamIdleTimeout
+	}
+	if dbCfg.AgentField.NodeLogProxy.MaxStreamDuration != 0 {
+		target.AgentField.NodeLogProxy.MaxStreamDuration = dbCfg.AgentField.NodeLogProxy.MaxStreamDuration
+	}
+	if dbCfg.AgentField.NodeLogProxy.MaxTailLines != 0 {
+		target.AgentField.NodeLogProxy.MaxTailLines = dbCfg.AgentField.NodeLogProxy.MaxTailLines
+	}
 
 	// Features
 	if dbCfg.Features.DID.Method != "" {

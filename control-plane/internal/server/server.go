@@ -1078,6 +1078,36 @@ func (s *AgentFieldServer) setupRoutes() {
 				// Individual node operations
 				nodes.GET("/:nodeId/details", uiNodesHandler.GetNodeDetailsHandler)
 
+				nodeLogsHandler := &ui.NodeLogsProxyHandler{
+					Storage: s.storage,
+					Snapshot: func() (config.NodeLogProxyConfig, string) {
+						s.configMu.RLock()
+						defer s.configMu.RUnlock()
+						return config.EffectiveNodeLogProxy(s.config.AgentField.NodeLogProxy),
+							s.config.Features.DID.Authorization.InternalToken
+					},
+				}
+				nodes.GET("/:nodeId/logs", nodeLogsHandler.ProxyNodeLogsHandler)
+
+				nodeLogSettingsHandler := &ui.NodeLogSettingsHandler{
+					Storage: s.storage,
+					ReadConfig: func(fn func(*config.Config)) {
+						s.configMu.RLock()
+						defer s.configMu.RUnlock()
+						fn(s.config)
+					},
+					WriteConfig: func(fn func(*config.Config)) {
+						s.configMu.Lock()
+						defer s.configMu.Unlock()
+						fn(s.config)
+					},
+				}
+				settings := uiAPI.Group("/settings")
+				{
+					settings.GET("/node-log-proxy", nodeLogSettingsHandler.GetNodeLogProxySettingsHandler)
+					settings.PUT("/node-log-proxy", nodeLogSettingsHandler.PutNodeLogProxySettingsHandler)
+				}
+
 				// DID and VC management endpoints for nodes
 				didHandler := ui.NewDIDHandler(s.storage, s.didService, s.vcService, s.didWebService)
 				nodes.GET("/:nodeId/did", didHandler.GetNodeDIDHandler)
