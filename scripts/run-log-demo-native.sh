@@ -102,5 +102,5 @@ start_agent "demo-ts" "${DATA_DIR}/demo-ts.pid" "${TS_LOG}" env \
   node "${REPO_ROOT}/tests/functional/docker/log-demo-node/log-demo.mjs"
 
 echo ""
-echo "Open http://localhost:8080/ui/agents — expand a row → Process logs → Live"
+echo "Open http://localhost:8080/ui/agents - expand a row -> Process logs -> Live; see tests/functional/docker/LOG_DEMO.md for the execution-observability demo path"
 echo "Stop: ${REPO_ROOT}/scripts/stop-log-demo-native.sh"

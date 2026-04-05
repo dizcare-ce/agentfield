@@ -1,10 +1,40 @@
-# Log demo stack (UI + NDJSON process logs)
+# Execution observability demo stack
 
-Brings up the **control plane** (embedded UI on port **8080**) plus three agents that periodically write to **stdout/stderr**, captured as NDJSON and visible under **Agents → expand row → Process logs**.
+This stack is the runnable demo path for the observability workstream.
+
+Today it proves the raw node/process-log half of the story: the control plane
+starts on port **8080**, three demo agents emit stdout/stderr, and the UI can
+proxy those node logs under **Agents → expand row → Process logs**.
+
+The execution-observability RFC adds the other half: structured execution logs
+shown on the execution detail page as the primary surface, with raw node logs
+kept behind an advanced/debug view.
+
+## What the demo covers today
+
+- Control plane + Python/Go/TypeScript demo agents
+- NDJSON node/process log capture
+- Live tailing and recent log history in the node log UI
+- A sample execution-log fixture for downstream wiring and schema validation
+
+## What the execution page should show after integration
+
+- Chronological structured execution logs as the default view
+- Filters by node, source, level, and free-text query
+- Live/recent toggle for streaming and tailing
+- Advanced raw node logs as a secondary debug surface
+
+## Demo assets
+
+- `make log-demo-up`
+- `make log-demo-native-up`
+- `tests/functional/docker/docker-compose.log-demo.yml`
+- `scripts/run-log-demo-native.sh`
+- `tests/functional/docker/execution-observability-sample.ndjson`
 
 ## Run
 
-From the **repository root**:
+From the repository root:
 
 ```bash
 make log-demo-up
@@ -20,7 +50,7 @@ The compose file uses `/data/...` paths that only exist inside containers. On th
 make log-demo-native-up
 ```
 
-This builds a local `agentfield-server` binary, stores SQLite/Bolt under `/tmp/agentfield-log-demo`, and starts the Python, Go, and Node demo agents on ports **8001–8003**. Stop with `make log-demo-native-down` (or `./scripts/stop-log-demo-native.sh`).
+This builds a local `agentfield-server` binary, stores SQLite/Bolt under `/tmp/agentfield-log-demo`, and starts the Python, Go, and Node demo agents on ports **8001-8003**. Stop with `make log-demo-native-down` (or `./scripts/stop-log-demo-native.sh`).
 
 Open **http://localhost:8080/ui/agents** and expand:
 
@@ -40,6 +70,11 @@ Startup order: a one-shot **`wait-control-plane`** service polls `GET /api/v1/he
 make log-demo-down
 ```
 
-## Automated check
+## Validation
 
-The functional suite includes `tests/functional/tests/test_ui_node_logs_proxy.py`, which starts a Python agent in-process and asserts the UI log proxy returns NDJSON containing a marker line after a reasoner runs.
+- `tests/functional/tests/test_ui_node_logs_proxy.py` validates the current NDJSON node-log proxy.
+- `scripts/check-execution-observability-demo.sh` validates the structured execution-log sample fixture and keeps the docs aligned with the demo path.
+
+## Integration blockers
+
+The execution-detail UI and control-plane execution-log ingestion are not wired in this worktree yet. The demo assets in this branch therefore stop at the documentable seed stage: raw node logs are runnable now, and structured execution logs are represented by the sample fixture until the backend/UI integration lands.
