@@ -13,7 +13,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Deque, Generator, Iterator, List, Optional, TextIO
+from typing import Deque, Iterator, List, Optional, TextIO
 
 # Optional: follow subscribers wake on new lines
 _follow_queues: List["queue.Queue[None]"] = []
