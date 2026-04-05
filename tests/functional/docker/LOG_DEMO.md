@@ -12,6 +12,16 @@ make log-demo-up
 docker compose -f tests/functional/docker/docker-compose.log-demo.yml up --build -d
 ```
 
+### Docker Desktop not running (host stack)
+
+The compose file uses `/data/...` paths that only exist inside containers. On the host, use:
+
+```bash
+make log-demo-native-up
+```
+
+This builds a local `agentfield-server` binary, stores SQLite/Bolt under `/tmp/agentfield-log-demo`, and starts the Python, Go, and Node demo agents on ports **8001–8003**. Stop with `make log-demo-native-down` (or `./scripts/stop-log-demo-native.sh`).
+
 Open **http://localhost:8080/ui/agents** and expand:
 
 | Node id            | Runtime |
