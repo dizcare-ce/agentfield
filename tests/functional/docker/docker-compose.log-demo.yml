@@ -29,6 +29,24 @@ services:
       - agentfield-log-demo
     command: ["server", "--port", "8080", "--config", "/etc/agentfield/agentfield-test.yaml", "--vc-execution"]
 
+  # Blocks demo agents until the API responds (avoids registration races on first boot).
+  wait-control-plane:
+    image: curlimages/curl:8.5.0
+    depends_on:
+      control-plane:
+        condition: service_started
+    networks:
+      - agentfield-log-demo
+    command:
+      - curl
+      - -sf
+      - --retry
+      - "60"
+      - --retry-delay
+      - "2"
+      - --retry-connrefused
+      - http://control-plane:8080/api/v1/health
+
   demo-python:
     build:
       context: ../../..
@@ -39,8 +57,12 @@ services:
       PORT: "8001"
       AGENT_CALLBACK_URL: http://demo-python:8001
       AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN: log-demo-internal-token
+    restart: unless-stopped
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_started
+      wait-control-plane:
+        condition: service_completed_successfully
     networks:
       - agentfield-log-demo
 
@@ -55,8 +77,12 @@ services:
       AGENT_LISTEN_ADDR: :8001
       AGENT_PUBLIC_URL: http://demo-go:8001
       AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN: log-demo-internal-token
+    restart: unless-stopped
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_started
+      wait-control-plane:
+        condition: service_completed_successfully
     networks:
       - agentfield-log-demo
 
@@ -71,8 +97,12 @@ services:
       TS_AGENT_BIND_HOST: "0.0.0.0"
       TS_AGENT_PUBLIC_URL: http://demo-node:8001
       AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN: log-demo-internal-token
+    restart: unless-stopped
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_started
+      wait-control-plane:
+        condition: service_completed_successfully
     networks:
       - agentfield-log-demo
 

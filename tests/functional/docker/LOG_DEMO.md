@@ -22,6 +22,8 @@ Open **http://localhost:8080/ui/agents** and expand:
 
 All services use `AGENTFIELD_AUTHORIZATION_INTERNAL_TOKEN=log-demo-internal-token` so the UI proxy can authenticate to each agent’s `GET /agentfield/v1/logs`.
 
+Startup order: a one-shot **`wait-control-plane`** service polls `GET /api/v1/health` (with retries) before the three demo agents start, so they do not race the control plane on first boot. Demo agents use **`restart: unless-stopped`** so they recover if the CP restarts.
+
 ## Stop
 
 ```bash
