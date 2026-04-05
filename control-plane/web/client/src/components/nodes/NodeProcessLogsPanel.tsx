@@ -10,6 +10,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -21,6 +26,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   MoreHorizontal,
@@ -41,6 +48,26 @@ const MAX_BUFFER = 5000;
 const DEFAULT_TAIL = "200";
 
 type StreamFilter = "all" | "stdout" | "stderr";
+type FormatFilter = "all" | "structured" | "plain";
+
+type ParsedStructuredProcessLog = {
+  v?: number | string;
+  ts?: string;
+  execution_id?: string;
+  workflow_id?: string;
+  run_id?: string;
+  root_workflow_id?: string;
+  parent_execution_id?: string;
+  agent_node_id?: string;
+  reasoner_id?: string;
+  level?: string;
+  source?: string;
+  event_type?: string;
+  message?: string;
+  attributes?: unknown;
+  system_generated?: boolean;
+  [key: string]: unknown;
+};
 
 function normalizeStream(s: string | undefined): "stdout" | "stderr" | "other" {
   const x = (s ?? "").toLowerCase();
@@ -97,6 +124,47 @@ function isRedundantLevel(
   );
 }
 
+function parseStructuredProcessLog(
+  line: string | undefined
+): ParsedStructuredProcessLog | null {
+  if (!line?.trim()) return null;
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const candidate = parsed as ParsedStructuredProcessLog;
+    const hasStructuredKeys =
+      "event_type" in candidate ||
+      "execution_id" in candidate ||
+      "run_id" in candidate ||
+      "message" in candidate ||
+      "source" in candidate ||
+      "reasoner_id" in candidate;
+    return hasStructuredKeys ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function compactValue(value: string | number | undefined): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (text.length <= 18) return text;
+  return `${text.slice(0, 8)}…${text.slice(-6)}`;
+}
+
+function hasStructuredDetails(entry: ParsedStructuredProcessLog | null): boolean {
+  if (!entry) return false;
+  const { attributes, message, event_type, level, source, ...rest } = entry;
+  if (attributes != null) return true;
+  return Object.keys(rest).some((key) => {
+    const value = rest[key];
+    return value != null && String(value).trim() !== "";
+  });
+}
+
 export interface NodeProcessLogsPanelProps {
   nodeId: string;
   className?: string;
@@ -117,6 +185,7 @@ export function NodeProcessLogsPanel({
   const [entries, setEntries] = useState<NodeLogEntry[]>([]);
   const [filter, setFilter] = useState("");
   const [streamFilter, setStreamFilter] = useState<StreamFilter>("all");
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [live, setLive] = useState(false);
   const [loadingTail, setLoadingTail] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -203,24 +272,55 @@ export function NodeProcessLogsPanel({
     return entries.filter((e) => normalizeStream(e.stream) === streamFilter);
   }, [entries, streamFilter]);
 
+  const formatScoped = useMemo(() => {
+    if (formatFilter === "all") return streamScoped;
+    return streamScoped.filter((entry) => {
+      const structured = parseStructuredProcessLog(entry.line);
+      return formatFilter === "structured" ? structured !== null : structured === null;
+    });
+  }, [formatFilter, streamScoped]);
+
+  const formatCounts = useMemo(() => {
+    let structured = 0;
+    let plain = 0;
+    for (const entry of streamScoped) {
+      if (parseStructuredProcessLog(entry.line)) structured += 1;
+      else plain += 1;
+    }
+    return { structured, plain, all: streamScoped.length };
+  }, [streamScoped]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return streamScoped;
-    return streamScoped.filter((e) => {
+    if (!q) return formatScoped;
+    return formatScoped.filter((e) => {
+      const structured = parseStructuredProcessLog(e.line);
       const line = (e.line ?? "").toLowerCase();
       const stream = (e.stream ?? "").toLowerCase();
-      const level = (e.level ?? "").toLowerCase();
-      const source = (e.source ?? "").toLowerCase();
+      const level = (structured?.level ?? e.level ?? "").toLowerCase();
+      const source = (structured?.source ?? e.source ?? "").toLowerCase();
       const seq = String(e.seq ?? "");
+      const eventType = (structured?.event_type ?? "").toLowerCase();
+      const executionId = (structured?.execution_id ?? "").toLowerCase();
+      const runId = (structured?.run_id ?? "").toLowerCase();
+      const workflowId = (structured?.workflow_id ?? "").toLowerCase();
+      const reasonerId = (structured?.reasoner_id ?? "").toLowerCase();
+      const message = (structured?.message ?? "").toLowerCase();
       return (
         line.includes(q) ||
         stream.includes(q) ||
         level.includes(q) ||
         source.includes(q) ||
-        seq.includes(q)
+        seq.includes(q) ||
+        eventType.includes(q) ||
+        executionId.includes(q) ||
+        runId.includes(q) ||
+        workflowId.includes(q) ||
+        reasonerId.includes(q) ||
+        message.includes(q)
       );
     });
-  }, [streamScoped, filter]);
+  }, [formatScoped, filter]);
 
   const ndjsonBlob = useMemo(() => {
     return filtered.map((e) => JSON.stringify(e)).join("\n");
@@ -267,9 +367,9 @@ export function NodeProcessLogsPanel({
               </Badge>
             </div>
             <CardDescription className="text-xs leading-relaxed text-muted-foreground">
-              NDJSON from the agent (UTC timestamps, seq, stdout/stderr). Filter
-              by stream, then search text, seq, level, or source when the SDK
-              emits them.
+              NDJSON from the agent. Structured SDK lines surface correlation fields like
+              execution, run, source, and event inline while plain stdout and stderr stay
+              available for low-level debugging.
             </CardDescription>
           </div>
 
@@ -525,6 +625,36 @@ export function NodeProcessLogsPanel({
           ) : null}
         </div>
 
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+          <div
+            className="min-w-0 flex-1 space-y-1.5"
+            role="group"
+            aria-label="Filter by line format"
+          >
+            <p className="text-xs font-medium text-muted-foreground">Format</p>
+            <SegmentedControl
+              value={formatFilter}
+              onValueChange={(v) => setFormatFilter(v as FormatFilter)}
+              size="sm"
+              className="w-full sm:w-auto"
+              options={[
+                {
+                  value: "all",
+                  label: `All${formatCounts.all ? ` (${formatCounts.all})` : ""}`,
+                },
+                {
+                  value: "structured",
+                  label: `Structured${formatCounts.structured ? ` (${formatCounts.structured})` : ""}`,
+                },
+                {
+                  value: "plain",
+                  label: `Plain${formatCounts.plain ? ` (${formatCounts.plain})` : ""}`,
+                },
+              ]}
+            />
+          </div>
+        </div>
+
         <div className="space-y-1.5">
           <Label
             htmlFor={`${nodeId}-log-text-filter`}
@@ -536,13 +666,13 @@ export function NodeProcessLogsPanel({
             id={`${nodeId}-log-text-filter`}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Text, seq, level, source…"
+            placeholder="Text, execution, run, event, reasoner, source…"
             className="h-9 border-border/80 bg-background text-sm"
             aria-label="Filter log lines by text"
           />
         </div>
 
-        {filter.trim() !== "" || streamFilter !== "all" ? (
+        {filter.trim() !== "" || streamFilter !== "all" || formatFilter !== "all" ? (
           <p className="text-[11px] text-muted-foreground">
             {filter.trim() !== "" ? (
               <>
@@ -550,9 +680,10 @@ export function NodeProcessLogsPanel({
                   {filtered.length}
                 </span>{" "}
                 match{filtered.length === 1 ? "" : "es"} within{" "}
-                <span className="tabular-nums">{streamScoped.length}</span> line
-                {streamScoped.length === 1 ? "" : "s"}
+                <span className="tabular-nums">{formatScoped.length}</span> line
+                {formatScoped.length === 1 ? "" : "s"}
                 {streamFilter !== "all" ? ` (${streamFilter})` : ""}
+                {formatFilter !== "all" ? ` · ${formatFilter}` : ""}
               </>
             ) : (
               <>
@@ -560,6 +691,7 @@ export function NodeProcessLogsPanel({
                   {filtered.length}
                 </span>{" "}
                 line{filtered.length === 1 ? "" : "s"} · stream: {streamFilter}
+                {formatFilter !== "all" ? ` · format: ${formatFilter}` : ""}
               </>
             )}
           </p>
@@ -593,15 +725,115 @@ export function NodeProcessLogsPanel({
                   const ns = normalizeStream(e.stream);
                   const dateHint = formatLogDate(e.ts);
                   const timeStr = formatLogTime(e.ts);
+                  const structured = parseStructuredProcessLog(e.line);
                   const title = `${e.ts ?? ""} · seq ${e.seq ?? "?"}${
-                    e.level ? ` · ${e.level}` : ""
-                  }${e.source ? ` · ${e.source}` : ""}`;
+                    structured?.level ?? e.level ? ` · ${structured?.level ?? e.level}` : ""
+                  }${structured?.source ?? e.source ? ` · ${structured?.source ?? e.source}` : ""}`;
                   const showLevel =
-                    e.level && !isRedundantLevel(e.level, ns);
+                    (structured?.level ?? e.level) &&
+                    !isRedundantLevel(structured?.level ?? e.level, ns);
                   const showSource =
-                    e.source && e.source.toLowerCase() !== "process";
+                    (structured?.source ?? e.source) &&
+                    (structured?.source ?? e.source)?.toLowerCase() !== "process";
+                  const primaryMessage =
+                    structured?.message?.trim() ||
+                    structured?.event_type?.trim() ||
+                    e.line;
+                  const streamLabel = ns === "other" ? e.stream || "?" : ns;
+                  const metadata = [
+                    { label: "v", value: compactValue(structured?.v) },
+                    { label: "exec", value: compactValue(structured?.execution_id) },
+                    { label: "run", value: compactValue(structured?.run_id) },
+                    { label: "reasoner", value: compactValue(structured?.reasoner_id) },
+                    { label: "event", value: compactValue(structured?.event_type) },
+                    {
+                      label: "source",
+                      value: compactValue(structured?.source ?? e.source),
+                    },
+                  ].filter((item) => item.value);
 
-                  return (
+                  return structured ? (
+                    <Collapsible
+                      key={`${e.seq}-${e.ts}-${i}`}
+                      title={title}
+                      className="border-b border-border/30 last:border-b-0"
+                    >
+                      <div
+                        className={cn(
+                          "grid grid-cols-1 items-start gap-x-2 gap-y-1 px-2 py-1 sm:grid-cols-[8.5rem_min-content_minmax(0,1fr)_auto] sm:gap-y-0",
+                          ns === "stderr" && "bg-destructive/[0.04]"
+                        )}
+                      >
+                        <div className="flex min-w-0 max-w-full flex-nowrap items-baseline gap-x-1.5 truncate tabular-nums text-muted-foreground sm:w-full sm:max-w-[8.5rem]">
+                          <time
+                            dateTime={e.ts}
+                            className="min-w-0 shrink truncate text-muted-foreground"
+                          >
+                            {dateHint ? (
+                              <span className="mr-1 text-[9px] opacity-85">{dateHint}</span>
+                            ) : null}
+                            <span className="whitespace-nowrap">{timeStr}</span>
+                          </time>
+                          <span className="shrink-0 text-[9px] text-muted-foreground/65">
+                            #{e.seq}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-0.5 sm:self-start sm:pt-px">
+                          <Badge
+                            variant={ns === "stderr" ? "destructive" : "secondary"}
+                            className="h-4 shrink-0 px-1 py-0 text-[8px] font-normal uppercase leading-none"
+                          >
+                            {streamLabel}
+                          </Badge>
+                          {showLevel ? (
+                            <Badge
+                              variant={levelBadgeVariant(structured?.level ?? e.level)}
+                              className="h-4 max-w-[4.5rem] shrink-0 truncate px-1 py-0 text-[8px] font-normal capitalize leading-none"
+                            >
+                              {structured?.level ?? e.level}
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        <div className="min-w-0 sm:pt-px">
+                          <div className="flex min-w-0 items-baseline gap-2">
+                            <span className="truncate font-mono text-[10px] leading-snug text-foreground sm:text-[11px]">
+                              {primaryMessage}
+                              {e.truncated ? (
+                                <span className="text-muted-foreground"> …</span>
+                              ) : null}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] text-muted-foreground">
+                            {metadata.map((item) => (
+                              <span key={`${e.seq}-${item.label}`} className="font-mono">
+                                {item.label}:{item.value}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {hasStructuredDetails(structured) ? (
+                          <CollapsibleTrigger className="group inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                            <ChevronRight className="h-3 w-3 group-data-[state=open]:hidden" />
+                            <ChevronDown className="hidden h-3 w-3 group-data-[state=open]:block" />
+                            details
+                          </CollapsibleTrigger>
+                        ) : null}
+                      </div>
+
+                      {hasStructuredDetails(structured) ? (
+                        <CollapsibleContent className="border-t border-border/30 bg-muted/[0.08] px-2 py-2 sm:pl-[calc(8.5rem+1.25rem)]">
+                          <div className="overflow-hidden rounded-md border border-border/50 bg-background/80">
+                            <pre className="overflow-x-auto p-2 text-[10px] leading-relaxed text-foreground/85">
+                              {JSON.stringify(structured, null, 2)}
+                            </pre>
+                          </div>
+                        </CollapsibleContent>
+                      ) : null}
+                    </Collapsible>
+                  ) : (
                     <div
                       key={`${e.seq}-${e.ts}-${i}`}
                       title={title}
@@ -610,16 +842,13 @@ export function NodeProcessLogsPanel({
                         ns === "stderr" && "bg-destructive/[0.04]"
                       )}
                     >
-                      {/* Time + seq — single line on sm+ */}
                       <div className="flex min-w-0 max-w-full flex-nowrap items-baseline gap-x-1.5 truncate tabular-nums text-muted-foreground sm:w-full sm:max-w-[9rem]">
                         <time
                           dateTime={e.ts}
                           className="min-w-0 shrink truncate text-muted-foreground"
                         >
                           {dateHint ? (
-                            <span className="mr-1 text-[9px] opacity-85">
-                              {dateHint}
-                            </span>
+                            <span className="mr-1 text-[9px] opacity-85">{dateHint}</span>
                           ) : null}
                           <span className="whitespace-nowrap">{timeStr}</span>
                         </time>
@@ -628,13 +857,12 @@ export function NodeProcessLogsPanel({
                         </span>
                       </div>
 
-                      {/* Stream / level — compact pills */}
                       <div className="flex flex-wrap items-center gap-0.5 sm:self-start sm:pt-px">
                         <Badge
                           variant={ns === "stderr" ? "destructive" : "secondary"}
                           className="h-4 shrink-0 px-1 py-0 text-[8px] font-normal uppercase leading-none"
                         >
-                          {ns === "other" ? e.stream || "?" : ns}
+                          {streamLabel}
                         </Badge>
                         {showLevel ? (
                           <Badge
@@ -646,7 +874,6 @@ export function NodeProcessLogsPanel({
                         ) : null}
                       </div>
 
-                      {/* Message — multiline only here */}
                       <div className="min-w-0 sm:pt-px">
                         {showSource ? (
                           <span className="mb-0.5 block truncate text-[9px] font-sans text-muted-foreground">
