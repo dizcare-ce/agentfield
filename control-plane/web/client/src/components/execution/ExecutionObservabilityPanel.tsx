@@ -87,11 +87,13 @@ function appendUniqueSorted(values: string[], nextValue?: string): string[] {
 
 interface ExecutionObservabilityPanelProps {
   execution: WorkflowExecution;
+  relatedNodeIds?: string[];
   className?: string;
 }
 
 export function ExecutionObservabilityPanel({
   execution,
+  relatedNodeIds = [],
   className,
 }: ExecutionObservabilityPanelProps) {
   const [entries, setEntries] = useState<ExecutionLogEntry[]>([]);
@@ -105,6 +107,7 @@ export function ExecutionObservabilityPanel({
   const [rawLogsOpen, setRawLogsOpen] = useState(false);
   const [selectedRawNodeId, setSelectedRawNodeId] = useState(execution.agent_node_id);
   const latestSeqRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const loadLogs = useCallback(async () => {
     setLoading(true);
@@ -169,9 +172,9 @@ export function ExecutionObservabilityPanel({
   const availableNodeIds = useMemo(() => {
     return entries.reduce<string[]>(
       (acc, entry) => appendUniqueSorted(acc, entry.agent_node_id),
-      execution.agent_node_id ? [execution.agent_node_id] : [],
+      [execution.agent_node_id, ...relatedNodeIds].filter(Boolean),
     );
-  }, [entries, execution.agent_node_id]);
+  }, [entries, execution.agent_node_id, relatedNodeIds]);
 
   const availableSources = useMemo(() => {
     return entries.reduce<string[]>((acc, entry) => appendUniqueSorted(acc, entry.source), []);
@@ -198,6 +201,14 @@ export function ExecutionObservabilityPanel({
         .some((value) => String(value).toLowerCase().includes(query));
     });
   }, [entries, levelFilter, nodeFilter, search, sourceFilter]);
+
+  useEffect(() => {
+    if (!live || !scrollRef.current) return;
+    const viewport = scrollRef.current.querySelector("[data-radix-scroll-area-viewport]");
+    if (viewport instanceof HTMLElement) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+  }, [filteredEntries.length, live]);
 
   const systemCount = useMemo(
     () => entries.filter((entry) => entry.system_generated).length,
@@ -356,7 +367,7 @@ export function ExecutionObservabilityPanel({
             </div>
           </div>
 
-          <ScrollArea className={cn("h-[30rem]", observabilityStyles.scrollArea)}>
+          <ScrollArea ref={scrollRef} className={cn("h-[30rem]", observabilityStyles.scrollArea)}>
             {loading ? (
               <div className={observabilityStyles.loadingState}>
                 <div className="flex items-center gap-2">

@@ -528,6 +528,22 @@ export function RunDetailPage() {
     webhook_registered: false,
     webhook_events: [],
   };
+  const selectedNode =
+    dag.timeline.find((node) => node.execution_id === selectedStepId) ?? rootNode;
+  const selectedExecution: WorkflowExecution = {
+    ...rootExecution,
+    execution_id: selectedNode?.execution_id ?? rootExecution.execution_id,
+    agent_node_id: selectedNode?.agent_node_id ?? rootExecution.agent_node_id,
+    workflow_depth: selectedNode?.workflow_depth ?? rootExecution.workflow_depth,
+    reasoner_id: selectedNode?.reasoner_id ?? rootExecution.reasoner_id,
+    status: normalizeExecutionStatus(selectedNode?.status ?? dag.workflow_status),
+    started_at: selectedNode?.started_at ?? rootExecution.started_at,
+    completed_at: selectedNode?.completed_at ?? rootExecution.completed_at,
+    duration_ms: selectedNode?.duration_ms ?? rootExecution.duration_ms,
+    created_at: selectedNode?.started_at ?? rootExecution.created_at,
+    updated_at:
+      selectedNode?.completed_at ?? selectedNode?.started_at ?? rootExecution.updated_at,
+  };
 
   const workflowId = dag.root_workflow_id || runId || "";
 
@@ -798,8 +814,11 @@ export function RunDetailPage() {
         </div>
 
         <TabsContent value="logs" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          {rootExecution.execution_id ? (
-            <ExecutionObservabilityPanel execution={rootExecution} />
+          {selectedExecution.execution_id ? (
+            <ExecutionObservabilityPanel
+              execution={selectedExecution}
+              relatedNodeIds={participants.ids}
+            />
           ) : (
             <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <CardContent className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">

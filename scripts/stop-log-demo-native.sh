@@ -25,14 +25,4 @@ for f in cp.pid demo-python.pid demo-go.pid demo-ts.pid; do
   fi
 done
 
-for port in 8080 8180 8001 8002 8003; do
-  if command -v lsof >/dev/null 2>&1; then
-    while read -r pid; do
-      [[ -n "${pid}" ]] || continue
-      stop_pid "${pid}"
-      echo "Stopped PID ${pid} (port ${port})"
-    done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
-  fi
-done
-
 echo "Done."

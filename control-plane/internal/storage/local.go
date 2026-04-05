@@ -482,6 +482,7 @@ type LocalStorage struct {
 	eventBus                  *events.ExecutionEventBus // Event bus for real-time updates
 	workflowExecutionEventBus *events.EventBus[*types.WorkflowExecutionEvent]
 	executionLogEventBus      *events.EventBus[*types.ExecutionLogEntry]
+	ftsEnabled                bool
 }
 
 // NewLocalStorage creates a new instance of LocalStorage.
@@ -914,10 +915,13 @@ func (ls *LocalStorage) createSchema(ctx context.Context) error {
 
 	if err := ls.setupWorkflowExecutionFTS(); err != nil {
 		if strings.Contains(err.Error(), "no such module: fts5") {
+			ls.ftsEnabled = false
 			log.Printf("FTS5 module not available, full-text search will be degraded")
 		} else {
 			return err
 		}
+	} else {
+		ls.ftsEnabled = true
 	}
 
 	if err := ls.ensureSQLiteIndexes(); err != nil {
@@ -2525,10 +2529,20 @@ func (ls *LocalStorage) QueryWorkflowExecutions(ctx context.Context, filters typ
 		// Sanitize search input to prevent FTS5 syntax errors
 		sanitizedSearch := sanitizeFTS5Query(*filters.Search)
 		if sanitizedSearch != "" {
-			// Use FTS5 MATCH for efficient full-text search
-			ftsJoin = " INNER JOIN workflow_executions_fts ON workflow_executions.id = workflow_executions_fts.rowid"
-			conditions = append(conditions, "workflow_executions_fts MATCH ?")
-			args = append(args, sanitizedSearch)
+			if ls.ftsEnabled {
+				// Use FTS5 MATCH for efficient full-text search when available.
+				ftsJoin = " INNER JOIN workflow_executions_fts ON workflow_executions.id = workflow_executions_fts.rowid"
+				conditions = append(conditions, "workflow_executions_fts MATCH ?")
+				args = append(args, sanitizedSearch)
+			} else {
+				searchTerm := strings.Trim(strings.TrimSpace(sanitizedSearch), "\"")
+				if searchTerm == "" {
+					searchTerm = strings.TrimSpace(*filters.Search)
+				}
+				like := "%" + searchTerm + "%"
+				conditions = append(conditions, `(workflow_executions.execution_id LIKE ? OR workflow_executions.workflow_id LIKE ? OR workflow_executions.agent_node_id LIKE ? OR workflow_executions.session_id LIKE ? OR workflow_executions.workflow_name LIKE ?)`)
+				args = append(args, like, like, like, like, like)
+			}
 		}
 	}
 
@@ -7653,6 +7667,8 @@ func (ls *LocalStorage) StoreExecutionLogEntry(ctx context.Context, entry *types
 	if entry.EmittedAt.IsZero() {
 		entry.EmittedAt = time.Now().UTC()
 	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
 
 	return ls.retryDatabaseOperation(ctx, entry.ExecutionID, func() error {
 		tx, err := ls.db.BeginTx(ctx, nil)
@@ -7671,6 +7687,46 @@ func (ls *LocalStorage) StoreExecutionLogEntry(ctx context.Context, entry *types
 
 		entryCopy := *entry
 		ls.executionLogEventBus.Publish(&entryCopy)
+		return nil
+	})
+}
+
+// StoreExecutionLogEntries atomically stores a batch of structured execution logs for one execution.
+func (ls *LocalStorage) StoreExecutionLogEntries(ctx context.Context, executionID string, entries []*types.ExecutionLogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	return ls.retryDatabaseOperation(ctx, executionID, func() error {
+		tx, err := ls.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to begin execution log batch transaction: %w", err)
+		}
+		defer rollbackTx(tx, "StoreExecutionLogEntries:"+executionID)
+
+		for _, entry := range entries {
+			if entry == nil {
+				continue
+			}
+			if err := ls.storeExecutionLogEntryTx(ctx, tx, entry); err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit execution log batch transaction: %w", err)
+		}
+
+		for _, entry := range entries {
+			if entry == nil {
+				continue
+			}
+			entryCopy := *entry
+			ls.executionLogEventBus.Publish(&entryCopy)
+		}
 		return nil
 	})
 }
@@ -7771,9 +7827,15 @@ func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID
 		args = append(args, like, like)
 	}
 
-	baseQuery += " ORDER BY sequence ASC"
-	if limit > 0 {
+	descendingTail := afterSeq == nil && limit > 0
+	if descendingTail {
+		baseQuery += " ORDER BY sequence DESC"
 		baseQuery += fmt.Sprintf(" LIMIT %d", limit)
+	} else {
+		baseQuery += " ORDER BY sequence ASC"
+		if limit > 0 {
+			baseQuery += fmt.Sprintf(" LIMIT %d", limit)
+		}
 	}
 
 	rows, err := ls.db.QueryContext(ctx, baseQuery, args...)
@@ -7866,6 +7928,11 @@ func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating execution logs: %w", err)
+	}
+	if descendingTail {
+		for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
+			entries[left], entries[right] = entries[right], entries[left]
+		}
 	}
 	return entries, nil
 }

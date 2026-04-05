@@ -155,6 +155,10 @@ func (h *ExecutionLogsHandler) StreamExecutionLogsHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
+	subscriberID := fmt.Sprintf("exec_logs_%s_%d_%s", executionID, time.Now().UnixNano(), c.ClientIP())
+	eventChan := h.storage.GetExecutionLogEventBus().Subscribe(subscriberID)
+	defer h.storage.GetExecutionLogEventBus().Unsubscribe(subscriberID)
+
 	if initial, err := h.storage.ListExecutionLogEntries(
 		c.Request.Context(),
 		executionID,
@@ -202,10 +206,6 @@ func (h *ExecutionLogsHandler) StreamExecutionLogsHandler(c *gin.Context) {
 		defer cancel()
 	}
 
-	subscriberID := fmt.Sprintf("exec_logs_%s_%d_%s", executionID, time.Now().UnixNano(), c.ClientIP())
-	eventChan := h.storage.GetExecutionLogEventBus().Subscribe(subscriberID)
-	defer h.storage.GetExecutionLogEventBus().Unsubscribe(subscriberID)
-
 	heartbeatTicker := time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()
 	idleTimer := time.NewTimer(cfg.StreamIdleTimeout)
@@ -220,6 +220,9 @@ func (h *ExecutionLogsHandler) StreamExecutionLogsHandler(c *gin.Context) {
 			if entry == nil || entry.ExecutionID != executionID {
 				continue
 			}
+			if sinceSeq != nil && entry.Sequence <= *sinceSeq {
+				continue
+			}
 			payload, err := json.Marshal(entry)
 			if err != nil {
 				logger.Logger.Error().Err(err).Msg("error marshalling execution log entry")
@@ -228,6 +231,8 @@ func (h *ExecutionLogsHandler) StreamExecutionLogsHandler(c *gin.Context) {
 			if !writeSSE(c, payload) {
 				return
 			}
+			next := entry.Sequence
+			sinceSeq = &next
 			resetTimer(idleTimer, cfg.StreamIdleTimeout)
 		case <-heartbeatTicker.C:
 			heartbeat := map[string]interface{}{

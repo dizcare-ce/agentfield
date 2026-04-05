@@ -23,6 +23,10 @@ type ExecutionLogStore interface {
 	PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error
 }
 
+type executionLogBatchStore interface {
+	StoreExecutionLogEntries(ctx context.Context, executionID string, entries []*types.ExecutionLogEntry) error
+}
+
 // StructuredExecutionLogsHandler ingests structured execution logs emitted by SDK runtimes.
 // POST /api/v1/executions/:execution_id/logs
 func StructuredExecutionLogsHandler(store ExecutionLogStore, snapshot func() config.ExecutionLogsConfig) gin.HandlerFunc {
@@ -60,7 +64,7 @@ func StructuredExecutionLogsHandler(store ExecutionLogStore, snapshot func() con
 			pruneBefore = time.Now().UTC().Add(-cfg.RetentionPeriod)
 		}
 
-		accepted := 0
+		prepared := make([]types.ExecutionLogEntry, 0, len(entries))
 		for i := range entries {
 			entry := entries[i]
 			entry.ExecutionID = strings.TrimSpace(entry.ExecutionID)
@@ -94,11 +98,25 @@ func StructuredExecutionLogsHandler(store ExecutionLogStore, snapshot func() con
 				entry.Attributes = json.RawMessage("{}")
 			}
 
-			if err := store.StoreExecutionLogEntry(ctx, &entry); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to store execution log entry: %v", err)})
+			prepared = append(prepared, entry)
+		}
+
+		if batchStore, ok := store.(executionLogBatchStore); ok {
+			ptrs := make([]*types.ExecutionLogEntry, 0, len(prepared))
+			for i := range prepared {
+				ptrs = append(ptrs, &prepared[i])
+			}
+			if err := batchStore.StoreExecutionLogEntries(ctx, executionID, ptrs); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to store execution log entry batch: %v", err)})
 				return
 			}
-			accepted++
+		} else {
+			for i := range prepared {
+				if err := store.StoreExecutionLogEntry(ctx, &prepared[i]); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to store execution log entry: %v", err)})
+					return
+				}
+			}
 		}
 
 		if err := store.PruneExecutionLogEntries(ctx, executionID, cfg.MaxEntriesPerExecution, pruneBefore); err != nil {
@@ -109,7 +127,7 @@ func StructuredExecutionLogsHandler(store ExecutionLogStore, snapshot func() con
 		c.JSON(http.StatusAccepted, gin.H{
 			"success":      true,
 			"execution_id": executionID,
-			"accepted":     accepted,
+			"accepted":     len(prepared),
 		})
 	}
 }

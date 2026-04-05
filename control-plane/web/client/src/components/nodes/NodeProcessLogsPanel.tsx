@@ -755,7 +755,7 @@ export function NodeProcessLogsPanel({
               <div
                 role="log"
                 aria-label="Process log lines"
-                className="min-w-0 font-mono"
+                className="min-w-0 select-text font-mono"
               >
                 {filtered.map((e, i) => {
                   const ns = normalizeStream(e.stream);
@@ -834,7 +834,7 @@ export function NodeProcessLogsPanel({
 
                         <div className="min-w-0 sm:pt-px">
                           <div className="flex min-w-0 items-baseline gap-2">
-                            <span className="truncate font-mono text-[10px] leading-snug text-foreground sm:text-[11px]">
+                            <span className="truncate select-text font-mono text-[10px] leading-snug text-foreground sm:text-[11px]">
                               {primaryMessage}
                               {e.truncated ? (
                                 <span className="text-muted-foreground"> …</span>
@@ -862,7 +862,7 @@ export function NodeProcessLogsPanel({
                       {hasStructuredDetails(structured) ? (
                         <CollapsibleContent className="border-t border-border/30 bg-muted/[0.08] px-2 py-2 sm:pl-[calc(8.5rem+1.25rem)]">
                           <div className="overflow-hidden rounded-md border border-border/50 bg-background/80">
-                            <pre className="overflow-x-auto p-2 text-[10px] leading-relaxed text-foreground/85">
+                            <pre className="overflow-x-auto select-text p-2 text-[10px] leading-relaxed text-foreground/85">
                               {JSON.stringify(structured, null, 2)}
                             </pre>
                           </div>
@@ -916,7 +916,7 @@ export function NodeProcessLogsPanel({
                             {e.source}
                           </span>
                         ) : null}
-                        <span className="block whitespace-pre-wrap break-all font-mono text-[10px] leading-snug text-foreground/90 sm:text-[11px]">
+                        <span className="block select-text whitespace-pre-wrap break-all font-mono text-[10px] leading-snug text-foreground/90 sm:text-[11px]">
                           {e.line}
                           {e.truncated ? (
                             <span className="text-muted-foreground"> …</span>
