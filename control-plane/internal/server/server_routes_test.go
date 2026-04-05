@@ -20,12 +20,14 @@ import (
 
 // stubStorage implements storage.StorageProvider with minimal functionality for testing
 type stubStorage struct {
-	eventBus *events.ExecutionEventBus
+	eventBus             *events.ExecutionEventBus
+	executionLogEventBus *events.EventBus[*types.ExecutionLogEntry]
 }
 
 func newStubStorage() *stubStorage {
 	return &stubStorage{
-		eventBus: events.NewExecutionEventBus(),
+		eventBus:             events.NewExecutionEventBus(),
+		executionLogEventBus: events.NewEventBus[*types.ExecutionLogEntry](),
 	}
 }
 
@@ -113,6 +115,15 @@ func (s *stubStorage) StoreWorkflowExecutionEvent(ctx context.Context, event *ty
 func (s *stubStorage) ListWorkflowExecutionEvents(ctx context.Context, executionID string, afterSeq *int64, limit int) ([]*types.WorkflowExecutionEvent, error) {
 	return nil, nil
 }
+func (s *stubStorage) StoreExecutionLogEntry(ctx context.Context, entry *types.ExecutionLogEntry) error {
+	return nil
+}
+func (s *stubStorage) ListExecutionLogEntries(ctx context.Context, executionID string, afterSeq *int64, limit int, levels []string, nodeIDs []string, sources []string, query string) ([]*types.ExecutionLogEntry, error) {
+	return nil, nil
+}
+func (s *stubStorage) PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error {
+	return nil
+}
 func (s *stubStorage) CleanupOldExecutions(ctx context.Context, retentionPeriod time.Duration, batchSize int) (int, error) {
 	return 0, nil
 }
@@ -164,7 +175,7 @@ func (s *stubStorage) DeleteMemory(ctx context.Context, scope, scopeID, key stri
 func (s *stubStorage) ListMemory(ctx context.Context, scope, scopeID string) ([]*types.Memory, error) {
 	return nil, nil
 }
-func (s *stubStorage) SetVector(ctx context.Context, record *types.VectorRecord) error    { return nil }
+func (s *stubStorage) SetVector(ctx context.Context, record *types.VectorRecord) error { return nil }
 func (s *stubStorage) GetVector(ctx context.Context, scope, scopeID, key string) (*types.VectorRecord, error) {
 	return nil, nil
 }
@@ -299,6 +310,9 @@ func (s *stubStorage) PublishMemoryChange(ctx context.Context, event types.Memor
 }
 func (s *stubStorage) GetWorkflowExecutionEventBus() *events.EventBus[*types.WorkflowExecutionEvent] {
 	return nil
+}
+func (s *stubStorage) GetExecutionLogEventBus() *events.EventBus[*types.ExecutionLogEntry] {
+	return s.executionLogEventBus
 }
 
 // DID Registry operations

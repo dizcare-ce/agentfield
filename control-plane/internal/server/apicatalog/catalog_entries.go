@@ -57,10 +57,12 @@ func DefaultEntries() []EndpointEntry {
 		},
 		{Method: "GET", Path: "/api/ui/v1/settings/node-log-proxy", Group: "ui-settings", Summary: "Effective node log proxy limits and env lock flags", AuthLevel: "api_key", Tags: []string{"ui", "settings", "logs"}},
 		{Method: "PUT", Path: "/api/ui/v1/settings/node-log-proxy", Group: "ui-settings", Summary: "Update node log proxy limits (persisted to DB config blob)", AuthLevel: "api_key", Tags: []string{"ui", "settings", "logs"}},
+		{Method: "GET", Path: "/api/ui/v1/settings/execution-logs", Group: "ui-settings", Summary: "Effective structured execution log limits and env lock flags", AuthLevel: "api_key", Tags: []string{"ui", "settings", "execution-logs"}},
+		{Method: "PUT", Path: "/api/ui/v1/settings/execution-logs", Group: "ui-settings", Summary: "Update structured execution log limits (persisted to DB config blob)", AuthLevel: "api_key", Tags: []string{"ui", "settings", "execution-logs"}},
 
 		// --- Execute ---
 		{Method: "POST", Path: "/api/v1/execute/:target", Group: "execute", Summary: "Execute a reasoner or skill synchronously", AuthLevel: "api_key", Tags: []string{"execute", "reasoner", "skill", "sync"},
-			Parameters: []ParamEntry{{Name: "target", In: "path", Required: true, Type: "string", Desc: "Target in format agent_id.reasoner_id or agent_id.skill_id"}},
+			Parameters:  []ParamEntry{{Name: "target", In: "path", Required: true, Type: "string", Desc: "Target in format agent_id.reasoner_id or agent_id.skill_id"}},
 			RequestBody: &BodyEntry{ContentType: "application/json", Fields: map[string]string{"input": "object - Input payload", "session_id": "string - Optional session ID", "run_id": "string - Optional run ID", "workflow_id": "string - Optional workflow ID"}},
 		},
 		{Method: "POST", Path: "/api/v1/execute/async/:target", Group: "execute", Summary: "Execute a reasoner or skill asynchronously", AuthLevel: "api_key", Tags: []string{"execute", "reasoner", "skill", "async"},
@@ -75,6 +77,7 @@ func DefaultEntries() []EndpointEntry {
 		},
 		{Method: "POST", Path: "/api/v1/executions/batch-status", Group: "executions", Summary: "Batch execution status query", AuthLevel: "api_key", Tags: []string{"executions", "status", "batch"}},
 		{Method: "POST", Path: "/api/v1/executions/:execution_id/status", Group: "executions", Summary: "Update execution status", AuthLevel: "api_key", Tags: []string{"executions", "status", "update"}},
+		{Method: "POST", Path: "/api/v1/executions/:execution_id/logs", Group: "executions", Summary: "Ingest structured execution logs", AuthLevel: "api_key", Tags: []string{"executions", "logs", "observability"}},
 		{Method: "POST", Path: "/api/v1/executions/:execution_id/cancel", Group: "executions", Summary: "Cancel a running execution", AuthLevel: "api_key", Tags: []string{"executions", "cancel"}},
 		{Method: "POST", Path: "/api/v1/executions/:execution_id/pause", Group: "executions", Summary: "Pause an execution", AuthLevel: "api_key", Tags: []string{"executions", "pause"}},
 		{Method: "POST", Path: "/api/v1/executions/:execution_id/resume", Group: "executions", Summary: "Resume a paused execution", AuthLevel: "api_key", Tags: []string{"executions", "resume"}},
@@ -90,6 +93,8 @@ func DefaultEntries() []EndpointEntry {
 		{Method: "POST", Path: "/api/v1/executions/note", Group: "executions", Summary: "Add an execution note (app.note())", AuthLevel: "api_key", Tags: []string{"executions", "notes"}},
 		{Method: "GET", Path: "/api/v1/executions/:execution_id/notes", Group: "executions", Summary: "Get execution notes", AuthLevel: "api_key", Tags: []string{"executions", "notes"}},
 		{Method: "POST", Path: "/api/v1/workflow/executions/events", Group: "executions", Summary: "Submit workflow execution events", AuthLevel: "api_key", Tags: []string{"executions", "events", "workflow"}},
+		{Method: "GET", Path: "/api/ui/v1/executions/:execution_id/logs", Group: "ui-executions", Summary: "Fetch structured execution logs for an execution", AuthLevel: "api_key", Tags: []string{"ui", "executions", "logs", "observability"}},
+		{Method: "GET", Path: "/api/ui/v1/executions/:execution_id/logs/stream", Group: "ui-executions", Summary: "Stream structured execution logs for an execution via SSE", AuthLevel: "api_key", Tags: []string{"ui", "executions", "logs", "stream", "observability"}},
 
 		// --- Memory ---
 		{Method: "POST", Path: "/api/v1/memory/set", Group: "memory", Summary: "Set a memory value", AuthLevel: "api_key", Tags: []string{"memory", "set"},
