@@ -57,7 +57,15 @@ class LogEntry:
             "ts": self.ts,
             "stream": self.stream,
             "line": self.line,
+            "source": "process",
         }
+        sl = self.stream.lower()
+        if sl == "stderr":
+            obj["level"] = "error"
+        elif sl == "stdout":
+            obj["level"] = "info"
+        else:
+            obj["level"] = "log"
         if self.truncated:
             obj["truncated"] = True
         return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")

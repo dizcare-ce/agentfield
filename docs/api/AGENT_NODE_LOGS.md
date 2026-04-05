@@ -24,7 +24,7 @@ Agent nodes MAY expose process stdout/stderr for the control plane UI to proxy.
 - Each line is a JSON object:
 
 ```json
-{"v":1,"seq":1,"ts":"2026-04-05T12:00:00.000Z","stream":"stdout","line":"hello"}
+{"v":1,"seq":1,"ts":"2026-04-05T12:00:00.000Z","stream":"stdout","line":"hello","level":"info","source":"process"}
 ```
 
 | Field    | Type   | Description |
@@ -34,6 +34,8 @@ Agent nodes MAY expose process stdout/stderr for the control plane UI to proxy.
 | `ts`     | string | RFC3339 UTC timestamp. |
 | `stream` | string | `stdout` or `stderr`. |
 | `line`   | string | Single line (no embedded newlines). |
+| `level`  | string | Optional; SDKs MAY set `info` for stdout, `error` for stderr, `log` otherwise. |
+| `source` | string | Optional; e.g. `process` for captured stdio. |
 | `truncated` | bool | Optional; line was truncated at max length. |
 
 ### Errors

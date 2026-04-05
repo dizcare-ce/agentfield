@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Search,
   SkillIcon,
+  Terminal,
 } from "@/components/ui/icon-bridge";
 import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition, LifecycleStatus } from "@/types/agentfield";
 import type { AgentTagSummary } from "@/services/tagApprovalApi";
@@ -511,17 +512,37 @@ function AgentRow({ node, tagSummary }: AgentRowProps) {
 
       {tagSummary ? <AgentAuthTagStrip summary={tagSummary} /> : null}
 
-      {/* Expanded: endpoints + process logs */}
+      {/* Expanded: endpoints + process logs (match Node detail tab chrome: rounded-lg muted track, full width) */}
       {open && (
-        <div className="border-t border-border bg-muted/15">
+        <div className="border-t border-border bg-muted/10">
           <Tabs defaultValue="endpoints" className="w-full">
-            <div className="px-4 pt-2 pb-1">
-              <TabsList variant="segmented" className="h-8 w-full max-w-md">
-                <TabsTrigger value="endpoints" className="text-xs">
-                  Endpoints
+            <div
+              className="border-b border-border/60 bg-muted/20 px-4 py-3"
+              role="presentation"
+            >
+              <TabsList
+                className="grid h-10 w-full grid-cols-2 gap-1 rounded-lg bg-muted/40 p-1 text-muted-foreground shadow-inner"
+                aria-label="Agent detail sections"
+              >
+                <TabsTrigger
+                  value="endpoints"
+                  className="group gap-2 rounded-md px-3 text-sm font-medium data-[state=active]:text-foreground"
+                >
+                  <ReasonerIcon
+                    className="size-4 shrink-0 opacity-60 group-data-[state=active]:opacity-100"
+                    aria-hidden
+                  />
+                  <span className="truncate">Endpoints</span>
                 </TabsTrigger>
-                <TabsTrigger value="logs" className="text-xs">
-                  Process logs
+                <TabsTrigger
+                  value="logs"
+                  className="group gap-2 rounded-md px-3 text-sm font-medium data-[state=active]:text-foreground"
+                >
+                  <Terminal
+                    className="size-4 shrink-0 opacity-60 group-data-[state=active]:opacity-100"
+                    aria-hidden
+                  />
+                  <span className="truncate">Process logs</span>
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -532,7 +553,7 @@ function AgentRow({ node, tagSummary }: AgentRowProps) {
                 skillCount={node.skill_count}
               />
             </TabsContent>
-            <TabsContent value="logs" className="mt-0 px-4 pb-4 focus-visible:outline-none">
+            <TabsContent value="logs" className="mt-0 border-t border-border/40 bg-card/30 px-4 pb-4 pt-3 focus-visible:outline-none">
               <NodeProcessLogsPanel nodeId={node.id} />
             </TabsContent>
           </Tabs>

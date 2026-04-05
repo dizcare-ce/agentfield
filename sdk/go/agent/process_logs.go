@@ -18,6 +18,8 @@ type processLogEntry struct {
 	TS        string `json:"ts"`
 	Stream    string `json:"stream"`
 	Line      string `json:"line"`
+	Level     string `json:"level,omitempty"`
+	Source    string `json:"source,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
@@ -94,9 +96,21 @@ func (r *processLogRing) appendLine(stream, line string, truncated bool) {
 		return
 	}
 	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
+	level := "info"
+	switch strings.ToLower(strings.TrimSpace(stream)) {
+	case "stderr":
+		level = "error"
+	case "stdout":
+		level = "info"
+	default:
+		level = "log"
+	}
 	r.mu.Lock()
 	r.seq++
-	e := processLogEntry{V: 1, Seq: r.seq, TS: ts, Stream: stream, Line: line, Truncated: truncated}
+	e := processLogEntry{
+		V: 1, Seq: r.seq, TS: ts, Stream: stream, Line: line,
+		Level: level, Source: "process", Truncated: truncated,
+	}
 	r.entries = append(r.entries, e)
 	r.approxBytes += len(line) + 64
 	for r.approxBytes > r.maxBytes && len(r.entries) > 1 {

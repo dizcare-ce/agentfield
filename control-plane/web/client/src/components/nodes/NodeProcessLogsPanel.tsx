@@ -10,7 +10,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   AlertCircle,
   Copy,
@@ -31,6 +33,51 @@ import {
 const MAX_BUFFER = 5000;
 const DEFAULT_TAIL = "200";
 
+type StreamFilter = "all" | "stdout" | "stderr";
+
+function normalizeStream(s: string | undefined): "stdout" | "stderr" | "other" {
+  const x = (s ?? "").toLowerCase();
+  if (x === "stderr" || x === "err") return "stderr";
+  if (x === "stdout" || x === "out") return "stdout";
+  return "other";
+}
+
+/** Wall time for scanning; falls back to — if missing/invalid. */
+function formatLogTime(iso: string | undefined): string {
+  if (!iso?.trim()) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+function formatLogDate(iso: string | undefined): string | null {
+  if (!iso?.trim()) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return null;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
+}
+
+function levelBadgeVariant(
+  level: string | undefined
+): "default" | "secondary" | "destructive" | "outline" {
+  const l = (level ?? "").toLowerCase();
+  if (l === "error" || l === "fatal" || l === "critical") return "destructive";
+  if (l === "warn" || l === "warning") return "outline";
+  if (l === "info" || l === "log") return "secondary";
+  return "outline";
+}
+
 export interface NodeProcessLogsPanelProps {
   nodeId: string;
   className?: string;
@@ -50,6 +97,7 @@ export function NodeProcessLogsPanel({
 }: NodeProcessLogsPanelProps) {
   const [entries, setEntries] = useState<NodeLogEntry[]>([]);
   const [filter, setFilter] = useState("");
+  const [streamFilter, setStreamFilter] = useState<StreamFilter>("all");
   const [live, setLive] = useState(false);
   const [loadingTail, setLoadingTail] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -118,15 +166,42 @@ export function NodeProcessLogsPanel({
     };
   }, [live, nodeId]);
 
+  const streamCounts = useMemo(() => {
+    let stdout = 0;
+    let stderr = 0;
+    let other = 0;
+    for (const e of entries) {
+      const k = normalizeStream(e.stream);
+      if (k === "stdout") stdout += 1;
+      else if (k === "stderr") stderr += 1;
+      else other += 1;
+    }
+    return { all: entries.length, stdout, stderr, other };
+  }, [entries]);
+
+  const streamScoped = useMemo(() => {
+    if (streamFilter === "all") return entries;
+    return entries.filter((e) => normalizeStream(e.stream) === streamFilter);
+  }, [entries, streamFilter]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((e) => {
+    if (!q) return streamScoped;
+    return streamScoped.filter((e) => {
       const line = (e.line ?? "").toLowerCase();
       const stream = (e.stream ?? "").toLowerCase();
-      return line.includes(q) || stream.includes(q);
+      const level = (e.level ?? "").toLowerCase();
+      const source = (e.source ?? "").toLowerCase();
+      const seq = String(e.seq ?? "");
+      return (
+        line.includes(q) ||
+        stream.includes(q) ||
+        level.includes(q) ||
+        source.includes(q) ||
+        seq.includes(q)
+      );
     });
-  }, [entries, filter]);
+  }, [streamScoped, filter]);
 
   const ndjsonBlob = useMemo(() => {
     return filtered.map((e) => JSON.stringify(e)).join("\n");
@@ -240,20 +315,86 @@ export function NodeProcessLogsPanel({
           </div>
         </div>
         <CardDescription className="text-xs text-muted-foreground">
-          Tailed from the agent via the control plane proxy. Requires a
-          long-running agent with logs enabled and matching internal auth.
+          NDJSON from the agent (UTC timestamps, seq, stdout/stderr). Filter by
+          stream, then search text, seq, level, or source when the SDK emits them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="relative">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+          <div
+            className="min-w-0 flex-1 space-y-1.5"
+            role="group"
+            aria-label="Filter by stdout or stderr"
+          >
+            <p className="text-xs font-medium text-muted-foreground">Stream</p>
+            <SegmentedControl
+              value={streamFilter}
+              onValueChange={(v) => setStreamFilter(v as StreamFilter)}
+              size="sm"
+              className="w-full sm:w-auto"
+              options={[
+                {
+                  value: "all",
+                  label: `All${streamCounts.all ? ` (${streamCounts.all})` : ""}`,
+                },
+                {
+                  value: "stdout",
+                  label: `Stdout${streamCounts.stdout ? ` (${streamCounts.stdout})` : ""}`,
+                },
+                {
+                  value: "stderr",
+                  label: `Stderr${streamCounts.stderr ? ` (${streamCounts.stderr})` : ""}`,
+                },
+              ]}
+            />
+          </div>
+          {streamCounts.other > 0 ? (
+            <p className="text-[11px] text-muted-foreground sm:pb-1">
+              {streamCounts.other} line{streamCounts.other === 1 ? "" : "s"} on
+              other streams (shown in All only)
+            </p>
+          ) : null}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label
+            htmlFor={`${nodeId}-log-text-filter`}
+            className="text-xs text-muted-foreground"
+          >
+            Search in visible lines
+          </Label>
           <Input
+            id={`${nodeId}-log-text-filter`}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter displayed lines…"
+            placeholder="Text, seq, level, source…"
             className="h-9 border-border/80 bg-background text-sm"
-            aria-label="Filter log lines"
+            aria-label="Filter log lines by text"
           />
         </div>
+
+        {filter.trim() !== "" || streamFilter !== "all" ? (
+          <p className="text-[11px] text-muted-foreground">
+            {filter.trim() !== "" ? (
+              <>
+                <span className="font-medium tabular-nums text-foreground">
+                  {filtered.length}
+                </span>{" "}
+                match{filtered.length === 1 ? "" : "es"} within{" "}
+                <span className="tabular-nums">{streamScoped.length}</span> line
+                {streamScoped.length === 1 ? "" : "s"}
+                {streamFilter !== "all" ? ` (${streamFilter})` : ""}
+              </>
+            ) : (
+              <>
+                <span className="font-medium tabular-nums text-foreground">
+                  {filtered.length}
+                </span>{" "}
+                line{filtered.length === 1 ? "" : "s"} · stream: {streamFilter}
+              </>
+            )}
+          </p>
+        ) : null}
 
         {streamError ? (
           <Alert variant="destructive">
@@ -274,28 +415,72 @@ export function NodeProcessLogsPanel({
                 supports streaming.
               </p>
             ) : (
-              filtered.map((e, i) => (
-                <div
-                  key={`${e.seq}-${e.ts}-${i}`}
-                  className="flex gap-2 border-b border-border/40 py-1 last:border-0"
-                >
-                  <span className="w-14 shrink-0 text-muted-foreground tabular-nums">
-                    {e.seq}
-                  </span>
-                  <Badge
-                    variant={e.stream === "stderr" ? "destructive" : "secondary"}
-                    className="h-5 shrink-0 px-1.5 text-[9px] font-normal uppercase"
+              filtered.map((e, i) => {
+                const ns = normalizeStream(e.stream);
+                const dateHint = formatLogDate(e.ts);
+                const timeStr = formatLogTime(e.ts);
+                const title = `${e.ts ?? ""} · seq ${e.seq ?? "?"}${
+                  e.level ? ` · ${e.level}` : ""
+                }${e.source ? ` · ${e.source}` : ""}`;
+                return (
+                  <div
+                    key={`${e.seq}-${e.ts}-${i}`}
+                    title={title}
+                    className={cn(
+                      "flex flex-col gap-1 border-b border-border/40 py-1.5 last:border-0 sm:flex-row sm:items-start sm:gap-3",
+                      ns === "stderr" && "bg-destructive/[0.04]"
+                    )}
                   >
-                    {e.stream || "?"}
-                  </Badge>
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-all text-foreground/90">
-                    {e.line}
-                    {e.truncated ? (
-                      <span className="text-muted-foreground"> …</span>
-                    ) : null}
-                  </span>
-                </div>
-              ))
+                    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-[10px] text-muted-foreground sm:w-[7.25rem] sm:flex-col sm:items-start sm:gap-0.5">
+                      <time
+                        dateTime={e.ts}
+                        className="leading-tight sm:w-full"
+                      >
+                        {dateHint ? (
+                          <span className="block truncate text-[9px] text-muted-foreground/90">
+                            {dateHint}
+                          </span>
+                        ) : null}
+                        <span className="block font-medium text-muted-foreground">
+                          {timeStr}
+                        </span>
+                      </time>
+                      <span className="text-[10px] text-muted-foreground/70 sm:font-mono">
+                        #{e.seq}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-1">
+                      <Badge
+                        variant={ns === "stderr" ? "destructive" : "secondary"}
+                        className="h-5 shrink-0 px-1.5 text-[9px] font-normal uppercase"
+                      >
+                        {ns === "other" ? e.stream || "?" : ns}
+                      </Badge>
+                      {e.level ? (
+                        <Badge
+                          variant={levelBadgeVariant(e.level)}
+                          className="h-5 max-w-[6rem] shrink-0 truncate px-1.5 text-[9px] font-normal capitalize"
+                        >
+                          {e.level}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {e.source ? (
+                        <span className="mb-0.5 block truncate text-[10px] text-muted-foreground">
+                          {e.source}
+                        </span>
+                      ) : null}
+                      <span className="whitespace-pre-wrap break-all text-foreground/90">
+                        {e.line}
+                        {e.truncated ? (
+                          <span className="text-muted-foreground"> …</span>
+                        ) : null}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </ScrollArea>

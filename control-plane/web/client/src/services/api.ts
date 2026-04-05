@@ -598,6 +598,7 @@ export async function registerServerlessAgent(invocationUrl: string): Promise<{
 // Agent node process logs (UI proxy → NDJSON)
 // ============================================================================
 
+/** NDJSON v1 from agent process log ring (Python / Go / TypeScript SDKs). */
 export type NodeLogEntry = {
   v: number;
   seq: number;
@@ -605,6 +606,10 @@ export type NodeLogEntry = {
   stream: string;
   line: string;
   truncated?: boolean;
+  /** Optional severity when SDKs emit it (e.g. log, info, warn, error). */
+  level?: string;
+  /** Optional logical source (e.g. sdk id, logger name). */
+  source?: string;
 };
 
 export type NodeLogProxyEffective = {

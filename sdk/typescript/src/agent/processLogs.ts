@@ -4,6 +4,8 @@ type LogEntry = {
   ts: string;
   stream: string;
   line: string;
+  level?: string;
+  source?: string;
   truncated?: boolean;
 };
 
@@ -47,7 +49,18 @@ export class ProcessLogRing {
   append(stream: string, line: string, truncated: boolean): void {
     const ts = new Date().toISOString();
     this.seq += 1;
-    const e: LogEntry = { v: 1, seq: this.seq, ts, stream, line, truncated };
+    const sl = stream.toLowerCase();
+    const level = sl === 'stderr' ? 'error' : sl === 'stdout' ? 'info' : 'log';
+    const e: LogEntry = {
+      v: 1,
+      seq: this.seq,
+      ts,
+      stream,
+      line,
+      level,
+      source: 'process',
+      truncated,
+    };
     this.entries.push(e);
     this.approxBytes += line.length + 64;
     while (this.approxBytes > this.maxBytes && this.entries.length > 1) {
