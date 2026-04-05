@@ -7633,6 +7633,264 @@ func (ls *LocalStorage) ListWorkflowExecutionEvents(ctx context.Context, executi
 	return events, nil
 }
 
+// StoreExecutionLogEntry inserts a structured execution log entry and publishes it to subscribers.
+func (ls *LocalStorage) StoreExecutionLogEntry(ctx context.Context, entry *types.ExecutionLogEntry) error {
+	if entry == nil {
+		return fmt.Errorf("execution log entry is nil")
+	}
+	if strings.TrimSpace(entry.ExecutionID) == "" {
+		return fmt.Errorf("execution_id is required")
+	}
+	if strings.TrimSpace(entry.WorkflowID) == "" {
+		entry.WorkflowID = entry.ExecutionID
+	}
+	if strings.TrimSpace(entry.Level) == "" {
+		entry.Level = "info"
+	}
+	if strings.TrimSpace(entry.Source) == "" {
+		entry.Source = "sdk.logger"
+	}
+	if entry.EmittedAt.IsZero() {
+		entry.EmittedAt = time.Now().UTC()
+	}
+
+	return ls.retryDatabaseOperation(ctx, entry.ExecutionID, func() error {
+		tx, err := ls.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to begin execution log transaction: %w", err)
+		}
+		defer rollbackTx(tx, "StoreExecutionLogEntry:"+entry.ExecutionID)
+
+		if err := ls.storeExecutionLogEntryTx(ctx, tx, entry); err != nil {
+			return err
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit execution log transaction: %w", err)
+		}
+
+		entryCopy := *entry
+		ls.executionLogEventBus.Publish(&entryCopy)
+		return nil
+	})
+}
+
+func (ls *LocalStorage) storeExecutionLogEntryTx(ctx context.Context, tx DBTX, entry *types.ExecutionLogEntry) error {
+	var nextSeq int64 = 1
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(sequence), 0) + 1 FROM execution_logs WHERE execution_id = ?`,
+		entry.ExecutionID,
+	).Scan(&nextSeq); err != nil {
+		return fmt.Errorf("failed to compute execution log sequence: %w", err)
+	}
+	entry.Sequence = nextSeq
+
+	attributes := "{}"
+	if len(entry.Attributes) > 0 {
+		attributes = string(entry.Attributes)
+	}
+
+	query := `
+		INSERT INTO execution_logs (
+			execution_id, workflow_id, run_id, root_workflow_id, parent_execution_id, sequence,
+			agent_node_id, reasoner_id, level, source, event_type, message, attributes,
+			system_generated, sdk_language, attempt, span_id, step_id, error_category, emitted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	result, err := tx.ExecContext(ctx, query,
+		entry.ExecutionID,
+		entry.WorkflowID,
+		entry.RunID,
+		entry.RootWorkflowID,
+		entry.ParentExecutionID,
+		entry.Sequence,
+		entry.AgentNodeID,
+		entry.ReasonerID,
+		entry.Level,
+		entry.Source,
+		entry.EventType,
+		entry.Message,
+		attributes,
+		entry.SystemGenerated,
+		entry.SDKLanguage,
+		entry.Attempt,
+		entry.SpanID,
+		entry.StepID,
+		entry.ErrorCategory,
+		entry.EmittedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert execution log entry: %w", err)
+	}
+	if id, err := result.LastInsertId(); err == nil {
+		entry.EventID = id
+	}
+	if entry.RecordedAt.IsZero() {
+		entry.RecordedAt = time.Now().UTC()
+	}
+	return nil
+}
+
+// ListExecutionLogEntries retrieves structured execution logs ordered by sequence.
+func (ls *LocalStorage) ListExecutionLogEntries(ctx context.Context, executionID string, afterSeq *int64, limit int, levels []string, nodeIDs []string, sources []string, query string) ([]*types.ExecutionLogEntry, error) {
+	baseQuery := `
+		SELECT event_id, execution_id, workflow_id, run_id, root_workflow_id, parent_execution_id, sequence,
+		       agent_node_id, reasoner_id, level, source, event_type, message, attributes, system_generated,
+		       sdk_language, attempt, span_id, step_id, error_category, emitted_at, recorded_at
+		FROM execution_logs
+		WHERE execution_id = ?`
+	args := []interface{}{executionID}
+
+	appendIn := func(column string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		holders := make([]string, 0, len(values))
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			holders = append(holders, "?")
+			args = append(args, value)
+		}
+		if len(holders) > 0 {
+			baseQuery += " AND " + column + " IN (" + strings.Join(holders, ",") + ")"
+		}
+	}
+
+	if afterSeq != nil {
+		baseQuery += " AND sequence > ?"
+		args = append(args, *afterSeq)
+	}
+	appendIn("level", levels)
+	appendIn("agent_node_id", nodeIDs)
+	appendIn("source", sources)
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		baseQuery += " AND (message LIKE ? OR attributes LIKE ?)"
+		like := "%" + trimmed + "%"
+		args = append(args, like, like)
+	}
+
+	baseQuery += " ORDER BY sequence ASC"
+	if limit > 0 {
+		baseQuery += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := ls.db.QueryContext(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query execution logs: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*types.ExecutionLogEntry
+	for rows.Next() {
+		entry := &types.ExecutionLogEntry{}
+		var runID, rootWorkflowID, parentExecutionID, reasonerID, eventType, sdkLanguage, spanID, stepID, errorCategory sql.NullString
+		var attributes sql.NullString
+		var attempt sql.NullInt64
+		if err := rows.Scan(
+			&entry.EventID,
+			&entry.ExecutionID,
+			&entry.WorkflowID,
+			&runID,
+			&rootWorkflowID,
+			&parentExecutionID,
+			&entry.Sequence,
+			&entry.AgentNodeID,
+			&reasonerID,
+			&entry.Level,
+			&entry.Source,
+			&eventType,
+			&entry.Message,
+			&attributes,
+			&entry.SystemGenerated,
+			&sdkLanguage,
+			&attempt,
+			&spanID,
+			&stepID,
+			&errorCategory,
+			&entry.EmittedAt,
+			&entry.RecordedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan execution log entry: %w", err)
+		}
+
+		if runID.Valid {
+			entry.RunID = &runID.String
+		}
+		if rootWorkflowID.Valid {
+			entry.RootWorkflowID = &rootWorkflowID.String
+		}
+		if parentExecutionID.Valid {
+			entry.ParentExecutionID = &parentExecutionID.String
+		}
+		if reasonerID.Valid {
+			entry.ReasonerID = &reasonerID.String
+		}
+		if eventType.Valid {
+			entry.EventType = &eventType.String
+		}
+		if sdkLanguage.Valid {
+			entry.SDKLanguage = &sdkLanguage.String
+		}
+		if spanID.Valid {
+			entry.SpanID = &spanID.String
+		}
+		if stepID.Valid {
+			entry.StepID = &stepID.String
+		}
+		if errorCategory.Valid {
+			entry.ErrorCategory = &errorCategory.String
+		}
+		if attempt.Valid {
+			value := int(attempt.Int64)
+			entry.Attempt = &value
+		}
+		if attributes.Valid {
+			entry.Attributes = json.RawMessage(attributes.String)
+		} else {
+			entry.Attributes = json.RawMessage("{}")
+		}
+
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating execution logs: %w", err)
+	}
+	return entries, nil
+}
+
+// PruneExecutionLogEntries trims old or excessive execution logs for a single execution.
+func (ls *LocalStorage) PruneExecutionLogEntries(ctx context.Context, executionID string, maxEntries int, olderThan time.Time) error {
+	if strings.TrimSpace(executionID) == "" {
+		return nil
+	}
+	if !olderThan.IsZero() {
+		if _, err := ls.db.ExecContext(ctx,
+			`DELETE FROM execution_logs WHERE execution_id = ? AND emitted_at < ?`,
+			executionID, olderThan,
+		); err != nil {
+			return fmt.Errorf("failed to prune execution logs by age: %w", err)
+		}
+	}
+	if maxEntries > 0 {
+		if _, err := ls.db.ExecContext(ctx, `
+			DELETE FROM execution_logs
+			WHERE execution_id = ?
+			  AND event_id NOT IN (
+			    SELECT event_id FROM execution_logs
+			    WHERE execution_id = ?
+			    ORDER BY sequence DESC
+			    LIMIT ?
+			  )`,
+			executionID, executionID, maxEntries,
+		); err != nil {
+			return fmt.Errorf("failed to prune execution logs by count: %w", err)
+		}
+	}
+	return nil
+}
+
 // StoreExecutionWebhookEvent records webhook delivery attempts for SQLite deployments.
 func (ls *LocalStorage) StoreExecutionWebhookEvent(ctx context.Context, event *types.ExecutionWebhookEvent) error {
 	if event == nil {
