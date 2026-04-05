@@ -49,6 +49,13 @@ export function useSSESync(): SSESyncContextValue {
   return useContext(SSESyncContext);
 }
 
+function shouldInvalidateForEvent(data: unknown): boolean {
+  if (!data || typeof data !== "object") return true;
+
+  const type = (data as Record<string, unknown>).type;
+  return type !== "connected" && type !== "heartbeat";
+}
+
 function useSSEQuerySyncCore(): SSESyncContextValue {
   const queryClient = useQueryClient();
 
@@ -73,13 +80,14 @@ function useSSEQuerySyncCore(): SSESyncContextValue {
   useEffect(() => {
     if (!execEvent) return;
 
-    void queryClient.invalidateQueries({ queryKey: ["runs"] });
-    void queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-
     const data =
       execEvent.data && typeof execEvent.data === "object"
         ? (execEvent.data as Record<string, unknown>)
         : {};
+    if (!shouldInvalidateForEvent(data)) return;
+
+    void queryClient.invalidateQueries({ queryKey: ["runs"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
 
     const runId = (data.run_id ?? data.workflow_id) as string | undefined;
     const execId = data.execution_id as string | undefined;
@@ -113,6 +121,9 @@ function useSSEQuerySyncCore(): SSESyncContextValue {
 
   useEffect(() => {
     if (!nodeEvent) return;
+
+    if (!shouldInvalidateForEvent(nodeEvent.data)) return;
+
     void queryClient.invalidateQueries({ queryKey: ["agents"] });
     void queryClient.invalidateQueries({ queryKey: ["reasoners"] });
   }, [nodeEvent, queryClient]);
@@ -134,8 +145,7 @@ function useSSEQuerySyncCore(): SSESyncContextValue {
       reasonerEvent.data && typeof reasonerEvent.data === "object"
         ? (reasonerEvent.data as Record<string, unknown>)
         : {};
-    const t = data.type;
-    if (t === "connected" || t === "heartbeat") return;
+    if (!shouldInvalidateForEvent(data)) return;
     void queryClient.invalidateQueries({ queryKey: ["reasoners"] });
   }, [reasonerEvent, queryClient]);
 

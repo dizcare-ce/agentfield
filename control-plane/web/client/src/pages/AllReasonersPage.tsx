@@ -46,7 +46,7 @@ const VIEW_OPTIONS: ReadonlyArray<SegmentedControlOption> = [
 export function AllReasonersPage() {
   const navigate = useNavigate();
   const { nodeConnected, reasonerConnected } = useSSESync();
-  const reasonersLive = nodeConnected || reasonerConnected;
+  const reasonersLive = nodeConnected && reasonerConnected;
   const [filters, setFilters] = useState<ReasonerFilters>({
     status: "online",
     limit: 50,
@@ -231,8 +231,9 @@ export function AllReasonersPage() {
           <WifiOff className="h-4 w-4" />
           <AlertTitle>Live updates unavailable</AlertTitle>
           <AlertDescription>
-            Node or reasoner event streams are disconnected — this list polls
-            every 6s until they reconnect. Use Refresh for an immediate pull.
+            One or more reasoner update streams are disconnected — this list
+            polls every 6s until both reconnect. Use Refresh for an immediate
+            pull.
           </AlertDescription>
         </Alert>
       ) : null}
