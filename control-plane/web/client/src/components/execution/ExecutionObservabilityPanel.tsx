@@ -16,6 +16,11 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { FilterCombobox } from "@/components/ui/filter-combobox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchBar } from "@/components/ui/SearchBar";
@@ -23,6 +28,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnifiedJsonViewer } from "@/components/ui/UnifiedJsonViewer";
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   PauseCircle,
   Play,
@@ -364,62 +371,74 @@ export function ExecutionObservabilityPanel({
                     No structured execution logs match the current filters yet.
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="overflow-hidden rounded-xl border border-border/70 bg-background/95">
                     {filteredEntries.map((entry) => (
-                      <article
+                      <Collapsible
                         key={`${entry.execution_id}-${entry.seq}-${entry.ts}`}
-                        className="rounded-xl border border-border/70 bg-background/90 p-3 shadow-xs"
+                        className="border-b border-border/60 last:border-b-0"
                       >
-                        <div className="flex flex-col gap-3">
-                          <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <Badge variant={levelVariant(entry.level)} className="font-mono uppercase">
-                              {entry.level}
-                            </Badge>
-                            <Badge variant="outline" className="font-mono">
-                              {entry.agent_node_id}
-                            </Badge>
-                            <Badge variant="secondary" className="font-mono">
-                              {entry.source}
-                            </Badge>
-                            {entry.reasoner_id ? (
-                              <Badge variant="outline" className="font-mono">
-                                {entry.reasoner_id}
-                              </Badge>
-                            ) : null}
-                            {entry.event_type ? (
-                              <Badge variant="outline" className="font-mono">
-                                {entry.event_type}
-                              </Badge>
-                            ) : null}
-                            <span className="font-mono text-muted-foreground">
-                              {formatTimestamp(entry.ts)}
-                            </span>
-                          </div>
+                        <div className="px-4 py-3">
+                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-4">
+                            <div className="flex min-w-0 flex-1 flex-col gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-[5.5rem] font-mono text-xs text-muted-foreground">
+                                  {formatTimestamp(entry.ts)}
+                                </span>
+                                <Badge
+                                  variant={levelVariant(entry.level)}
+                                  className="h-6 font-mono uppercase"
+                                >
+                                  {entry.level}
+                                </Badge>
+                                <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                                  {entry.message}
+                                </p>
+                              </div>
 
-                          <div className="space-y-2">
-                            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-                              {entry.message}
-                            </p>
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="rounded-md border border-border/60 bg-muted/35 px-2 py-1 font-mono">
+                                  {entry.agent_node_id}
+                                </span>
+                                <span className="rounded-md border border-border/60 bg-muted/35 px-2 py-1 font-mono">
+                                  {entry.source}
+                                </span>
+                                {entry.reasoner_id ? (
+                                  <span className="rounded-md border border-border/60 bg-muted/35 px-2 py-1 font-mono">
+                                    {entry.reasoner_id}
+                                  </span>
+                                ) : null}
+                                {entry.event_type ? (
+                                  <span className="rounded-md border border-border/60 bg-muted/35 px-2 py-1 font-mono">
+                                    {entry.event_type}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
 
                             {hasAttributes(entry.attributes) ? (
-                              <details className="rounded-lg border border-border/60 bg-muted/25 p-3">
-                                <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                  Attributes
-                                </summary>
-                                <div className="mt-3 overflow-hidden rounded-md border border-border/50 bg-background">
-                                  <UnifiedJsonViewer
-                                    data={entry.attributes}
-                                    searchable={false}
-                                    showHeader={false}
-                                    className="border-0"
-                                    maxHeight="18rem"
-                                  />
-                                </div>
-                              </details>
+                              <CollapsibleTrigger className="group inline-flex items-center gap-1 self-start rounded-md border border-border/70 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground">
+                                <ChevronRight className="h-3.5 w-3.5 group-data-[state=open]:hidden" />
+                                <ChevronDown className="hidden h-3.5 w-3.5 group-data-[state=open]:block" />
+                                Attributes
+                              </CollapsibleTrigger>
                             ) : null}
                           </div>
+
+                          {hasAttributes(entry.attributes) ? (
+                            <CollapsibleContent className="mt-3">
+                              <div className="overflow-hidden rounded-lg border border-border/60 bg-muted/15">
+                                <UnifiedJsonViewer
+                                  data={entry.attributes}
+                                  searchable={false}
+                                  showHeader={false}
+                                  className="border-0"
+                                  maxHeight="16rem"
+                                />
+                              </div>
+                            </CollapsibleContent>
+                          ) : null}
                         </div>
-                      </article>
+                      </Collapsible>
                     ))}
                   </div>
                 )}
