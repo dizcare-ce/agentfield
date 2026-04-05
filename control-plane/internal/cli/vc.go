@@ -1,14 +1,10 @@
 package cli
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -17,86 +13,6 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 	"github.com/spf13/cobra"
 )
-
-// maxDIDDocBytes limits the response body when fetching external DID documents.
-const maxDIDDocBytes = 2 << 20 // 2 MiB
-
-// safeHTTPClient returns an http.Client that refuses to connect to private/loopback/link-local IPs,
-// preventing SSRF when resolving user-supplied DID URLs or custom resolvers.
-func safeHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, _, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, fmt.Errorf("invalid address: %s", addr)
-				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-				if err != nil {
-					return nil, err
-				}
-				for _, ip := range ips {
-					if isPrivateIP(ip.IP) {
-						return nil, fmt.Errorf("request to private/internal address %s is blocked", ip.IP)
-					}
-				}
-				dialer := &net.Dialer{Timeout: 5 * time.Second}
-				return dialer.DialContext(ctx, network, addr)
-			},
-		},
-	}
-}
-
-func isPrivateIP(ip net.IP) bool {
-	privateRanges := []string{
-		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-		"127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
-	}
-	for _, cidr := range privateRanges {
-		_, network, _ := net.ParseCIDR(cidr)
-		if network != nil && network.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// validateExternalURL ensures a URL is HTTPS and structurally safe to fetch.
-func validateExternalURL(rawURL string) (*url.URL, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %v", err)
-	}
-	if u.Scheme != "https" {
-		return nil, fmt.Errorf("only HTTPS URLs are allowed, got %s", u.Scheme)
-	}
-	if u.Host == "" || u.Hostname() == "" {
-		return nil, fmt.Errorf("URL must include a host")
-	}
-	if u.User != nil {
-		return nil, fmt.Errorf("embedded URL credentials are not allowed")
-	}
-	return u, nil
-}
-
-func fetchExternalURL(ctx context.Context, rawURL string) (*http.Response, *url.URL, error) {
-	parsedURL, err := validateExternalURL(rawURL)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build request: %v", err)
-	}
-
-	resp, err := safeHTTPClient().Do(req)
-	if err != nil {
-		return nil, parsedURL, err
-	}
-	return resp, parsedURL, nil
-}
 
 // NewVCCommand creates the vc command with subcommands
 func NewVCCommand() *cobra.Command {
@@ -297,22 +213,19 @@ func collectUniqueDIDs(chain EnhancedVCChain) []string {
 }
 
 func resolveDID(did string, bundle map[string]DIDResolutionInfo, options VerifyOptions) (DIDResolutionInfo, error) {
+	if options.ResolveWeb {
+		return DIDResolutionInfo{}, fmt.Errorf("web DID resolution is disabled in this CLI verifier; use bundled DID resolution instead")
+	}
+	if options.Resolver != "" {
+		return DIDResolutionInfo{}, fmt.Errorf("custom DID resolvers are disabled in this CLI verifier; use bundled DID resolution instead")
+	}
+
 	// 1. did:web always resolves from web
 	if strings.HasPrefix(did, "did:web:") {
 		return resolveWebDID(did)
 	}
 
-	// 2. --resolve-web flag: fetch from web
-	if options.ResolveWeb {
-		return resolveFromWeb(did, options.Resolver)
-	}
-
-	// 3. --did-resolver: use custom endpoint
-	if options.Resolver != "" {
-		return resolveFromCustom(did, options.Resolver)
-	}
-
-	// 4. Fallback: use bundled resolution
+	// 2. Fallback: use bundled resolution
 	if bundle != nil {
 		if resolution, exists := bundle[did]; exists {
 			resolution.ResolvedFrom = "bundled"
@@ -341,65 +254,7 @@ func resolveWebDID(did string) (DIDResolutionInfo, error) {
 	}
 
 	didURL := fmt.Sprintf("https://%s%s", domain, path)
-	resp, parsedURL, err := fetchExternalURL(context.Background(), didURL)
-	if err != nil {
-		return DIDResolutionInfo{}, fmt.Errorf("failed to fetch DID document: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return DIDResolutionInfo{}, fmt.Errorf("DID document not found: HTTP %d", resp.StatusCode)
-	}
-
-	var didDoc map[string]interface{}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDIDDocBytes)).Decode(&didDoc); err != nil {
-		return DIDResolutionInfo{}, fmt.Errorf("failed to parse DID document: %v", err)
-	}
-
-	// Extract public key from DID document
-	publicKeyJWK, err := extractPublicKeyFromDIDDoc(didDoc)
-	if err != nil {
-		return DIDResolutionInfo{}, err
-	}
-
-	return DIDResolutionInfo{
-		DID:          did,
-		Method:       "web",
-		PublicKeyJWK: publicKeyJWK,
-		WebURL:       parsedURL.String(),
-		ResolvedFrom: "web",
-	}, nil
-}
-
-func resolveFromWeb(did, resolver string) (DIDResolutionInfo, error) {
-	// For did:key, we can resolve locally
-	if strings.HasPrefix(did, "did:key:") {
-		return resolveKeyDID(did)
-	}
-
-	// For other methods, would need a universal resolver
-	return DIDResolutionInfo{}, fmt.Errorf("web resolution not supported for DID method: %s", getDIDMethod(did))
-}
-
-func resolveFromCustom(did, resolver string) (DIDResolutionInfo, error) {
-	resolverURL := fmt.Sprintf("%s/%s", strings.TrimSuffix(resolver, "/"), did)
-	resp, _, err := fetchExternalURL(context.Background(), resolverURL)
-	if err != nil {
-		return DIDResolutionInfo{}, fmt.Errorf("failed to resolve DID: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return DIDResolutionInfo{}, fmt.Errorf("DID resolution failed: HTTP %d", resp.StatusCode)
-	}
-
-	var resolution DIDResolutionInfo
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDIDDocBytes)).Decode(&resolution); err != nil {
-		return DIDResolutionInfo{}, fmt.Errorf("failed to parse resolution response: %v", err)
-	}
-
-	resolution.ResolvedFrom = "custom"
-	return resolution, nil
+	return DIDResolutionInfo{}, fmt.Errorf("did:web online resolution is disabled in this CLI verifier; use bundled DID resolution for %s (%s)", did, didURL)
 }
 
 func resolveKeyDID(did string) (DIDResolutionInfo, error) {
@@ -416,25 +271,6 @@ func resolveKeyDID(did string) (DIDResolutionInfo, error) {
 		ResolvedFrom: "local",
 		// PublicKeyJWK would be extracted from the key encoding
 	}, fmt.Errorf("did:key resolution not fully implemented")
-}
-
-func extractPublicKeyFromDIDDoc(didDoc map[string]interface{}) (map[string]interface{}, error) {
-	verificationMethod, ok := didDoc["verificationMethod"].([]interface{})
-	if !ok || len(verificationMethod) == 0 {
-		return nil, fmt.Errorf("no verification methods found in DID document")
-	}
-
-	firstMethod, ok := verificationMethod[0].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid verification method format")
-	}
-
-	publicKeyJwk, ok := firstMethod["publicKeyJwk"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("no publicKeyJwk found in verification method")
-	}
-
-	return publicKeyJwk, nil
 }
 
 //nolint:unused // Reserved for future signature verification
