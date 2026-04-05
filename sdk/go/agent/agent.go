@@ -813,7 +813,7 @@ func (a *Agent) startServer() error {
 	a.logger.Printf("listening on %s", a.cfg.ListenAddress)
 	a.logExecutionInfo(context.Background(), "server.start", "agent HTTP server listening", map[string]any{
 		"node_id": a.cfg.NodeID,
-		"listen":   a.cfg.ListenAddress,
+		"listen":  a.cfg.ListenAddress,
 	})
 	return nil
 }
@@ -846,11 +846,10 @@ func (a *Agent) Execute(ctx context.Context, reasonerName string, input map[stri
 	durationMS := time.Since(start).Milliseconds()
 	if err != nil {
 		a.logExecutionError(ctx, "reasoner.invoke.failed", "reasoner execution failed", map[string]any{
-			"reasoner_id":  reasonerName,
-			"mode":         "direct",
-			"duration_ms":  durationMS,
-			"error":        err.Error(),
-			"system_event": true,
+			"reasoner_id": reasonerName,
+			"mode":        "direct",
+			"duration_ms": durationMS,
+			"error":       err.Error(),
 		})
 		return nil, err
 	}
@@ -1714,7 +1713,7 @@ func (a *Agent) Call(ctx context.Context, target string, input map[string]any) (
 	}
 
 	a.logExecutionInfo(ctx, "call.outbound.complete", "cross-node call completed", map[string]any{
-		"target":      target,
+		"target":       target,
 		"execution_id": execResp.ExecutionID,
 		"run_id":       execResp.RunID,
 	})
@@ -1915,12 +1914,14 @@ func (a *Agent) shutdown(ctx context.Context) error {
 	})
 	close(a.stopLease)
 
-	if _, err := a.client.Shutdown(ctx, a.cfg.NodeID, types.ShutdownRequest{Reason: "shutdown", Version: a.cfg.Version}); err != nil {
-		a.logger.Printf("failed to notify shutdown: %v", err)
-		a.logExecutionWarn(ctx, "agent.shutdown.status_failed", "failed to notify control plane about shutdown", map[string]any{
-			"node_id": a.cfg.NodeID,
-			"error":   err.Error(),
-		})
+	if a.client != nil {
+		if _, err := a.client.Shutdown(ctx, a.cfg.NodeID, types.ShutdownRequest{Reason: "shutdown", Version: a.cfg.Version}); err != nil {
+			a.logger.Printf("failed to notify shutdown: %v", err)
+			a.logExecutionWarn(ctx, "agent.shutdown.status_failed", "failed to notify control plane about shutdown", map[string]any{
+				"node_id": a.cfg.NodeID,
+				"error":   err.Error(),
+			})
+		}
 	}
 
 	a.serverMu.RLock()

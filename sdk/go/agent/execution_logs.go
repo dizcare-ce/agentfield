@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	executionLogVersion = 1
-	executionLogSourceUser = "sdk.user"
+	executionLogVersion       = 1
+	executionLogSourceUser    = "sdk.user"
 	executionLogSourceRuntime = "sdk.runtime"
 )
 
@@ -20,28 +20,28 @@ var executionLogStdoutMu sync.Mutex
 
 // ExecutionLogEntry is the canonical structured execution log envelope.
 type ExecutionLogEntry struct {
-	V                 int               `json:"v"`
-	TS                string            `json:"ts"`
-	ExecutionID       string            `json:"execution_id"`
-	WorkflowID        string            `json:"workflow_id"`
-	RunID             string            `json:"run_id"`
-	RootWorkflowID    string            `json:"root_workflow_id"`
-	ParentExecutionID string            `json:"parent_execution_id"`
-	AgentNodeID       string            `json:"agent_node_id"`
-	ReasonerID        string            `json:"reasoner_id"`
-	Level             string            `json:"level"`
-	Source            string            `json:"source"`
-	EventType         string            `json:"event_type"`
-	Message           string            `json:"message"`
-	Attributes        map[string]any    `json:"attributes"`
-	SystemGenerated   bool              `json:"system_generated"`
-	SessionID         string            `json:"session_id,omitempty"`
-	ActorID           string            `json:"actor_id,omitempty"`
-	ParentWorkflowID  string            `json:"parent_workflow_id,omitempty"`
-	Depth             int               `json:"depth,omitempty"`
-	CallerDID         string            `json:"caller_did,omitempty"`
-	TargetDID         string            `json:"target_did,omitempty"`
-	AgentNodeDID      string            `json:"agent_node_did,omitempty"`
+	V                 int            `json:"v"`
+	TS                string         `json:"ts"`
+	ExecutionID       string         `json:"execution_id"`
+	WorkflowID        string         `json:"workflow_id"`
+	RunID             string         `json:"run_id"`
+	RootWorkflowID    string         `json:"root_workflow_id"`
+	ParentExecutionID string         `json:"parent_execution_id"`
+	AgentNodeID       string         `json:"agent_node_id"`
+	ReasonerID        string         `json:"reasoner_id"`
+	Level             string         `json:"level"`
+	Source            string         `json:"source"`
+	EventType         string         `json:"event_type"`
+	Message           string         `json:"message"`
+	Attributes        map[string]any `json:"attributes"`
+	SystemGenerated   bool           `json:"system_generated"`
+	SessionID         string         `json:"session_id,omitempty"`
+	ActorID           string         `json:"actor_id,omitempty"`
+	ParentWorkflowID  string         `json:"parent_workflow_id,omitempty"`
+	Depth             int            `json:"depth,omitempty"`
+	CallerDID         string         `json:"caller_did,omitempty"`
+	TargetDID         string         `json:"target_did,omitempty"`
+	AgentNodeDID      string         `json:"agent_node_did,omitempty"`
 }
 
 // ExecutionLogger emits structured execution logs and mirrors them to stdout.
@@ -228,4 +228,3 @@ func (a *Agent) normalizeExecutionContext(exec ExecutionContext) ExecutionContex
 	}
 	return exec
 }
-
