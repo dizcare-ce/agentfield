@@ -5,14 +5,20 @@ import type { WorkflowDAGLightweightResponse } from "../../types/workflows";
 import type { WorkflowExecution } from "../../types/executions";
 import { normalizeExecutionStatus } from "../../utils/status";
 import { useSSESync } from "../useSSEQuerySync";
+import { useDemoMode } from "../../demo/hooks/useDemoMode";
+import { getDemoRunDAG } from "../../demo/mock/interceptor";
 
 export function useRunDAG(runId: string | undefined) {
   const { execConnected } = useSSESync();
+  const { isDemoMode, vertical } = useDemoMode();
   return useQuery<WorkflowDAGLightweightResponse>({
-    queryKey: ["run-dag", runId],
-    queryFn: () => getWorkflowDAGLightweight(runId!),
+    queryKey: ["run-dag", runId, isDemoMode ? "demo" : "live"],
+    queryFn: isDemoMode && vertical && runId
+      ? () => Promise.resolve(getDemoRunDAG(vertical, runId))
+      : () => getWorkflowDAGLightweight(runId!),
     enabled: !!runId,
-    refetchInterval: (query) => {
+    staleTime: isDemoMode ? Infinity : undefined,
+    refetchInterval: isDemoMode ? false : (query) => {
       const status = query.state.data?.workflow_status;
       if (status === "running" || status === "pending") {
         return execConnected ? 2_500 : 1_500;

@@ -1,3 +1,4 @@
+import { useState, useCallback } from "react";
 import { Navigate, Route, BrowserRouter as Router, Routes, useParams } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RootRedirect } from "./components/RootRedirect";
@@ -19,48 +20,107 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import {
+  DemoModeProvider,
+  DemoVerticalPicker,
+  DemoStoryline,
+  DemoPill,
+  DemoExitBanner,
+  useDemoMode,
+} from "./demo";
+import type { DemoVertical } from "./demo/mock/types";
 
 function NavigateToPlayground() {
   const { reasonerId } = useParams();
   return <Navigate to={`/playground/${reasonerId}`} replace />;
 }
 
+/** Demo mode overlay — renders picker, storyline, pill, and exit banner. */
+function DemoOverlay() {
+  const { isDemoMode, act, vertical, actions } = useDemoMode();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [showExitBanner, setShowExitBanner] = useState(false);
+
+  // Show picker when demo is active but no vertical chosen yet
+  const shouldShowPicker = isDemoMode && act === 0 && vertical == null;
+
+  const handleVerticalSelect = useCallback(
+    (v: DemoVertical) => {
+      actions.activateDemo(v);
+      setPickerOpen(false);
+    },
+    [actions],
+  );
+
+  const handleSwitchVertical = useCallback(() => {
+    setPickerOpen(true);
+  }, []);
+
+  const handleBackToDemo = useCallback(() => {
+    setShowExitBanner(false);
+    if (vertical) {
+      actions.activateDemo(vertical);
+    }
+  }, [actions, vertical]);
+
+  return (
+    <>
+      <DemoVerticalPicker
+        open={shouldShowPicker || pickerOpen}
+        onSelect={handleVerticalSelect}
+        dismissable={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+      />
+      <DemoStoryline />
+      <DemoPill onSwitchVertical={handleSwitchVertical} />
+      <DemoExitBanner
+        visible={!isDemoMode && showExitBanner}
+        verticalLabel={vertical ?? 'Demo'}
+        onBackToDemo={handleBackToDemo}
+      />
+    </>
+  );
+}
+
 function AppContent() {
   useFocusManagement();
 
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="/dashboard" element={<NewDashboardPage />} />
-        <Route path="/dashboard/legacy" element={<EnhancedDashboardPage />} />
-        <Route path="/settings" element={<NewSettingsPage />} />
-        <Route path="/settings/observability-webhook" element={<Navigate to="/settings" replace />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="/runs" element={<RunsPage />} />
-        <Route path="/runs/compare" element={<ComparisonPage />} />
-        <Route path="/runs/:runId" element={<RunDetailPage />} />
-        <Route path="/verify" element={<VerifyProvenancePage />} />
-        <Route path="/playground" element={<PlaygroundPage />} />
-        <Route path="/playground/:reasonerId" element={<PlaygroundPage />} />
-        <Route path="/access" element={<AccessManagementPage />} />
+    <>
+      <DemoOverlay />
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/dashboard" element={<NewDashboardPage />} />
+          <Route path="/dashboard/legacy" element={<EnhancedDashboardPage />} />
+          <Route path="/settings" element={<NewSettingsPage />} />
+          <Route path="/settings/observability-webhook" element={<Navigate to="/settings" replace />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/runs" element={<RunsPage />} />
+          <Route path="/runs/compare" element={<ComparisonPage />} />
+          <Route path="/runs/:runId" element={<RunDetailPage />} />
+          <Route path="/verify" element={<VerifyProvenancePage />} />
+          <Route path="/playground" element={<PlaygroundPage />} />
+          <Route path="/playground/:reasonerId" element={<PlaygroundPage />} />
+          <Route path="/access" element={<AccessManagementPage />} />
 
-        {/* Old → New redirects */}
-        <Route path="/executions" element={<Navigate to="/runs" replace />} />
-        <Route path="/executions/:executionId" element={<Navigate to="/runs" replace />} />
-        <Route path="/workflows" element={<Navigate to="/runs" replace />} />
-        <Route path="/workflows/:workflowId" element={<Navigate to="/runs" replace />} />
-        <Route path="/nodes" element={<Navigate to="/agents" replace />} />
-        <Route path="/nodes/:nodeId" element={<Navigate to="/agents" replace />} />
-        <Route path="/reasoners/all" element={<Navigate to="/agents" replace />} />
-        <Route path="/reasoners/:reasonerId" element={<NavigateToPlayground />} />
-        <Route path="/identity/dids" element={<Navigate to="/settings" replace />} />
-        <Route path="/identity/credentials" element={<Navigate to="/settings" replace />} />
-        <Route path="/governance" element={<Navigate to="/access" replace />} />
-        <Route path="/authorization" element={<Navigate to="/access" replace />} />
-        <Route path="/packages" element={<Navigate to="/settings" replace />} />
-      </Route>
-    </Routes>
+          {/* Old → New redirects */}
+          <Route path="/executions" element={<Navigate to="/runs" replace />} />
+          <Route path="/executions/:executionId" element={<Navigate to="/runs" replace />} />
+          <Route path="/workflows" element={<Navigate to="/runs" replace />} />
+          <Route path="/workflows/:workflowId" element={<Navigate to="/runs" replace />} />
+          <Route path="/nodes" element={<Navigate to="/agents" replace />} />
+          <Route path="/nodes/:nodeId" element={<Navigate to="/agents" replace />} />
+          <Route path="/reasoners/all" element={<Navigate to="/agents" replace />} />
+          <Route path="/reasoners/:reasonerId" element={<NavigateToPlayground />} />
+          <Route path="/identity/dids" element={<Navigate to="/settings" replace />} />
+          <Route path="/identity/credentials" element={<Navigate to="/settings" replace />} />
+          <Route path="/governance" element={<Navigate to="/access" replace />} />
+          <Route path="/authorization" element={<Navigate to="/access" replace />} />
+          <Route path="/packages" element={<Navigate to="/settings" replace />} />
+        </Route>
+      </Routes>
+    </>
   );
 }
 
@@ -74,15 +134,17 @@ function App() {
         disableTransitionOnChange
       >
         <ModeProvider>
-          <AuthProvider>
-            <AuthGuard>
-              <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
-                <ErrorBoundary>
-                  <AppContent />
-                </ErrorBoundary>
-              </Router>
-            </AuthGuard>
-          </AuthProvider>
+          <DemoModeProvider>
+            <AuthProvider>
+              <AuthGuard>
+                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                  <ErrorBoundary>
+                    <AppContent />
+                  </ErrorBoundary>
+                </Router>
+              </AuthGuard>
+            </AuthProvider>
+          </DemoModeProvider>
         </ModeProvider>
       </ThemeProvider>
     </QueryClientProvider>

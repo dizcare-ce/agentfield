@@ -18,11 +18,14 @@ import {
   FileCheck2,
   Settings,
   Search,
+  Sparkles,
 } from "lucide-react";
+import { useDemoMode } from "@/demo/hooks/useDemoMode";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const { isDemoMode, actions: demoActions } = useDemoMode();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -30,10 +33,20 @@ export function CommandPalette() {
         e.preventDefault();
         setOpen((o) => !o);
       }
+      // Cmd+Shift+D: toggle demo mode
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "d") {
+        e.preventDefault();
+        if (isDemoMode) {
+          demoActions.deactivateDemo();
+        } else {
+          demoActions.setAct(0);
+          demoActions.activateDemo("saas");
+        }
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [isDemoMode, demoActions]);
 
   const runAction = useCallback((action: () => void) => {
     setOpen(false);
@@ -84,6 +97,26 @@ export function CommandPalette() {
           >
             <Settings className="mr-2 size-4" />
             Settings
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Demo">
+          <CommandItem
+            onSelect={() =>
+              runAction(() => {
+                if (isDemoMode) {
+                  demoActions.deactivateDemo();
+                } else {
+                  demoActions.setAct(0);
+                  demoActions.activateDemo("saas");
+                }
+              })
+            }
+          >
+            <Sparkles className="mr-2 size-4" />
+            {isDemoMode ? "Exit demo mode" : "Enter demo mode"}
           </CommandItem>
         </CommandGroup>
 

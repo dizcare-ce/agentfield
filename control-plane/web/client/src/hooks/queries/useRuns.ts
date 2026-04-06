@@ -3,6 +3,8 @@ import { useMemo } from "react";
 import { getWorkflowsSummary } from "../../services/workflowsApi";
 import type { WorkflowsResponse } from "../../types/workflows";
 import { useSSESync } from "../useSSEQuerySync";
+import { useDemoMode } from "../../demo/hooks/useDemoMode";
+import { getDemoRuns } from "../../demo/mock/interceptor";
 
 export interface RunsFilters {
   timeRange?: string;
@@ -21,6 +23,7 @@ export interface RunsFilters {
 
 export function useRuns(filters: RunsFilters = {}) {
   const { execConnected } = useSSESync();
+  const { isDemoMode, vertical } = useDemoMode();
   const {
     timeRange,
     status,
@@ -36,6 +39,7 @@ export function useRuns(filters: RunsFilters = {}) {
   } = filters;
 
   const refetchInterval = useMemo(() => {
+    if (isDemoMode) return false; // Demo data never goes stale
     if (explicitRefetch !== undefined) {
       if (typeof explicitRefetch === "number") {
         return execConnected ? explicitRefetch : Math.min(explicitRefetch, 5_000);
@@ -43,26 +47,29 @@ export function useRuns(filters: RunsFilters = {}) {
       return explicitRefetch;
     }
     return execConnected ? false : 6_000;
-  }, [explicitRefetch, execConnected]);
+  }, [explicitRefetch, execConnected, isDemoMode]);
 
   return useQuery<WorkflowsResponse>({
-    queryKey: ["runs", filters],
+    queryKey: ["runs", isDemoMode ? "demo" : "live", filters],
     placeholderData: keepPreviousData,
     refetchInterval,
-    queryFn: () =>
-      getWorkflowsSummary(
-        {
-          ...(status && status !== "all" ? { status } : {}),
-          ...(timeRange && timeRange !== "all" ? { timeRange } : {}),
-          ...(search ? { search } : {}),
-          ...(session ? { session } : {}),
-          ...(actor ? { actor_id: actor } : {}),
-          ...(workflow ? { workflow } : {}),
-        },
-        page,
-        pageSize,
-        sortBy,
-        sortOrder,
-      ),
+    staleTime: isDemoMode ? Infinity : undefined,
+    queryFn: isDemoMode && vertical
+      ? () => Promise.resolve(getDemoRuns(vertical))
+      : () =>
+          getWorkflowsSummary(
+            {
+              ...(status && status !== "all" ? { status } : {}),
+              ...(timeRange && timeRange !== "all" ? { timeRange } : {}),
+              ...(search ? { search } : {}),
+              ...(session ? { session } : {}),
+              ...(actor ? { actor_id: actor } : {}),
+              ...(workflow ? { workflow } : {}),
+            },
+            page,
+            pageSize,
+            sortBy,
+            sortOrder,
+          ),
   });
 }
