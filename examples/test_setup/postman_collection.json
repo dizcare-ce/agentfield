@@ -1,0 +1,209 @@
+{
+  "info": {
+    "name": "AgentField Test Setup",
+    "description": "Pre-configured Postman collection for the AgentField test environment.\n\nBase URL variable: {{base_url}} = http://localhost:8080\nAuth variable:     {{admin_token}} = valid-admin-token",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",      "value": "http://localhost:8080" },
+    { "key": "admin_token",   "value": "valid-admin-token" },
+    { "key": "readonly_token","value": "valid-readonly-token" },
+    { "key": "expired_token", "value": "expired-token" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health  (no auth needed)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth Edge Cases",
+      "item": [
+        {
+          "name": "valid-admin-token → 200",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        },
+        {
+          "name": "Bearer valid-admin-token → 200",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        },
+        {
+          "name": "valid-readonly-token → 200 (read-only use)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{readonly_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        },
+        {
+          "name": "expired-token → 401",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{expired_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        },
+        {
+          "name": "no token → 401",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "List all nodes",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        },
+        {
+          "name": "Get agent-alpha",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes/agent-alpha"
+          }
+        },
+        {
+          "name": "Get agent-beta (offline)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes/agent-beta"
+          }
+        },
+        {
+          "name": "Get agent-gamma (errored)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/nodes/agent-gamma"
+          }
+        },
+        {
+          "name": "Register agent-beta (offline)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"node_id\": \"agent-beta\",\n  \"name\": \"agent-beta\",\n  \"description\": \"Registered but offline test agent\",\n  \"url\": \"http://localhost:9002\",\n  \"capabilities\": [\"ping\"],\n  \"status\": \"ready\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/nodes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workflows",
+      "item": [
+        {
+          "name": "Trigger workflow-short (fast_work, ~1s)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"steps\": 3 }"
+            },
+            "url": "{{base_url}}/api/v1/execute/agent-alpha.fast_work"
+          }
+        },
+        {
+          "name": "Trigger workflow-long (slow_work, 70s)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"duration_seconds\": 70 }"
+            },
+            "url": "{{base_url}}/api/v1/execute/async/agent-alpha.slow_work"
+          }
+        },
+        {
+          "name": "Trigger workflow-fail step 1 (step_one → ok)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"payload\": \"workflow-fail-start\" }"
+            },
+            "url": "{{base_url}}/api/v1/execute/agent-alpha.step_one"
+          }
+        },
+        {
+          "name": "Trigger workflow-fail step 2 (step_fail → error)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{admin_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"payload\": \"trigger-from-postman\" }"
+            },
+            "url": "{{base_url}}/api/v1/execute/agent-gamma.step_fail"
+          }
+        },
+        {
+          "name": "List all executions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/v1/executions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Process Logs (agent-alpha)",
+      "item": [
+        {
+          "name": "Stream logs from agent-alpha",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-Key", "value": "{{admin_token}}" }],
+            "url": "{{base_url}}/api/ui/v1/nodes/agent-alpha/logs"
+          }
+        }
+      ]
+    }
+  ]
+}
