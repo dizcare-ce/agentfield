@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.64-rc.6] - 2026-04-06
+
+
+### Other
+
+- Remove OpenCode serve+attach workaround for stateless CLI (#326)
+
+* remove OpenCode serve+attach workaround for stateless CLI
+
+* fix: use correct OpenCode CLI flags (-p, -c, MODEL env var)
+
+* fix: Restored system_prompt support in both SDKs (2aed6bd)
+
 ## [0.1.64-rc.5] - 2026-04-05
 
 
