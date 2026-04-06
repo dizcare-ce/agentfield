@@ -6,6 +6,945 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.64-rc.7] - 2026-04-06
+
+
+### Added
+
+- Feat(web): operations-first control plane UI revamp with live updates and node logs (#330)
+
+* feat(sdk/ts): add multimodal helpers for image, audio, file inputs/outputs
+
+* refactor(ui): migrate icons from Phosphor to Lucide
+
+Replace all @phosphor-icons/react imports with lucide-react equivalents.
+Rewrote icon-bridge.tsx to re-export Lucide icons under the same names
+used throughout the codebase, so no consumer files needed changing.
+Updated icon.tsx to use Lucide directly. Removed weight= props from
+badge.tsx, segmented-status-filter.tsx, and ReasonerCard.tsx since
+Lucide does not support the Phosphor weight API.
+
+* refactor(ui): remove MCP, Authorization, DID/VC, Packages pages — features being redesigned
+
+- Delete src/components/mcp/ (MCPServerList, MCPServerCard, MCPHealthIndicator, MCPServerControls, MCPToolExplorer, MCPToolTester)
+- Delete src/components/authorization/ (AccessRulesTab, AgentTagsTab, ApproveWithContextDialog, PolicyContextPanel, PolicyFormDialog, RevokeDialog)
+- Delete src/components/packages/ (AgentPackageCard, AgentPackageList)
+- Delete src/components/did/ (DIDIdentityCard, DIDDisplay, DIDStatusBadge, DIDInfoModal, DIDIndicator)
+- Delete src/components/vc/ (VCVerificationCard, WorkflowVCChain, SimpleVCTag, SimpleWorkflowVC, VCDetailsModal, VCStatusIndicator, VerifiableCredentialBadge)
+- Delete MCP hooks: useMCPHealth, useMCPMetrics, useMCPServers, useMCPTools
+- Delete pages: AuthorizationPage, CredentialsPage, DIDExplorerPage, PackagesPage, WorkflowDeckGLTestPage
+- Remove MCP Servers, Tools, Performance tabs from NodeDetailPage
+- Remove Identity & Trust and Authorization sections from navigation config
+- Remove deprecated routes from App.tsx router
+- Fix broken imports in WorkflowDetailPage, ReasonerDetailPage
+- Trim src/mcp/index.ts barrel to API services + types only (no component re-exports)
+
+API services (vcApi, mcpApi), types, and non-MCP hooks are preserved.
+TypeScript check passes with zero errors after cleanup.
+
+* refactor(ui): migrate to standard shadcn design tokens, remove custom foundation system
+
+- Rewrote src/index.css with clean standard shadcn/ui theme (HSL tokens for light/dark mode)
+- Deleted src/styles/foundation.css (custom token system)
+- Rewrote tailwind.config.js to minimal shadcn-standard config (removed custom spacing, fontSize, lineHeight, transitionDuration overrides)
+- Replaced ~130 component files: bg-bg-*, text-text-*, border-border-*, text-nav-*, bg-nav-*, text-heading-*, text-body*, text-caption, text-label, text-display, interactive-hover, card-elevated, focus-ring, glass, gradient-* with standard shadcn equivalents
+- Migrated status sub-tokens (status-success-bg, status-success-light, status-success-border etc.) to opacity modifiers on base status tokens
+- Updated lib/theme.ts STATUS_TONES to use standard token classes
+- Fixed workflow-table.css status dot and node status colors to use hsl(var(--status-*))
+- Zero TypeScript errors after migration
+
+* refactor(ui): remove 15 duplicate components, consolidate to single variants
+
+- Delete 4 JSON viewer duplicates (JsonViewer, EnhancedJsonViewer x2, AdvancedJsonViewer); all callers already use UnifiedJsonViewer
+- Delete 3 execution header duplicates (ExecutionHero, ExecutionHeader, EnhancedExecutionHeader); update RedesignedExecutionDetailPage to use CompactExecutionHeader
+- Delete 3 status indicator duplicates (ui/StatusIndicator, ui/status-indicator, reasoners/StatusIndicator); consolidate legacy StatusIndicator into UnifiedStatusIndicator module and create ReasonerStatusDot for reasoner-specific dot display
+- Delete RedesignedInputDataPanel and RedesignedOutputDataPanel standalone files; InputDataPanel/OutputDataPanel already export backward-compat aliases
+- Delete legacy Navigation/Sidebar, NavigationItem, NavigationSection (unused; SidebarNew is active)
+- Delete enterprise-card.tsx (no callers; card.tsx already exports cardVariants)
+- Delete animated-tabs.tsx; add AnimatedTabs* re-exports to tabs.tsx and update 5 callers
+
+* feat(ui): new app shell — minimal sidebar, health strip, 5-item nav, dark mode default
+
+- Rewrote navigation config with 5 items: Dashboard, Runs, Agents, Playground, Settings
+- Built AppSidebar using shadcn Sidebar with icon-rail collapsed by default (collapsible="icon")
+- Built HealthStrip sticky bar showing LLM, Agent fleet, and Queue status placeholders
+- Built AppLayout using SidebarProvider/SidebarInset/Outlet pattern with breadcrumb header
+- Updated App.tsx to use AppLayout as layout route wrapper, removing old SidebarNew/TopNavigation
+- Added placeholder routes for /runs, /playground and their detail pages
+- Set defaultTheme="dark" for dark-first UI
+- All existing pages (Dashboard, Executions, Workflows, Nodes, Reasoners) preserved under new layout
+
+* feat(ui): add TanStack Query data layer with query hooks for runs, agents, health
+
+- Install @tanstack/react-query v5
+- Create src/lib/query-client.ts with 30s stale time, 5min GC, retry=1
+- Wrap App with QueryClientProvider
+- Add src/hooks/queries/ with useRuns, useRunDAG, useStepDetail, useAgents, useLLMHealth, useQueueStatus, useCancelExecution, usePauseExecution, useResumeExecution
+- Barrel export via src/hooks/queries/index.ts
+- Hooks delegate to existing service functions (workflowsApi, executionsApi, api)
+- Polling: agents 10s, system health 5s, active run DAGs 3s
+
+* feat(ui): build Runs page — unified view replacing Executions + Workflows
+
+Add RunsPage component at /runs with:
+- Filter bar: time range, status, and debounced search
+- Table with columns: Run ID, Root Reasoner, Steps, Status, Duration, Started
+- Checkbox row selection with bulk action bar (Compare / Cancel Running)
+- Paginated data via useRuns hook with Load more support
+- Status badge using existing badge variants (destructive/default/secondary)
+- Duration formatting (Xs, Xm Ys, —)
+- Row click navigates to /runs/:runId
+
+Wire RunsPage into App.tsx replacing the placeholder at /runs.
+
+* feat(ui): build Playground page — test reasoners with custom input, view results
+
+Adds a new /playground and /playground/:reasonerId route with:
+- Reasoner selector grouped by agent node
+- Split-pane JSON input textarea and result display
+- Execute button with loading state (Loader2 spinner)
+- View as Execution link on successful run
+- Recent Runs table (last 5) with Load Input shortcut
+- Route-sync: selecting a reasoner updates the URL path
+
+* feat(ui): new operations-first dashboard with issues banner and recent runs
+
+Replaces /dashboard with NewDashboardPage — a focused, operations-first
+view that answers "Is anything broken? What's happening now?" rather than
+displaying metrics charts. The legacy enhanced dashboard is preserved at
+/dashboard/legacy.
+
+Key sections:
+- Issues banner (conditional): surfaces unhealthy LLM endpoints and
+  queue-saturated agents via useLLMHealth / useQueueStatus polling
+- Recent Runs table: last 10 runs with reasoner, step count, status
+  badge, duration, and relative start time; click navigates to detail
+- System Overview: 4 stat cards (Total Runs Today, Success Rate,
+  Agents Online, Avg Run Time) backed by dashboardService + TanStack
+  Query with auto-refresh
+
+* feat(ui): build simplified Agents page — node cards with inline reasoner list
+
+Replaces the /agents placeholder with a fully functional page showing
+each registered agent node as a collapsible Card. Each card displays
+status badge with live dot, last heartbeat, reasoner/skill count,
+health score, and an inline reasoner list fetched lazily from
+GET /nodes/:id/details. Supports Restart and Config actions. Auto-
+refreshes every 10 s via useAgents polling.
+
+* feat(ui): build Settings page — tabs for General, Observability, Identity, About
+
+Adds NewSettingsPage with four tabs:
+- General: placeholder for future system config
+- Observability: full webhook config (migrated from ObservabilityWebhookSettingsPage) with live forwarder status and DLQ management
+- Identity: DID system status, server DID display, export credentials
+- About: version, server URL, storage mode
+
+Updates App.tsx to route /settings to NewSettingsPage and redirect /settings/observability-webhook to /settings.
+
+* feat(ui): add URL redirects from old routes to new pages
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* feat(ui): build Run Detail page — trace view with step detail panel
+
+Adds RunDetailPage (/runs/:runId) as the primary execution inspection
+screen, replacing the placeholder. Features a split-panel layout with
+a proportional-bar execution trace tree on the left and collapsible
+Input/Output/Notes step detail on the right. Single-step runs skip the
+trace and show step detail directly. Includes smart polling for active
+runs and a Trace/Graph toggle (graph view placeholder).
+
+New files:
+- src/pages/RunDetailPage.tsx — main page, wires useRunDAG + state
+- src/components/RunTrace.tsx — recursive trace tree with duration bars
+- src/components/StepDetail.tsx — step I/O panel with collapsible sections
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* fix(ui): dashboard — compact rows, stats strip, fix duration formatting
+
+- Replace 4 stat cards with a horizontal stats strip above the table
+- Fix duration formatter to handle hours and days (e.g. "31d 6h", "5h 23m")
+- Compact table rows: TableHead h-8 px-3 text-[11px], TableCell px-3 py-1.5
+- Table text reduced to text-xs for all data columns
+- Remove double padding — page container is now plain flex col gap-4
+- Remove Separator between CardHeader and table
+- Tighten CardHeader to py-3 px-4 with text-sm font-medium title
+- Limit recent runs to 15 (up from 10)
+- Fix "View All" link to navigate to /runs instead of /workflows
+- Remove unused StatCard component and Clock/XCircle imports
+
+* fix(ui): agents page — compact collapsed cards, dense reasoner list, clickable headers
+
+- Cards start collapsed by default (was open): prevents 300+ item flood with 15 agents × 20+ reasoners
+- Entire card header row is the expand/collapse trigger (was isolated chevron button on far right)
+- Reasoner rows reduced to py-1 ~24px (was ~40px with tree characters)
+- Removed tree characters (├──), replaced with clean font-mono list
+- Play button always visible (was hidden on hover) with icon + label
+- Truncate reasoner list at 5, "Show N more" link to expand
+- Removed Config button and Restart text label — icon-only restart button
+- Removed redundant "15 TOTAL" badge from page header
+- Replaced space-y-* with flex flex-col gap-2 for card list
+- Removed Card/CardHeader/CardContent/Collapsible/Separator — plain divs for density
+
+* fix(ui): runs page — compact table rows, fix duration formatting
+
+- TableHead height reduced from h-10 to h-8, padding px-4 → px-3, text-[11px]
+- TableCell padding reduced from p-4 to px-3 py-1.5 across all row cells
+- Table base text changed from text-sm to text-xs for dense data display
+- Run ID and Started cells use text-[11px], Reasoner cell uses text-xs font-medium
+- Steps and Duration cells use tabular-nums for numeric alignment
+- formatDuration now handles ms, seconds, minutes, hours, and days correctly
+- space-y-4 → space-y-3 and mb-4 → mb-3 for tighter page layout
+
+* fix(ui): agents as clean list, fix sidebar, fix dashboard data, fix timestamps
+
+- Rewrite AgentsPage from bordered cards to a borderless divide-y list inside a single Card
+- Fix formatRelativeTime to guard against bogus/epoch timestamps (was showing '739709d ago')
+- Expanded reasoner rows now render inline (bg-muted/30, pl-8, text-[11px]) instead of in a nested Card
+- Remove page <h1> heading from AgentsPage — breadcrumb in AppLayout already identifies the page
+- Add delayDuration={300} to HealthStrip TooltipProvider so tooltips don't appear immediately
+- navigation.ts already correct (5 items, correct icons) — no change needed
+- Dashboard already reads runsQuery.data?.workflows and navigates to /runs — no change needed
+
+* fix(ui): sidebar — proper shadcn implementation, icon-rail with tooltips, theme toggle
+
+- Use useSidebar() state to conditionally render logo text vs icon-only in collapsed mode,
+  eliminating text overflow/clipping behind the icon rail
+- Add SidebarRail for drag-to-resize handle on desktop
+- Add SidebarSeparator between header and nav content for visual separation
+- Implement ModeToggle in SidebarFooter (sun/moon theme toggle, centered when collapsed)
+- Replace bg-primary/text-primary-foreground with bg-sidebar-primary/text-sidebar-primary-foreground
+  in logo icon container to use correct semantic sidebar tokens
+- Use text-sidebar-foreground and text-sidebar-foreground/60 for logo text
+- Add tooltip="AgentField" to logo SidebarMenuButton so collapsed state shows tooltip on hover
+- Header bar: use border-sidebar-border and bg-sidebar/30 backdrop-blur instead of border-border
+
+* feat(ui): playground — cURL copy, async cURL, schema display, better result linking
+
+- Add cURL dropdown with sync and async variants; clipboard copy with "Copied!" feedback
+- Add collapsible schema section showing input_schema and output_schema when a reasoner is selected
+- Show status badge and duration in Result card header after execution
+- Replace "View as Execution" with "View Run →" linking to /runs/:runId
+- Add "Replay" button to re-run with same input
+
+* fix(ui): sidebar default open, settings — API info, fix DID display, observability check
+
+- AppLayout: change SidebarProvider defaultOpen from false to true so
+  sidebar shows labels on first load (users can collapse via Cmd+B)
+- Settings/General: replace empty placeholder with useful content —
+  API endpoint display with copy button and quick-start env var snippet
+- Settings/Identity: fix Server DID display — was incorrectly showing
+  res.message (a status string) as the DID; now fetches the actual DID
+  from /api/v1/did/agentfield-server and displays it with a copy button;
+  shows "DID system not configured" when unavailable (local mode)
+- Settings: default tab remains "general" which is now useful content
+- Settings/Observability: tab already has full webhook config, status,
+  DLQ management — no changes needed
+
+* fix(ui): P0 fixes — routes, health strip data, agent filter, action buttons
+
+- Dashboard: routes already correct (/runs/:runId and /runs)
+- Playground: View Run link already uses /runs/:runId
+- HealthStrip: connected to real data (useLLMHealth, useQueueStatus, useAgents)
+- RunsPage: added agent filter Select, functional Compare Selected and Cancel Running buttons
+- RunDetailPage: removed broken Trace/Graph toggle (Tabs/ViewMode were declared but unused), added Cancel Run button (useCancelExecution) for running runs and Replay button for failed/timeout runs
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* feat(ui): step detail — JSON syntax highlighting, cURL/input/output copy, VC export
+
+- StepDetail: replace plain <pre> blocks with JsonHighlight component
+  (regex-based coloring for keys, strings, numbers, booleans, null)
+- StepDetail: add copy-action row (Copy cURL, Copy Input, Copy Output)
+  with transient check-icon feedback after clipboard write
+- RunDetailPage: add Export VC button in header that opens the
+  /api/v1/did/workflow/:id/vc-chain endpoint in a new tab
+- RunTrace: extend formatDuration to handle hours (Xh Ym) and days (Xd Yh)
+
+* feat(ui): runs table — sortable columns, agent column, better column order, status dots
+
+- Add click-to-sort on Status, Steps, Duration, and Started headers with
+  asc/desc arrow indicators; sort state flows through useRuns to the API
+- Reorder columns: Status | Reasoner | Agent | Steps | Duration | Started | Run ID
+  (status first for scannability, run ID de-emphasised at the far right)
+- Add Agent column showing agent_id / agent_name per row
+- Replace Badge with a compact StatusDot (coloured dot + short label) for
+  denser status display in table rows
+- Update search placeholder to "Search runs, reasoners, agents…" to reflect
+  multi-field search capability
+- Import cn from @/lib/utils for conditional class merging
+
+* feat(ui): run detail — integrate ReactFlow DAG as graph view toggle
+
+Wire up the existing WorkflowDAGViewer component into the Run Detail
+page as a proper Graph tab alongside the Trace view. Multi-step runs
+show a Trace/Graph toggle in the header; single-step runs skip the
+toggle entirely and show step detail directly. Clicking a node in the
+graph panel selects the step and populates the right-hand detail panel.
+
+* feat(ui): runs table — ID copy, agent.reasoner format, I/O preview, empty state
+
+- Add copy button next to each Run ID (copies full ID to clipboard)
+- Combine Agent + Reasoner columns into a single "Target" column showing
+  agent.reasoner in monospace (agent part muted, reasoner part primary)
+- Remove separate Agent column; new order: Status | Target | Steps | Duration | Started | Run ID
+- Add HoverCard on reasoner cell that lazily fetches and displays root
+  execution input/output preview (only when root_execution_id is present)
+- Replace plain "No runs found" cell with a centered empty state using
+  Play icon and context-aware helper text
+- TypeScript: 0 errors
+
+* feat(ui): run detail — full height, replay, DID badge, export dropdown, active sidebar
+
+- RunDetailPage: flex column layout with h-[calc(100vh-8rem)] so trace/step
+  panels fill the viewport instead of using fixed 500px heights
+- Reorganized header: status badge and DID badge inline with title, subtitle
+  shows workflow name + step count + duration
+- Added Replay button (navigates to playground with agent/reasoner target)
+- Added Copy ID button for quick clipboard access to the run ID
+- Replaced single Export VC button with an Export dropdown containing
+  "Export VC Chain" and "Export Audit Log" (downloads JSON)
+- AppSidebar: active nav item now renders a left-edge accent bar
+  (before:w-0.5 bg-sidebar-primary) for clear visual distinction in both
+  light and dark mode, supplementing the existing bg-sidebar-accent fill
+
+* feat(ui): trace view — step numbers, relative times, status colors, group separators
+
+- Add sequential step numbers (1-based) on every trace row for disambiguation
+- Show relative start times per step ("+0:00", "+1:23") anchored to run start
+- Color-code duration bars: green=succeeded, red=failed, amber=timeout, blue/pulse=running
+- Replace large status icons with compact inline status dots (size-1.5)
+- Add group count badge (×N) on first node of consecutive same-reasoner runs
+- Add subtle border separator when reasoner_id changes between siblings
+- Reduce row height to py-1 (28px) for better visual density
+- Pass runStartedAt prop from RunDetailPage down to RunTrace
+
+* feat(ui): command palette — Cmd+K for navigation and quick actions
+
+Adds a CommandPalette component using shadcn Command + Dialog, registered
+globally via AppLayout. Cmd+K / Ctrl+K toggles the palette; items navigate
+to Dashboard, Runs, Agents, Playground, Settings, and filtered run views.
+A ⌘K hint badge is shown in the header bar on medium+ screens.
+
+* feat(ui): run comparison page — side-by-side step diff with divergence highlighting
+
+Adds /runs/compare?a=RUN_ID_1&b=RUN_ID_2 route accessible from the Runs
+page when exactly 2 runs are selected via "Compare Selected". The page
+shows dual summary cards (status, step count, failures, duration delta),
+a step-by-step alignment table with same/diverged/extra annotations, and
+a clickable output-diff panel for diverged rows.
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* feat(ui): virtual scrolling for trace, HITL approval UI in step detail
+
+- Flatten the recursive RunTrace tree and virtualize with @tanstack/react-virtual
+  for performant rendering of 200+ step traces (overscan=20, estimateSize=28px)
+- Extract TraceRow as a standalone component; preserve all visual logic
+  (step numbers, depth indentation, connector glyphs, status dots, bars,
+  group-count badges, relative-start times, group separators)
+- Add HITL approval card in StepDetail: shows when execution.status === "waiting"
+  or approval_request_id is present; displays approval_status badge and
+  approval_requested_at timestamp; renders Approve/Reject buttons when
+  approval_status === "pending", posting to /api/v1/webhooks/approval-response
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* feat(ui): SSE live updates, connection indicator, webhook delivery status in step detail
+
+- Add useSSEQuerySync hook that subscribes to execution and node SSE
+  channels and invalidates TanStack Query caches on every event, so
+  Runs, Run DAG, and Step Detail pages auto-refresh without polling
+- Mount useSSEQuerySync once in AppLayout for app-wide coverage
+- Add SSE connection status indicator (Live / Reconnecting / Disconnected)
+  to HealthStrip so users know whether real-time updates are active
+- Add Webhook Delivery collapsible section to StepDetail showing per-event
+  HTTP status, delivery time, and a Retry button for failed deliveries;
+  only rendered when webhook_registered or webhook_events are present
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+* fix(ui): remove double scroll in trace, add I/O diff to comparison, sticky header
+
+- RunDetailPage: remove ScrollArea wrapper around RunTrace; the virtualizer
+  already owns its scroll container (h-full overflow-auto), so the outer
+  ScrollArea caused scroll-inside-scroll
+- ComparisonPage: replace status-only OutputDiff with StepDiff that fetches
+  both executions via useStepDetail and renders input/output JSON side-by-side
+  with error highlighting; all rows are now clickable (not just diverged)
+- ComparisonPage: make summary-cards section sticky (top-0 z-10) so it stays
+  visible while scrolling the step comparison table
+
+* fix(ui): graph view — edges visible, node clicks populate right panel instead of sidebar
+
+- Destructure onExecutionClick in WorkflowDAGViewerInner (was defined in
+  props interface but never used inside the component)
+- handleNodeClick and handleDeckNodeClick now call onExecutionClick when
+  provided, falling back to the internal NodeDetailSidebar only when no
+  parent handler is registered (preserves legacy WorkflowDetailPage usage)
+- Suppress internal NodeDetailSidebar render when onExecutionClick is set
+- FloatingEdge: remove early return null when useInternalNode yields
+  undefined; fall back to React Flow's default handle coordinates
+  (sourceX/sourceY/targetX/targetY) so edges render before the first
+  measure cycle completes
+- Fix duplicate SVG marker ids by scoping id to the edge id, preventing
+  cross-edge marker conflicts
+
+* fix(ui): graph edges invisible — wrap HSL vars in hsl() for SVG stroke attributes
+
+* web(ui): revamp layout, filters, and health strip
+
+- Update AppLayout, AppSidebar, and global styles
+- Add filter combobox components and popover
+- Refresh Agents and Runs pages with new filtering UX
+- Adjust HealthStrip; update client dependencies
+
+* feat(web): UI revamp — components, pages, logos, and shared UI utilities
+
+- Refresh control-plane web client pages and execution/reasoner components
+- Add logo assets, pagination, JSON highlight, endpoint icons, reasoner combobox
+- Add reasonerCompareExtract util; update Tailwind and global styles
+- Track Cursor continual-learning hook state artifact
+
+* feat(ui): inset shell, unified theme tokens, runs workflow updates
+
+- Sidebar inset variant with rounded rail; SidebarInset overflow/min-h-0; single main landmark
+- Dark neutrals use shared --shell-h/--shell-s; accent isolated to --brand-* (logo, rings, sidebar-primary)
+- Run detail trace/step UI, executions API/handler, scroll-area, ui-revamp docs
+
+* fix(web-ui): run detail workflow graph renders with valid React Flow bounds
+
+- Replace embedded WorkflowGraphViewport absolute inset-0 with flex layout so
+  the pane gets non-zero height in the document flow (fixes xyflow error #004).
+- Give flow containers explicit minHeight/width/flex and pass width/height
+  styles into ReactFlow and VirtualizedDAG.
+- Defer initial fitView/setViewport until after nodes commit (double rAF).
+- Reset viewport/layout only on workflow id change, not first mount; RunDetail
+  passes stable workflowId, key=runId, and graph column flex/min-height.
+
+* feat(ui): runs/step detail, DAG polish, execution APIs, provenance card
+
+- Backend: UI executions and workflow DAG handler updates.
+- Web: RunsPage, StepDetail, StepProvenanceCard; WorkflowNode and AgentLegend tweaks.
+- Client types and executions/vc API services aligned with server payloads.
+- Cursor continual-learning hook state snapshot.
+
+* feat(web): workflow DAG controls, dashboard/settings polish, runs query updates
+
+- Add WorkflowGraphControls and integrate with WorkflowDAG
+- Update AppLayout, AgentLegend, DeckGLView, VirtualizedDAG
+- Refresh NewDashboardPage, NewSettingsPage, alert component
+- Adjust useRuns hook; sync continual-learning hook state
+
+* feat(web): playground and reasoner combobox updates
+
+- Update PlaygroundPage
+- Refine reasoner-node-combobox UI
+- Sync continual-learning hook state
+
+* feat: access management UI, verify provenance, governance hooks
+
+- Add AccessManagementPage and authorization components (policies, tags, dialogs)
+- Add VerifyProvenancePage and vcApi/did type updates; af verify-provenance CLI + tests
+- Wire DID handlers, UI DID routes, API catalog, and server routes
+- Governance queries/probe/utils; navigation, App, CommandPalette, Agents/Run detail polish
+- Sync continual-learning hook state
+
+* fix(web): app shell, navigation, run detail, verify provenance polish
+
+- Tweak AppLayout and CommandPalette
+- Update navigation config
+- Refine RunDetailPage and VerifyProvenancePage
+- Sync continual-learning hook state
+
+* feat(web): dashboard workload components and Figma/shadcn audit doc
+
+- Add DashboardActiveWorkload, DashboardRunOutcomeStrip, dashboardRunUtils
+- Refactor NewDashboardPage; remove NewDashboardPage.tail.tsx
+- Update client package.json and pnpm-lock.yaml
+- Add docs/FIGMA_SHADCN_AUDIT.md
+- Sync continual-learning hook state
+
+* style(web): broad UI polish across shell, tables, DAG, and design tokens
+
+- Refine AppLayout, sidebars, navigation, and global index.css / Tailwind config
+- Update executions tables, health strip, run trace, step detail, provenance card
+- Polish WorkflowDAG components and workflow dashboard panels
+- Refresh shadcn-style UI primitives (badge, button, drawer, sidebar, etc.)
+- Add copy-identifier-chip and entity-tag components
+- Touch dashboard, authorization, and key pages (agents, runs, playground, etc.)
+- Extend FIGMA_SHADCN_AUDIT.md; sync continual-learning hook state
+
+* chore: remove internal UI planning docs and stray tooling files
+
+Drop docs/ui-revamp and embedded client audit notes from the branch;
+surface product direction in the PR instead. Remove accidentally tracked
+.agit index and Claude worktree pointer; add ignore rules.
+
+* fix: address review findings across Go handlers, TS SDK, and web UI
+
+Multi-pass code review surfaced 60 issues across security, code quality,
+performance, API design, frontend, and test coverage. This commit fixes
+the critical, high, and medium severity items:
+
+- Go: fix ValidComponents count, immutable mergeDIDBundle, empty-DID guard,
+  remove debug fmt.Printf, return 422/413 on verify-audit endpoints
+- TS SDK: fix Audio.fromFile format detection (in→includes), imageFromBuffer
+  default mimeType, remove unnecessary async on fromUrl methods
+- Web: add top-level ErrorBoundary, limit auto-reset to one attempt,
+  DEV-gate SSE console.log, opt-in events accumulation, extract
+  SortableHead component, hoist Intl.RelativeTimeFormat, guard bulk
+  cancel async handler, add keyboard a11y to table rows, convert
+  sidebar nav to Link elements, wrap DAG in ErrorBoundary, fix
+  HealthStrip false-healthy default
+
+* fix: simplify review fixes — stale state, import style, destructuring, parallel cancel
+
+- ErrorBoundary: use functional setState in auto-reset timer to avoid
+  stale closure; also clear errorInfo/errorId on auto-reset
+- RunDetailPage: use @/ alias for ErrorBoundary import (consistency)
+- useSSE: move trackEvents into existing destructuring block
+- RunsPage: parallelize bulk cancel with Promise.all instead of sequential loop
+
+* refactor: extract shared handler, reuse SortableHeaderCell, consolidate formatRelativeTime
+
+- Go: extract HandleVerifyAuditBundle into handlers/verify_audit.go,
+  both DIDHandlers.VerifyAuditBundle and DIDHandler.VerifyAuditBundleHandler
+  now delegate to the shared function (removes 30+ lines of duplication)
+- Web: replace local SortableHead in RunsPage with shared SortableHeaderCell
+  from CompactTable.tsx (reuses existing exported component)
+- Web: add formatCompactRelativeTime to utils/dateFormat.ts and replace 5
+  local copies across AgentsPage, NodesPage, CompactReasonersStats,
+  CompactWorkflowSummary, and ExecutionTimeline
+
+* fix: move ErrorBoundary inside Router to preserve routing context
+
+* style(web): redesign sign-in page with shadcn components and app branding
+
+- AuthGuard: replace raw HTML inputs/button with shadcn Card, Input,
+  Button, Alert; add app logo (light/dark), icon-prefixed fields
+  (KeyRound, ShieldCheck), Loader2 spinner, proper labels for a11y,
+  and friendlier error messages
+- AuthContext: replace plain "Loading..." text with a styled spinner
+  and "Connecting…" label matching the app's design tokens
+
+* fix: resolve all tsc -b strict build errors for CI
+
+- App.tsx: remove 8 unused page imports
+- DeckGLView.tsx: narrow zoom type (number | [number, number]) before arithmetic
+- VirtualizedDAG.tsx: cast nodeTypes/edgeTypes to satisfy xyflow strict types
+- WorkflowDAG/index.tsx: cast DeckGL node click handler and component types
+- AgentLegend.tsx: restore main's version, export layout types for callers
+- AccessRulesTab.tsx, PolicyFormDialog.tsx: remove invalid weight prop from lucide icons
+- reasoner-node-combobox.tsx: add boolean coercion for string | boolean
+- EnhancedDashboardPage.tsx: change "warning" to valid "degraded" badge variant
+- ExecutionDetailPage.tsx: create ExecutionHeader component, remove unused import
+- NodeDetailPage.tsx: restore main's version with latestEvent bindings
+- reasonerCompareExtract.ts: fix number | boolean comparison with explicit ternary
+- Add stub modules for DIDInfoModal, mcp/index, animated-tabs
+
+* security: prevent SSRF in DID resolution and custom resolver endpoints
+
+- Add safeHTTPClient with DialContext that resolves DNS and blocks
+  private/loopback/link-local IPs (10/8, 172.16/12, 192.168/16,
+  127/8, 169.254/16, ::1, fc00::/7, fe80::/10)
+- Add validateExternalURL requiring HTTPS scheme
+- Apply to resolveWebDID and resolveFromCustom (CodeQL critical findings)
+- Add io.LimitReader (2 MiB) on all external response bodies to prevent
+  memory exhaustion from malicious DID document hosts
+- Set 10s client timeout and 5s dial timeout
+
+* chore: stacked branch for UI live-update follow-up work
+
+Establishes a PR stack on top of #330. No functional changes yet.
+
+* feat(web): unified SSE sync and adaptive polling for live UI
+
+- SSESyncProvider runs executions, nodes, and reasoners SSE once; invalidates
+  runs, run-dag, step-detail, agents, reasoners, and dashboard-summary
+- HealthStrip uses shared connection state; Refresh resyncs when streams are down
+- Faster TanStack refetch intervals when SSE is disconnected (runs, agents,
+  LLM/queue, dashboard summary); explicit run list intervals tighten too
+- useRunDAG/useStepDetail poll active steps more often, especially without SSE
+- AllReasonersPage uses React Query with SSE-driven invalidation and 6s fallback
+
+* fix(web): match polling and badges to the SSE channel that feeds each view
+
+- useRuns, run DAG/step detail, dashboard summary, LLM/queue: gate on execConnected
+- useAgents: gate on nodeConnected
+- All Reasoners: fallback poll when neither node nor reasoner stream is up
+- HealthStrip Live/Refresh tied to execution stream (runs/steps)
+
+* agit sync
+
+* agit sync
+
+* fix(web): tighten live update gating
+
+* feat: agent node process logs (Python NDJSON, CP proxy, UI panel)
+
+- Document NDJSON v1 contract and UI proxy path in docs/api/AGENT_NODE_LOGS.md
+- Python SDK: ring buffer, stdio tee, GET /agentfield/v1/logs with internal bearer
+- Control plane: proxy GET /api/ui/v1/nodes/:nodeId/logs, node-log-proxy settings GET/PUT
+- Web UI: NodeProcessLogsPanel on Agents expanded row and Node detail Logs tab;
+  Settings tab for proxy limits using existing shadcn cards and patterns
+
+* docs: document node log proxy and agent log env vars in .env.example
+
+* fix: align .env.example log vars with Python node_logs.py
+
+* agit sync
+
+* agit sync
+
+* chore: log-demo compose, UI proxy functional test, example heartbeats
+
+- Makefile targets log-demo-up / log-demo-down
+- docker-compose.log-demo.yml + Node log-demo agent Dockerfile
+- test_ui_proxies_node_process_logs exercises GET /api/ui/v1/nodes/:id/logs
+- Python + Go demo agents emit periodic stdout/stderr for UI verification
+- Trim unused notify from Go process log ring; drop unused TS import
+
+* fix(docker): wait for CP health before log-demo agents start
+
+Add wait-control-plane (curl with retries) and depends_on completed_successfully
+so Python/Go/Node demo agents do not register before the API is ready.
+Set restart: unless-stopped on demo agents. Document behavior in LOG_DEMO.md.
+
+* feat(scripts): host log-demo stack when Docker is unavailable
+
+Add run-log-demo-native.sh / stop-log-demo-native.sh with writable paths
+(env overrides for SQLite, Bolt, DID keystore under /tmp/agentfield-log-demo).
+Makefile targets log-demo-native-up/down. Document in LOG_DEMO.md.
+
+Fixes local runs using agentfield-test.yaml which points storage at /data.
+
+* feat(ui,sdks): process log filters, structured rows, NDJSON level/source
+
+- AgentsPage: full-width tab bar aligned with node detail (icons, muted track).
+- NodeProcessLogsPanel: stream segmented control (All/Stdout/Stderr with counts),
+  text search across line/seq/level/source, rows show local time + date when not
+  today, seq, stream/level badges, optional source line; stderr row tint.
+- NodeLogEntry type: optional level, source.
+- Python/Go/TypeScript SDKs: emit level (info/error/log) and source=process
+  for stdio capture; document in AGENT_NODE_LOGS.md.
+
+* fix: tighten audit verification and multimodal IO
+
+* feat(ui): agents page heading, nav labels, compact responsive logs
+
+- Page h1 Agent nodes & logs; sidebar/command palette use Agent nodes
+- Agents row: terminal shortcut + controlled tabs; breadcrumb route name
+- NodeProcessLogsPanel: responsive header toolbars, compact log grid,
+  hide redundant level badges, optional native demo scripts unchanged
+
+* fix(sdk/python): drop unused Generator import (ruff F401)
+
+Unblocks Python SDK CI lint-and-test job.
+
+* fix(sdk/ts): qualify Express Response in flush cast (TS2352)
+
+Bare Response resolved to DOM Fetch Response; use import('express').Response.
+
+* fix(ci): harden DID fetches and stabilize node log proxy test
+
+* agit sync
+
+* fix(web): avoid format strings in node action logs
+
+* fix(cli): keep VC verification offline-only
+
+* fix(tests): write node log marker into process ring
+
+* docs: add execution observability RFC
+
+* agit sync
+
+* agit sync
+
+* agit sync
+
+* agit sync
+
+* agit sync
+
+* agit sync
+
+* agit sync
+
+* feat: add execution logging transport
+
+* feat(py): add structured execution logging
+
+* agit sync
+
+* feat(web): unify execution observability panel
+
+* Remove local plandb database from repo
+
+* fix demo execution observability flow
+
+* refactor run detail into execution and logs tabs
+
+* refine execution logs density
+
+* agit sync
+
+* polish execution logs panel header
+
+* refine raw node log console
+
+* polish process log filter toolbar
+
+* standardize observability spacing primitives
+
+* agit sync
+
+* test execution observability in functional harness
+
+* fix: security hardening for execution logs and process log auth
+
+- Use constant-time comparison (crypto/subtle) for bearer token
+  validation in Go SDK process logs endpoint
+- Add MaxBytesReader (10 MiB) to execution logs ingestion handler
+  to prevent memory exhaustion from oversized payloads
+- Remove accidentally committed .cursor/ IDE state files
+- Add .cursor/ to .gitignore
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(sdk-python): forward structured execution logs to control plane
+
+The Python SDK logger only wrote structured logs to stdout, unlike the
+Go SDK which also dispatches them to POST /api/v1/executions/:id/logs.
+This caused the Logs tab in the UI to always show empty for Python agents.
+
+- Add post_execution_logs() to AgentFieldClient
+- Add _dispatch_to_cp() in logger to async-POST records to the CP
+- Wire the client into the logger during Agent init via set_cp_client()
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(web): health strip counts agents with lifecycle_status ready as online
+
+The HealthStrip filtered on health_status === "ready" | "active" but
+agents register with lifecycle_status: "ready" and health_status may
+be "inactive" or "unknown". This caused "0/5 online" while the table
+showed all agents as ready with green dots.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(ui): restore compact AgentLegend, fix runs row click and copy feedback
+
+- Restore AgentLegend from pre-regression (commit 32081e3): compact embedded
+  bar with agent color dots, Popover agent picker, Maximize2 expand-to-fullscreen
+  button, and inline viewport controls (fit/zoom in/zoom out)
+- Fix runs table row click: remove stopPropagation on Target cell so clicking
+  anywhere on the row navigates to run detail
+- Add copy feedback on run ID chip: show Check icon + green border for 2s after
+  copying, matching the standard CopyButton pattern used elsewhere
+
+* fix: approval flow, SSE connection exhaustion, and stale execution sync
+
+Approval flow fixes:
+- Allow timeout→running state transition so approvals resolve even
+  after the stale reaper marks an execution as timed out
+- Webhook handler no longer rejects approvals when execution was
+  reaped but approval_status is still pending
+- Stale reaper now syncs both executions and workflow_executions
+  tables in the same transaction to prevent split-brain status
+- Reaper skips executions with approval_status=pending (legitimately
+  waiting for human input, not stale)
+- Approve/Reject buttons show loading state, handle errors, and
+  invalidate queries to refresh the UI
+
+SSE connection exhaustion fix:
+- Disable node and reasoner SSE streams to stay within browser
+  HTTP/1.1 per-origin connection limit (6); queries already include
+  adaptive polling fallback
+- Execution events SSE handler sends initial connected event so
+  browser EventSource detects the open immediately
+- Execution log SSE stream checks terminal status on startup and
+  each heartbeat, closing gracefully instead of hanging forever
+- Heartbeats no longer reset the idle timer (was preventing timeout)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(web): handle agent tag approval when no proposed tags exist
+
+The ApproveWithContextDialog opened an empty tag selector with a
+disabled Approve button when the agent had no proposed_tags. Now it
+shows an "Approve Agent" flow explaining the agent registered without
+tags and lets the admin approve the registration directly.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(web): pre-fill playground input when replaying a run
+
+The Replay button navigated to the playground without passing the
+execution's input data, leaving the input editor empty. Now it passes
+input_data via React Router location state, and the playground reads
+it to seed the JSON editor on mount.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(web): pre-fill playground input when replaying a run
+
+The Replay button fetches execution details to get the original
+input_data before navigating to the playground. The playground reads
+replay input from location state and skips the schema-based empty
+seed when replay data is present.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com> (3d2e4d7)
+
+## [0.1.64-rc.6] - 2026-04-06
+
+
+### Other
+
+- Remove OpenCode serve+attach workaround for stateless CLI (#326)
+
+* remove OpenCode serve+attach workaround for stateless CLI
+
+* fix: use correct OpenCode CLI flags (-p, -c, MODEL env var)
+
+* fix: Restored system_prompt support in both SDKs (2aed6bd)
+
+## [0.1.64-rc.5] - 2026-04-05
+
+
+### Added
+
+- Feat(observability): enrich execution facts for downstream analysis (#341)
+
+* feat: enrich execution observability facts
+
+* test: cover execution observability contract
+
+* test: add functional execution webhook coverage
+
+* fix: use uvicorn websockets sansio (4a04419)
+
+## [0.1.64-rc.4] - 2026-04-05
+
+
+### Changed
+
+- Refactor: replace emoji logging with structured zerolog in memory handler (#335)
+
+Convert all 18 emoji-based debug log statements to structured zerolog
+calls with typed fields (operation, scope, key, err, bytes). Log levels
+adjusted: Debug for normal flow, Error for failures, Warn for edge cases.
+No handler logic changed.
+
+Closes #114
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (208be41)
+
+
+
+### Documentation
+
+- Docs: add godoc comments to StorageProvider interface methods (#336) (799c4a2)
+
+## [0.1.64-rc.3] - 2026-04-05
+
+
+### Changed
+
+- Refactor: extract shared ErrorResponse helper to handlers/errors.go (#338) (42ddf3b)
+
+
+
+### Documentation
+
+- Docs: update README UTM links with granular tracking (#328)
+
+* docs: update all README UTM links with granular tracking IDs
+
+Replace generic utm_medium=referral with unique utm_id per link
+and add utm_campaign=github-readme consistently across all 35
+outbound links. This enables granular click attribution in analytics
+to see exactly which README section drives traffic.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: track UTM links reference file in assets
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: add HTML comment referencing UTM links file
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: update UTM links CSV with target URLs
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: clarify HTML comment about UTM link requirements
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* docs: note that CSV target URLs are for reference only
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: OG <oktaygoktas@users.noreply.github.com>
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (6e4f258)
+
+## [0.1.64-rc.2] - 2026-04-05
+
+
+### Fixed
+
+- Fix(sdk/python): replace deprecated datetime.utcnow() with timezone-a… (#332)
+
+* fix(sdk/python): replace deprecated datetime.utcnow() with timezone-aware alternative
+
+datetime.utcnow() is deprecated since Python 3.12 and scheduled for
+removal. It produces naive datetime objects with no timezone info,
+which causes DeprecationWarning on every test run across 5 files.
+
+Additionally, two call sites combined .isoformat() + 'Z' on a
+timezone-aware datetime, producing invalid ISO strings like:
+  '2026-04-05T01:30:20.584591+00:00Z'  ← double timezone suffix
+
+This caused test failures in test_vc_generator.py.
+
+Changes:
+- agentfield/did_manager.py: add timezone import, utcnow → now(timezone.utc)
+- agentfield/agent.py: utcnow → now(timezone.utc), fix isoformat+Z
+- agentfield/client.py: datetime.datetime.utcnow() → datetime.datetime.now(datetime.timezone.utc)
+- agentfield/vc_generator.py: add timezone import, utcnow → now(timezone.utc)
+- tests/test_vc_generator.py: add timezone import, utcnow → now(timezone.utc), fix isoformat+Z
+
+All 745 tests pass with 0 failures after this change.
+DeprecationWarnings reduced from 36 to 0.
+
+* fix(sdk/python): fix remaining naive timestamps in client.py registration payloads
+
+Per code review feedback from @santoshkumarradha:
+
+- Add _utc_now_iso() shared helper in client.py for consistent UTC
+  timestamp formatting across the file
+- Replace 4 remaining datetime.datetime.now().isoformat() + 'Z' calls
+  in the registration payloads (last_heartbeat, registered_at) with
+  the helper — these were producing naive local timestamps with a UTC
+  suffix incorrectly appended
+- Add TestUtcNowIso test class (5 tests) covering: string type, Z suffix,
+  valid ISO parse, no double-offset, millisecond precision
+
+All 745 tests pass. (265cf79)
+
 ## [0.1.64-rc.1] - 2026-04-05
 
 
