@@ -8,15 +8,20 @@ This module provides a centralized logging system for the AgentField SDK that:
 - Preserves stdout mirroring for local developer ergonomics
 """
 
+import asyncio
 import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .execution_context import ExecutionContext, get_current_context
+
+if TYPE_CHECKING:
+    from .client import AgentFieldClient
 
 
 _DEFAULT_STRUCTURED_SOURCE = "sdk.python.logger"
@@ -47,6 +52,8 @@ class AgentFieldLogger:
     Structured execution logs bypass the human log-level filter so that execution telemetry
     remains available even when console verbosity is reduced.
     """
+
+    _cp_client: Optional["AgentFieldClient"] = None
 
     def __init__(self, name: str = "agentfield"):
         self.logger = logging.getLogger(name)
@@ -169,7 +176,40 @@ class AgentFieldLogger:
     def _emit_structured_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":"), default=str)
         print(line, file=sys.stdout, flush=True)
+        self._dispatch_to_cp(record)
         return record
+
+    def _dispatch_to_cp(self, record: Dict[str, Any]) -> None:
+        """Send the structured log record to the control plane (best-effort, non-blocking)."""
+        client = self._cp_client
+        if client is None:
+            return
+        execution_id = record.get("execution_id")
+        if not execution_id:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(client.post_execution_logs(execution_id, record))
+        except RuntimeError:
+            # No running event loop — fire from a background thread
+            threading.Thread(
+                target=self._dispatch_sync,
+                args=(client, execution_id, record),
+                daemon=True,
+            ).start()
+
+    @staticmethod
+    def _dispatch_sync(
+        client: "AgentFieldClient",
+        execution_id: str,
+        record: Dict[str, Any],
+    ) -> None:
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(client.post_execution_logs(execution_id, record))
+            loop.close()
+        except Exception:
+            pass
 
     def _emit_plain(
         self,
@@ -444,6 +484,11 @@ def set_log_level(level: str):
     """Set log level for the global logger at runtime (e.g., 'DEBUG', 'INFO', 'WARN', 'ERROR')"""
 
     get_logger().set_level(level)
+
+
+def set_cp_client(client: Optional["AgentFieldClient"]) -> None:
+    """Attach a control-plane client so structured logs are forwarded."""
+    get_logger()._cp_client = client
 
 
 # Convenience functions for common logging patterns
