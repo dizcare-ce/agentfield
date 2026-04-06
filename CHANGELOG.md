@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.64-rc.9] - 2026-04-06
+
+
+### Added
+
+- Feat(sdk/python): add per-execution LLM cost tracking (#343)
+
+* feat(sdk/python): add per-execution LLM cost tracking
+
+Add CostTracker that accumulates token usage and cost data from
+app.ai() calls. Each LLM response's cost_usd (via LiteLLM) is
+recorded before schema parsing strips the multimodal metadata.
+
+- CostTracker: thread-safe accumulator with per-model breakdown
+- Agent.cost_tracker: auto-initialized on every Agent instance
+- Agent.execution_cost: convenience property returning summary dict
+- Wired into agent_ai.py after detect_multimodal_response()
+- 6 unit tests covering record, accumulate, summary, and reset
+
+* docs: add changelog entry for cost tracking
+
+* fix: wire reasoner_name from execution context into cost tracking
+
+The CostTracker.record() accepts reasoner_name but the call site in
+agent_ai.py never passed it. Now reads it from the current
+ExecutionContext, which is set by the @reasoner decorator. (c29a2a8)
+
 ## [0.1.64-rc.8] - 2026-04-06
 
 
