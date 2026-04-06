@@ -59,11 +59,20 @@ function shouldInvalidateForEvent(data: unknown): boolean {
 function useSSEQuerySyncCore(): SSESyncContextValue {
   const queryClient = useQueryClient();
 
+  // In demo mode, skip all SSE connections (no backend)
+  const demoMode = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('demo') === 'true') return true;
+      return localStorage.getItem('af-demo-active') === 'true';
+    } catch { return false; }
+  })();
+
   const {
     latestEvent: execEvent,
     connected: execConnected,
     reconnecting: execReconnecting,
-  } = useSSE("/api/ui/v1/executions/events", {
+  } = useSSE(demoMode ? null : "/api/ui/v1/executions/events", {
     eventTypes: [
       "execution_completed",
       "execution_failed",
@@ -104,7 +113,7 @@ function useSSEQuerySyncCore(): SSESyncContextValue {
     latestEvent: nodeEvent,
     connected: nodeConnected,
     reconnecting: nodeReconnecting,
-  } = useSSE("/api/ui/v1/nodes/events", {
+  } = useSSE(demoMode ? null : "/api/ui/v1/nodes/events", {
     eventTypes: [
       "node_online",
       "node_offline",
@@ -132,7 +141,7 @@ function useSSEQuerySyncCore(): SSESyncContextValue {
     latestEvent: reasonerEvent,
     connected: reasonerConnected,
     reconnecting: reasonerReconnecting,
-  } = useSSE("/api/ui/v1/reasoners/events", {
+  } = useSSE(demoMode ? null : "/api/ui/v1/reasoners/events", {
     autoReconnect: true,
     maxReconnectAttempts: 10,
     reconnectDelayMs: 2000,

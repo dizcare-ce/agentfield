@@ -65,6 +65,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
+      // In demo mode, skip auth check entirely — no backend needed
+      const demoActive = (() => {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          if (params.get('demo') === 'true') return true;
+          return localStorage.getItem('af-demo-active') === 'true';
+        } catch { return false; }
+      })();
+
+      if (demoActive) {
+        setAuthRequired(false);
+        setLoading(false);
+        return;
+      }
+
       try {
         // Check for stored key first
         const stored = localStorage.getItem(STORAGE_KEY);

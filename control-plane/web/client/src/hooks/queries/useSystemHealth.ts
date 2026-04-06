@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getGlobalApiKey } from "../../services/api";
 import { useSSESync } from "../useSSEQuerySync";
+import { useDemoMode } from "../../demo/hooks/useDemoMode";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/ui/v1";
 
@@ -52,18 +53,26 @@ async function fetchQueueStatus(): Promise<QueueStatusResponse> {
 
 export function useLLMHealth() {
   const { execConnected } = useSSESync();
+  const { isDemoMode } = useDemoMode();
   return useQuery<LLMHealthResponse>({
-    queryKey: ["llm-health"],
-    queryFn: fetchLLMHealth,
-    refetchInterval: execConnected ? 5_000 : 3_000,
+    queryKey: ["llm-health", isDemoMode ? "demo" : "live"],
+    queryFn: isDemoMode
+      ? () => Promise.resolve({ endpoints: [], healthy: true })
+      : fetchLLMHealth,
+    refetchInterval: isDemoMode ? false : (execConnected ? 5_000 : 3_000),
+    staleTime: isDemoMode ? Infinity : undefined,
   });
 }
 
 export function useQueueStatus() {
   const { execConnected } = useSSESync();
+  const { isDemoMode } = useDemoMode();
   return useQuery<QueueStatusResponse>({
-    queryKey: ["queue-status"],
-    queryFn: fetchQueueStatus,
-    refetchInterval: execConnected ? 5_000 : 3_000,
+    queryKey: ["queue-status", isDemoMode ? "demo" : "live"],
+    queryFn: isDemoMode
+      ? () => Promise.resolve({ agents: {}, total_running: 0 })
+      : fetchQueueStatus,
+    refetchInterval: isDemoMode ? false : (execConnected ? 5_000 : 3_000),
+    staleTime: isDemoMode ? Infinity : undefined,
   });
 }

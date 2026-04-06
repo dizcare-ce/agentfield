@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { setGlobalApiKey } from "../services/api";
+import { isDemoActive } from "../demo/hooks/useDemoMode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +48,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (!authRequired || isAuthenticated) {
+  if (!authRequired || isAuthenticated || isDemoActive()) {
     return <>{children}</>;
   }
 
