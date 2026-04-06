@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -88,7 +89,7 @@ func internalBearerOK(authHeader string) bool {
 		return false
 	}
 	got := strings.TrimSpace(authHeader[7:])
-	return got == want
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func (r *processLogRing) appendLine(stream, line string, truncated bool) {

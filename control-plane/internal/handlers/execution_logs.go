@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -37,9 +39,16 @@ func StructuredExecutionLogsHandler(store ExecutionLogStore, snapshot func() con
 			return
 		}
 
-		body, err := c.GetRawData()
+		const maxBodyBytes int64 = 10 << 20 // 10 MiB
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to read body: %v", err)})
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large", "max_bytes": maxBodyBytes})
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+			}
 			return
 		}
 		if len(body) == 0 {
