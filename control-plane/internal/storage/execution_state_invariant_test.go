@@ -28,6 +28,13 @@ var terminalStatuses = []string{
 	types.ExecutionStatusSucceeded,
 	types.ExecutionStatusFailed,
 	types.ExecutionStatusCancelled,
+}
+
+// semiTerminalStatuses lists states that are terminal-like but allow specific
+// recovery transitions. For example, timeout allows transitions to running
+// (stale execution reaper may timeout executions that are still active, e.g.
+// waiting for HITL approval) and cancelled.
+var semiTerminalStatuses = []string{
 	types.ExecutionStatusTimeout,
 }
 
@@ -36,7 +43,7 @@ var terminalStatuses = []string{
 // ---------------------------------------------------------------------------
 
 // TestInvariant_ExecutionState_TerminalStatesAreIrreversible verifies that no
-// terminal state can transition to any non-identical state.
+// fully terminal state can transition to any non-identical state.
 func TestInvariant_ExecutionState_TerminalStatesAreIrreversible(t *testing.T) {
 	for _, terminal := range terminalStatuses {
 		for _, target := range allCanonicalStatuses {
@@ -46,6 +53,29 @@ func TestInvariant_ExecutionState_TerminalStatesAreIrreversible(t *testing.T) {
 			err := validateExecutionStateTransition(terminal, target)
 			assert.Error(t, err,
 				"terminal state %q must not transition to %q", terminal, target)
+		}
+	}
+}
+
+// TestInvariant_ExecutionState_SemiTerminalAllowedTransitions verifies that
+// semi-terminal states (e.g. timeout) forbid all transitions except the
+// explicitly allowed recovery paths.
+func TestInvariant_ExecutionState_SemiTerminalAllowedTransitions(t *testing.T) {
+	// timeout allows transitions to running and cancelled only.
+	allowedFromTimeout := map[string]bool{
+		types.ExecutionStatusRunning:   true,
+		types.ExecutionStatusCancelled: true,
+		types.ExecutionStatusTimeout:   true, // self-transition
+	}
+
+	for _, target := range allCanonicalStatuses {
+		err := validateExecutionStateTransition(types.ExecutionStatusTimeout, target)
+		if allowedFromTimeout[target] {
+			assert.NoError(t, err,
+				"semi-terminal state %q must allow transition to %q", types.ExecutionStatusTimeout, target)
+		} else {
+			assert.Error(t, err,
+				"semi-terminal state %q must not transition to %q", types.ExecutionStatusTimeout, target)
 		}
 	}
 }
@@ -185,6 +215,8 @@ func TestInvariant_ExecutionState_KnownValidTransitions(t *testing.T) {
 		{types.ExecutionStatusWaiting, types.ExecutionStatusRunning},
 		{types.ExecutionStatusWaiting, types.ExecutionStatusCancelled},
 		{types.ExecutionStatusWaiting, types.ExecutionStatusFailed},
+		{types.ExecutionStatusTimeout, types.ExecutionStatusRunning},
+		{types.ExecutionStatusTimeout, types.ExecutionStatusCancelled},
 	}
 
 	for _, pair := range valid {
@@ -203,7 +235,8 @@ func TestInvariant_ExecutionState_KnownInvalidTransitions(t *testing.T) {
 		{types.ExecutionStatusFailed, types.ExecutionStatusRunning},
 		{types.ExecutionStatusFailed, types.ExecutionStatusSucceeded},
 		{types.ExecutionStatusCancelled, types.ExecutionStatusPending},
-		{types.ExecutionStatusTimeout, types.ExecutionStatusRunning},
+		{types.ExecutionStatusTimeout, types.ExecutionStatusPending},
+		{types.ExecutionStatusTimeout, types.ExecutionStatusSucceeded},
 		{types.ExecutionStatusPending, types.ExecutionStatusSucceeded}, // must go through running
 		{types.ExecutionStatusQueued, types.ExecutionStatusSucceeded},
 	}

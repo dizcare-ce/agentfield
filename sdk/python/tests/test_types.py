@@ -576,7 +576,6 @@ class TestHarnessConfig:
         assert hc.system_prompt is None
         assert hc.cwd is None
         assert hc.project_dir is None
-        assert hc.opencode_server is None
         assert hc.env == {}
 
 

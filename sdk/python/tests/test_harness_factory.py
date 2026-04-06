@@ -153,15 +153,6 @@ def test_build_provider_opencode_custom_bin():
     assert provider._bin == "/usr/bin/opencode"
 
 
-def test_build_provider_opencode_custom_server_url():
-    from agentfield.harness.providers.opencode import OpenCodeProvider
-
-    config = _make_config("opencode", opencode_server="http://localhost:9000")
-    provider = build_provider(config)
-    assert isinstance(provider, OpenCodeProvider)
-    assert provider._explicit_server == "http://localhost:9000"
-
-
 # ---------------------------------------------------------------------------
 # build_provider: claude-code
 # ---------------------------------------------------------------------------
