@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
+  Check,
   Copy,
   Play,
 } from "lucide-react";
@@ -1083,6 +1084,7 @@ interface RunRowProps {
 function RunRow({ run, isSelected, onRowClick, onToggleSelect }: RunRowProps) {
   const agentLabel = run.agent_id || run.agent_name || "";
   const reasonerLabel = run.root_reasoner || run.display_name || "—";
+  const [copied, setCopied] = useState(false);
 
   return (
     <TableRow
@@ -1113,12 +1115,10 @@ function RunRow({ run, isSelected, onRowClick, onToggleSelect }: RunRowProps) {
       {/* Target name, then inline copy-chip for run id (no sub-column) */}
       <TableCell
         className="px-3 py-1.5 min-w-0 max-w-[min(36rem,72vw)]"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <span
-            className="inline-block min-w-0 max-w-[min(100%,20rem)] cursor-pointer truncate text-xs font-medium font-mono hover:underline hover:underline-offset-2"
-            onClick={() => onRowClick(run)}
+            className="inline-block min-w-0 max-w-[min(100%,20rem)] truncate text-xs font-medium font-mono hover:underline hover:underline-offset-2"
           >
             {agentLabel ? (
               <>
@@ -1164,16 +1164,23 @@ function RunRow({ run, isSelected, onRowClick, onToggleSelect }: RunRowProps) {
               "h-6 shrink-0 cursor-pointer gap-1 rounded-full border-border/70 px-2 py-0 font-mono tabular-nums",
               "text-muted-foreground transition-colors hover:border-border hover:bg-muted/70 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              copied && "border-green-500/50 text-green-600 dark:text-green-400",
             )}
-            title={run.run_id}
-            aria-label={`Copy run ID ${run.run_id}`}
+            title={copied ? "Copied!" : run.run_id}
+            aria-label={copied ? "Copied!" : `Copy run ID ${run.run_id}`}
             onClick={(e) => {
               e.stopPropagation();
               void navigator.clipboard.writeText(run.run_id);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
             }}
           >
             <span>{shortRunIdDisplay(run.run_id)}</span>
-            <Copy className="size-3 shrink-0 opacity-60" aria-hidden />
+            {copied ? (
+              <Check className="size-3 shrink-0" aria-hidden />
+            ) : (
+              <Copy className="size-3 shrink-0 opacity-60" aria-hidden />
+            )}
           </button>
         </div>
       </TableCell>
