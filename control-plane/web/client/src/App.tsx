@@ -37,7 +37,7 @@ function NavigateToPlayground() {
 
 /** Demo mode overlay — renders picker, storyline, pill, and exit banner. */
 function DemoOverlay() {
-  const { isDemoMode, act, vertical, actions } = useDemoMode();
+  const { isDemoMode, vertical, actions } = useDemoMode();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showExitBanner, setShowExitBanner] = useState(false);
 
