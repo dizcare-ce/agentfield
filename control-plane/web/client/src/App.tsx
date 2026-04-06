@@ -42,7 +42,7 @@ function DemoOverlay() {
   const [showExitBanner, setShowExitBanner] = useState(false);
 
   // Show picker when demo is active but no vertical chosen yet
-  const shouldShowPicker = isDemoMode && act === 0 && vertical == null;
+  const shouldShowPicker = isDemoMode && vertical == null;
 
   const handleVerticalSelect = useCallback(
     (v: DemoVertical) => {
