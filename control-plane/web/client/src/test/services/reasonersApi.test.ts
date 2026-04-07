@@ -219,6 +219,56 @@ describe("reasonersApi", () => {
     expect(historyUrl).toContain("limit=50");
   });
 
+  it("surfaces detailed errors for metrics, history, templates, and save-template calls", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(500, { message: 'ignored' }, 'Bad Gateway'))
+      .mockResolvedValueOnce(mockResponse(503, { message: 'ignored' }, 'Service Unavailable'))
+      .mockResolvedValueOnce(mockResponse(404, { message: 'ignored' }, 'Missing'))
+      .mockResolvedValueOnce(mockResponse(422, { message: 'ignored' }, 'Unprocessable Entity'));
+
+    const checks = [
+      [() => reasonersApi.getPerformanceMetrics('core'), 'Failed to fetch performance metrics: Bad Gateway', 500],
+      [() => reasonersApi.getExecutionHistory('core'), 'Failed to fetch execution history: Service Unavailable', 503],
+      [() => reasonersApi.getExecutionTemplates('core'), 'Failed to fetch execution templates: Missing', 404],
+      [() => reasonersApi.saveExecutionTemplate('core', { name: 'Bad', input: {} }), 'Failed to save execution template: Unprocessable Entity', 422],
+    ] as const;
+
+    for (const [run, message, status] of checks) {
+      try {
+        await run();
+        throw new Error('expected helper to reject');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ReasonersApiError);
+        expect((error as ReasonersApiError).message).toBe(message);
+        expect((error as ReasonersApiError).status).toBe(status);
+      }
+    }
+  });
+
+  it("wraps generic network failures for downstream reasoner helpers", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+
+    await expect(reasonersApi.getPerformanceMetrics('core')).rejects.toMatchObject({
+      name: 'ReasonersApiError',
+      message: 'Network error: network down',
+    });
+    await expect(reasonersApi.getExecutionHistory('core')).rejects.toMatchObject({
+      name: 'ReasonersApiError',
+      message: 'Network error: network down',
+    });
+    await expect(reasonersApi.getExecutionTemplates('core')).rejects.toMatchObject({
+      name: 'ReasonersApiError',
+      message: 'Network error: network down',
+    });
+    await expect(
+      reasonersApi.saveExecutionTemplate('core', { name: 'Retry', input: {} })
+    ).rejects.toMatchObject({
+      name: 'ReasonersApiError',
+      message: 'Network error: network down',
+    });
+  });
+
   it("creates and closes event streams with callback handling", () => {
     class MockEventSource {
       static instances: MockEventSource[] = [];
@@ -263,6 +313,45 @@ describe("reasonersApi", () => {
       2,
       new Error("SSE connection error - readyState: 1")
     );
+
+    reasonersApi.closeEventStream(stream);
+    expect(instance.closed).toBe(true);
+  });
+
+  it("creates event streams without an API key and keeps custom errors intact", async () => {
+    class MockEventSource {
+      static instances: MockEventSource[] = [];
+
+      url: string;
+      readyState = 0;
+      closed = false;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        MockEventSource.instances.push(this);
+      }
+
+      close() {
+        this.closed = true;
+      }
+    }
+
+    globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    const onError = vi.fn();
+    const customError = new ReasonersApiError('custom', 418);
+
+    const stream = reasonersApi.createEventStream(vi.fn(), onError);
+    const instance = MockEventSource.instances[0];
+
+    expect(instance.url).toBe('/api/ui/v1/reasoners/events');
+    instance.onerror?.(new Event('error'));
+    expect(onError).toHaveBeenCalledWith(new Error('SSE connection error - readyState: 0'));
+
+    globalThis.fetch = vi.fn().mockRejectedValue(customError);
+    await expect(reasonersApi.getReasonerDetails('core')).rejects.toBe(customError);
 
     reasonersApi.closeEventStream(stream);
     expect(instance.closed).toBe(true);

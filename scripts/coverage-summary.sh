@@ -137,7 +137,7 @@ surfaces = [
 ]
 
 summary = {
-    "generated_at": __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat().replace("+00:00", "Z"),
+    "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"),
     "surfaces": surfaces,
     "badge": {
         "schemaVersion": 1,
