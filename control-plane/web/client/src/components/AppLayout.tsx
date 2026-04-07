@@ -27,10 +27,6 @@ const routeNames: Record<string, string> = {
   "/verify": "Audit",
   "/access": "Access management",
   "/settings": "Settings",
-  "/nodes": "Nodes",
-  "/reasoners": "Reasoners",
-  "/executions": "Executions",
-  "/workflows": "Workflows",
 };
 
 /** Match the longest configured section prefix so `/dashboard/legacy` maps to `/dashboard`. */
