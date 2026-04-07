@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRunDAG, useCancelExecution } from "@/hooks/queries";
+import {
+  useRunDAG,
+  useCancelExecution,
+  usePauseExecution,
+  useResumeExecution,
+} from "@/hooks/queries";
 import {
   Card,
   CardContent,
@@ -10,15 +15,34 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Activity,
   BadgeCheck,
   ChevronDown,
   FileJson,
   FileCheck2,
   Info,
   Link2,
+  PauseCircle,
+  Play,
   RefreshCw,
   RotateCcw,
+  XCircle,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  useErrorNotification,
+  useSuccessNotification,
+} from "@/components/ui/notification";
+import { CANCEL_RUN_COPY } from "@/components/runs/RunLifecycleMenu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -402,6 +426,14 @@ export function RunDetailPage() {
   const queryClient = useQueryClient();
   const { data: dag, isLoading, isError, error } = useRunDAG(runId);
   const cancelMutation = useCancelExecution();
+  const pauseMutation = usePauseExecution();
+  const resumeMutation = useResumeExecution();
+  const showSuccess = useSuccessNotification();
+  const showError = useErrorNotification();
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState<
+    null | "pause" | "resume" | "cancel"
+  >(null);
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"trace" | "graph">("trace");
@@ -767,26 +799,199 @@ export function RunDetailPage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Cancel (running only) */}
-          {dag.workflow_status === "running" && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={cancelMutation.isPending}
-              onClick={() => {
-                const execId =
-                  dag.timeline.find((n) => n.workflow_depth === 0)
-                    ?.execution_id ?? dag.timeline[0]?.execution_id;
-                if (execId) cancelMutation.mutate(execId);
-              }}
-            >
-              Cancel
-            </Button>
-          )}
+          {/* Lifecycle cluster — Pause / Resume / Cancel, shown only for
+              non-terminal runs. All three share a single busy flag so one
+              in-flight mutation disables the other controls. */}
+          {(() => {
+            const normalized = normalizeExecutionStatus(dag.workflow_status);
+            const isRunning = normalized === "running";
+            const isPaused = normalized === "paused";
+            if (!isRunning && !isPaused) return null;
+
+            const rootExecId =
+              dag.timeline.find((n) => n.workflow_depth === 0)?.execution_id ??
+              dag.timeline[0]?.execution_id;
+            if (!rootExecId) return null;
+
+            const busy = lifecycleBusy !== null;
+
+            const runShort = runId ? runId.slice(0, 8) : "run";
+
+            const handlePause = async () => {
+              setLifecycleBusy("pause");
+              try {
+                await pauseMutation.mutateAsync(rootExecId);
+                showSuccess("Run paused", `Run ${runShort} is now paused.`);
+              } catch (err) {
+                showError(
+                  "Pause failed",
+                  err instanceof Error ? err.message : "Unable to pause run.",
+                );
+              } finally {
+                setLifecycleBusy(null);
+              }
+            };
+
+            const handleResume = async () => {
+              setLifecycleBusy("resume");
+              try {
+                await resumeMutation.mutateAsync(rootExecId);
+                showSuccess(
+                  "Run resumed",
+                  `Run ${runShort} is running again.`,
+                );
+              } catch (err) {
+                showError(
+                  "Resume failed",
+                  err instanceof Error
+                    ? err.message
+                    : "Unable to resume run.",
+                );
+              } finally {
+                setLifecycleBusy(null);
+              }
+            };
+
+            return (
+              <>
+                {isRunning ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={busy}
+                    onClick={handlePause}
+                  >
+                    {lifecycleBusy === "pause" ? (
+                      <Activity
+                        className="size-3.5 animate-spin"
+                        aria-hidden
+                      />
+                    ) : (
+                      <PauseCircle className="size-3.5" aria-hidden />
+                    )}
+                    Pause
+                  </Button>
+                ) : null}
+                {isPaused ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={busy}
+                    onClick={handleResume}
+                  >
+                    {lifecycleBusy === "resume" ? (
+                      <Activity
+                        className="size-3.5 animate-spin"
+                        aria-hidden
+                      />
+                    ) : (
+                      <Play className="size-3.5" aria-hidden />
+                    )}
+                    Resume
+                  </Button>
+                ) : null}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={busy}
+                  onClick={() => setCancelDialogOpen(true)}
+                >
+                  {lifecycleBusy === "cancel" ? (
+                    <Activity className="size-3.5 animate-spin" aria-hidden />
+                  ) : (
+                    <XCircle className="size-3.5" aria-hidden />
+                  )}
+                  Cancel
+                </Button>
+
+                <AlertDialog
+                  open={cancelDialogOpen}
+                  onOpenChange={setCancelDialogOpen}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {CANCEL_RUN_COPY.title(1)}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {CANCEL_RUN_COPY.description}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={busy}>
+                        {CANCEL_RUN_COPY.keepLabel}
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={busy}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async () => {
+                          setCancelDialogOpen(false);
+                          setLifecycleBusy("cancel");
+                          try {
+                            await cancelMutation.mutateAsync(rootExecId);
+                            showSuccess(
+                              "Cancellation registered",
+                              `Run ${runShort} will stop after its current step finishes.`,
+                            );
+                          } catch (err) {
+                            showError(
+                              "Cancel failed",
+                              err instanceof Error
+                                ? err.message
+                                : "Unable to cancel run.",
+                            );
+                          } finally {
+                            setLifecycleBusy(null);
+                          }
+                        }}
+                      >
+                        {CANCEL_RUN_COPY.confirmLabel(1)}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            );
+          })()}
 
         </div>
       </div>
+
+      {/* Cancellation-registered strip — shown only when the run is marked
+          cancelled but at least one node is still reporting 'running'. That
+          is the honest depiction of the backend semantics: the control
+          plane flipped the status immediately but in-flight work cannot be
+          killed mid-dispatch and will finish naturally. */}
+      {(() => {
+        const normalized = normalizeExecutionStatus(dag.workflow_status);
+        if (normalized !== "cancelled") return null;
+        const stillRunning = dag.timeline.filter(
+          (n) => normalizeExecutionStatus(n.status) === "running",
+        ).length;
+        if (stillRunning === 0) return null;
+        return (
+          <div
+            role="status"
+            className="mb-3 flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <Info
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
+            <p className="leading-snug">
+              <span className="font-medium text-foreground">
+                Cancellation registered
+              </span>{" "}
+              — {stillRunning} node{stillRunning === 1 ? "" : "s"} still
+              finishing the current step. No new nodes will start; their
+              output will be discarded.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Nodes + webhooks — always show run-level strip (empty states explicit) */}
       <TooltipProvider delayDuration={280}>
