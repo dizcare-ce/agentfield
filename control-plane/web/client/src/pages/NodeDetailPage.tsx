@@ -1,8 +1,3 @@
-import {
-  ErrorAnnouncer,
-  StatusAnnouncer,
-  useAccessibility,
-} from "@/components/AccessibilityEnhancements";
 import { DIDInfoModal } from "@/components/did/DIDInfoModal";
 import { EnvironmentVariableForm } from "@/components/forms/EnvironmentVariableForm";
 import { ReasonersSkillsTable } from "@/components/ReasonersSkillsTable";
@@ -69,7 +64,6 @@ function NodeDetailPageContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { mode } = useMode();
-  const { announceStatus: _announceStatus } = useAccessibility();
 
   // Notification hooks
   const showSuccess = useSuccessNotification();
@@ -432,9 +426,11 @@ function NodeDetailPageContent() {
   // Loading state with enhanced skeleton
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        <StatusAnnouncer status="Loading node details" />
-
+      <div
+        className="p-6 max-w-7xl mx-auto space-y-6"
+        aria-busy="true"
+        aria-label="Loading node details"
+      >
         {/* Header skeleton */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -457,11 +453,9 @@ function NodeDetailPageContent() {
         {/* Tabs skeleton */}
         <div className="space-y-4">
           <div className="flex space-x-2">
-            {["Overview", "Configuration", "Logs"].map(
-              (_, i) => (
-                <Skeleton key={i} className="h-10 w-24" />
-              )
-            )}
+            {["Overview", "Configuration", "Logs"].map((_, i) => (
+              <Skeleton key={i} className="h-10 w-24" />
+            ))}
           </div>
           <div className="space-y-4">
             <Skeleton className="h-32 w-full" />
@@ -480,7 +474,6 @@ function NodeDetailPageContent() {
   if (error) {
     return (
       <div className="p-4">
-        <ErrorAnnouncer error={error} />
         <Alert variant="destructive" title="Error" role="alert">
           {error}
         </Alert>
