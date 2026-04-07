@@ -320,14 +320,6 @@ function NotificationRow({
       onClick={() => {
         if (!notification.read) onMarkRead();
       }}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          if (!notification.read) onMarkRead();
-        }
-      }}
     >
       <Icon className={cn("size-3.5 shrink-0", iconClass)} aria-hidden />
       <span
@@ -341,7 +333,7 @@ function NotificationRow({
         {notification.title}
       </span>
       <span
-        className="shrink-0 text-[10px] tabular-nums text-muted-foreground/80"
+        className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
         title={absolute}
       >
         {relative}
@@ -455,7 +447,7 @@ function RunSection({
             aria-label={`${unread} unread`}
           />
         ) : null}
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {latestRelative}
         </span>
       </div>

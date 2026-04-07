@@ -534,21 +534,7 @@ const FILTER_STATUS_CANONICAL = [
 ] as const satisfies readonly CanonicalStatus[];
 
 function StatusMenuDot({ canonical }: { canonical: CanonicalStatus }) {
-  const color =
-    canonical === "succeeded"
-      ? "bg-green-500"
-      : canonical === "failed" || canonical === "timeout"
-        ? "bg-red-500"
-        : canonical === "running"
-          ? "bg-blue-500"
-          : "bg-muted-foreground";
-
-  return (
-    <span
-      className={cn("inline-flex size-2 shrink-0 rounded-full", color)}
-      aria-hidden
-    />
-  );
+  return <StatusDot status={canonical} label={false} />;
 }
 
 /** Page numbers to render (1-based), with ellipsis when there are gaps. */
@@ -1002,7 +988,7 @@ export function RunsPage() {
     let rows = pageRows;
     if (selectedStatuses.size > 1) {
       rows = rows.filter((r) =>
-        selectedStatuses.has(normalizeExecutionStatus(r.status)),
+        selectedStatuses.has(normalizeExecutionStatus(r.root_execution_status ?? r.status)),
       );
     }
     return rows;

@@ -66,6 +66,8 @@ export function StatusDot({
     <span
       className={cn("inline-flex items-center gap-1.5", className)}
       data-status={normalized}
+      role={label ? undefined : "img"}
+      aria-label={label ? undefined : getStatusLabel(normalized)}
     >
       <span
         className={cn(

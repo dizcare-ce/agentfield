@@ -106,14 +106,15 @@ export function RunLifecycleMenu({
             variant="ghost"
             size="icon"
             className={cn(
-              "size-7 shrink-0 text-muted-foreground/40 transition-colors",
-              "group-hover/run-row:text-muted-foreground",
+              "size-7 shrink-0 text-muted-foreground/70 transition-colors",
+              "group-hover/run-row:text-foreground",
               "hover:bg-muted hover:text-foreground",
               "data-[state=open]:bg-muted data-[state=open]:text-foreground",
               "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isPending && "text-foreground",
             )}
             disabled={isPending}
+            aria-busy={isPending}
             onClick={(e) => e.stopPropagation()}
             aria-label={`Run actions for ${run.run_id}`}
           >

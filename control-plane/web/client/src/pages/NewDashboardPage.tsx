@@ -533,7 +533,7 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
               <RunStatusBadge status={run.root_execution_status ?? run.status} />
             </TableCell>
             <TableCell className="px-3 py-1.5 text-right font-mono text-xs text-muted-foreground tabular-nums">
-              {run.terminal ? (
+              {isTerminalStatus(run.root_execution_status ?? run.status) ? (
                 formatDurationHumanReadable(run.duration_ms)
               ) : (
                 <LiveElapsedDuration

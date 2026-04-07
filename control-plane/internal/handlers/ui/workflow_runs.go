@@ -254,6 +254,11 @@ func deriveStatusFromCounts(statusCounts map[string]int, activeExecutions int) s
 		return string(types.ExecutionStatusCancelled)
 	}
 
+	// If there are any paused executions (and no active ones), the workflow is paused
+	if statusCounts[string(types.ExecutionStatusPaused)] > 0 {
+		return string(types.ExecutionStatusPaused)
+	}
+
 	// All executions are in terminal non-error states (succeeded) or no executions exist
 	return string(types.ExecutionStatusSucceeded)
 }

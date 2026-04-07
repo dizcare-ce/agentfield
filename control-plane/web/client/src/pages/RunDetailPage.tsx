@@ -62,7 +62,8 @@ import { StepDetail } from "@/components/StepDetail";
 import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ExecutionObservabilityPanel } from "@/components/execution";
-import { normalizeExecutionStatus } from "@/utils/status";
+import { normalizeExecutionStatus, isTerminalStatus } from "@/utils/status";
+import { StatusPill } from "@/components/ui/status-pill";
 import type {
   WebhookFailurePreview,
   WebhookRunSummary,
@@ -77,20 +78,6 @@ import {
 } from "@/services/vcApi";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function statusVariant(
-  status: string,
-): "default" | "destructive" | "secondary" | "outline" {
-  switch (status) {
-    case "succeeded":
-      return "default";
-    case "failed":
-    case "timeout":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
 
 function computeMaxDuration(
   timeline: WorkflowDAGLightweightNode[],
@@ -639,13 +626,7 @@ export function RunDetailPage() {
                 rootNodeForBadge?.status ?? dag.workflow_status,
               );
               return (
-                <Badge
-                  variant={statusVariant(effective)}
-                  size="md"
-                  className="shrink-0 px-2.5 py-1 text-xs font-medium capitalize leading-snug shadow-xs"
-                >
-                  {effective}
-                </Badge>
+                <StatusPill status={effective} size="md" className="shrink-0 shadow-xs" />
               );
             })()}
           </div>
@@ -819,7 +800,7 @@ export function RunDetailPage() {
             );
             const isRunning = normalized === "running";
             const isPaused = normalized === "paused";
-            if (!isRunning && !isPaused) return null;
+            if (isTerminalStatus(normalized)) return null;
 
             const rootExecId = rootNodeForStatus?.execution_id;
             if (!rootExecId) return null;
