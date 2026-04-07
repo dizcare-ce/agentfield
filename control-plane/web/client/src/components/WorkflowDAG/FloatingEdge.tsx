@@ -61,7 +61,9 @@ function FloatingEdge({ id, source, target, style = {}, data, sourceX = 0, sourc
     const baseStyle = {
       stroke: (() => {
         // CSS vars store raw HSL components (e.g. "142 76% 36%"), so we must
-        // wrap them in hsl() for SVG stroke attributes.
+        // wrap them in hsl() for SVG stroke attributes. The status here is the
+        // edge's OWN canonical status — never propagated from a parent run, so
+        // a child can be running blue even when the root is cancelled.
         switch (canonicalStatus) {
           case "succeeded":
             return "hsl(var(--status-success))";
@@ -69,9 +71,13 @@ function FloatingEdge({ id, source, target, style = {}, data, sourceX = 0, sourc
             return "hsl(var(--status-error))";
           case "running":
             return "hsl(var(--status-info))";
+          case "paused":
+          case "waiting":
           case "pending":
           case "queued":
             return "hsl(var(--status-warning))";
+          case "cancelled":
+            return "hsl(var(--muted-foreground))";
           default:
             return "hsl(var(--muted-foreground))";
         }
@@ -102,12 +108,21 @@ function FloatingEdge({ id, source, target, style = {}, data, sourceX = 0, sourc
           strokeDasharray: "12,8",
           animation: "dash 2s linear infinite",
         };
+      case "paused":
+      case "waiting":
       case "pending":
       case "queued":
         return {
           ...baseStyle,
           strokeWidth: 2,
           opacity: 0.7,
+        };
+      case "cancelled":
+        return {
+          ...baseStyle,
+          strokeWidth: 2,
+          strokeDasharray: "4,4",
+          opacity: 0.55,
         };
       default:
         return {

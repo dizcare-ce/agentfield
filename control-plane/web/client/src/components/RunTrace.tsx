@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
+import { getStatusTheme, normalizeExecutionStatus } from "@/utils/status";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
 
 // ─── Tree node type (runtime-constructed) ────────────────────────────────────
@@ -165,15 +166,20 @@ function buildFlatSteps(root: TraceTreeNode): FlatStep[] {
 // ─── Status dot ───────────────────────────────────────────────────────────────
 
 function StatusDot({ status }: { status: string }) {
-  const color =
-    status === "succeeded"
-      ? "bg-green-500"
-      : status === "failed" || status === "timeout"
-        ? "bg-red-500"
-        : status === "running"
-          ? "bg-blue-500 animate-pulse"
-          : "bg-muted-foreground/40";
-  return <span className={cn("size-1.5 rounded-full shrink-0 inline-block", color)} />;
+  // Route colors through the canonical status theme so cancelled/paused/timeout
+  // are visually distinct from pending. The own-status of this row drives the
+  // color — never propagate parent status here.
+  const theme = getStatusTheme(status);
+  const isRunning = theme.status === "running";
+  return (
+    <span
+      className={cn(
+        "size-1.5 rounded-full shrink-0 inline-block",
+        theme.indicatorClass,
+        isRunning && "animate-pulse",
+      )}
+    />
+  );
 }
 
 // ─── Single trace row ─────────────────────────────────────────────────────────
@@ -201,16 +207,12 @@ function TraceRow({
       : 4;
   const isSelected = node.execution_id === selectedId;
 
-  const barColor =
-    node.status === "succeeded"
-      ? "bg-green-600"
-      : node.status === "failed"
-        ? "bg-red-500"
-        : node.status === "timeout"
-          ? "bg-amber-500"
-          : node.status === "running"
-            ? "bg-blue-500 animate-pulse"
-            : "bg-muted-foreground/30";
+  // Bar color derives from this row's own canonical status — covers
+  // cancelled/paused/timeout that previously fell through to a generic gray.
+  const barTheme = getStatusTheme(node.status);
+  const isBarRunning = barTheme.status === "running";
+  const barColor = cn(barTheme.indicatorClass, isBarRunning && "animate-pulse");
+  const isCancelled = normalizeExecutionStatus(node.status) === "cancelled";
 
   let relativeStart: string | null = null;
   if (runStartedAt && node.started_at) {
@@ -252,7 +254,12 @@ function TraceRow({
         <StatusDot status={node.status} />
 
         {/* Reasoner name */}
-        <span className="flex-1 truncate font-mono text-xs min-w-0">
+        <span
+          className={cn(
+            "flex-1 truncate font-mono text-xs min-w-0",
+            isCancelled && "line-through opacity-60",
+          )}
+        >
           {node.reasoner_id}
         </span>
 
