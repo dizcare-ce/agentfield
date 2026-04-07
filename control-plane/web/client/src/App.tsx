@@ -3,7 +3,6 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RootRedirect } from "./components/RootRedirect";
 import { ModeProvider } from "./contexts/ModeContext";
 import { ThemeProvider } from "./components/theme-provider";
-import { useFocusManagement } from "./hooks/useFocusManagement";
 import { AppLayout } from "./components/AppLayout";
 import { EnhancedDashboardPage } from "./pages/EnhancedDashboardPage";
 import { NewDashboardPage } from "./pages/NewDashboardPage";
@@ -27,8 +26,6 @@ function NavigateToPlayground() {
 }
 
 function AppContent() {
-  useFocusManagement();
-
   return (
     <Routes>
       <Route element={<AppLayout />}>
