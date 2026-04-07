@@ -1,0 +1,102 @@
+name: Coverage Summary
+
+on:
+  pull_request:
+    paths:
+      - "control-plane/**"
+      - "sdk/**"
+      - "scripts/test-all.sh"
+      - "scripts/coverage-summary.sh"
+      - ".github/workflows/coverage.yml"
+      - "docs/COVERAGE.md"
+      - "docs/DEVELOPMENT.md"
+      - ".github/BRANCH_PROTECTION.md"
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/**"
+      - "sdk/**"
+      - "scripts/test-all.sh"
+      - "scripts/coverage-summary.sh"
+      - ".github/workflows/coverage.yml"
+      - "docs/COVERAGE.md"
+      - "docs/DEVELOPMENT.md"
+      - ".github/BRANCH_PROTECTION.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.2"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python SDK test dependencies
+        working-directory: sdk/python
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdk/typescript
+        run: npm ci
+        env:
+          CI: true
+
+      - name: Install control plane web UI dependencies
+        working-directory: control-plane/web/client
+        run: npm ci
+        env:
+          CI: true
+
+      - name: Generate coverage summary
+        run: ./scripts/coverage-summary.sh
+
+      - name: Publish coverage summary
+        run: cat test-reports/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: test-reports/coverage/
+          retention-days: 7
+
+      - name: Update coverage badge gist
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.COVERAGE_GIST_ID != '' && secrets.GIST_TOKEN != ''
+        uses: actions/github-script@v7
+        env:
+          COVERAGE_GIST_ID: ${{ secrets.COVERAGE_GIST_ID }}
+        with:
+          github-token: ${{ secrets.GIST_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const badge = fs.readFileSync('test-reports/coverage/badge.json', 'utf8');
+            const summary = fs.readFileSync('test-reports/coverage/summary.json', 'utf8');
+
+            await github.rest.gists.update({
+              gist_id: process.env.COVERAGE_GIST_ID,
+              files: {
+                'badge.json': { content: badge },
+                'coverage-summary.json': { content: summary },
+              },
+            });
