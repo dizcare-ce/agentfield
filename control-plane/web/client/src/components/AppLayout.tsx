@@ -102,16 +102,6 @@ function resolveHeaderCrumbs(
     };
   }
 
-  if (section === "/dashboard" && parts[0] === "legacy") {
-    return {
-      mode: "trail",
-      crumbs: [
-        { label: sectionTitle, to: section },
-        { label: "Classic dashboard" },
-      ],
-    };
-  }
-
   const last = parts[parts.length - 1] ?? rest;
   const display =
     last.length > 24 ? shortResourceId(last, 10) : last.replace(/-/g, " ");
