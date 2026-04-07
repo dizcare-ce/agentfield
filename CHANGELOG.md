@@ -6,6 +6,330 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.1] - 2026-04-07
+
+
+### Chores
+
+- Chore(deps): bump the npm_and_yarn group across 5 directories with 21 updates (#346)
+
+* chore(deps): bump the npm_and_yarn group across 5 directories with 21 updates
+
+Bumps the npm_and_yarn group with 6 updates in the /sdk/typescript directory:
+
+| Package | From | To |
+| --- | --- | --- |
+| [axios](https://github.com/axios/axios) | `1.13.2` | `1.13.5` |
+| [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) | `8.2.1` | `8.2.2` |
+| [esbuild](https://github.com/evanw/esbuild) | `0.21.5` | `0.27.0` |
+| [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | `0.1.12` | `0.1.13` |
+| [qs](https://github.com/ljharb/qs) | `6.13.0` | `6.14.2` |
+| [rollup](https://github.com/rollup/rollup) | `4.53.3` | `4.60.1` |
+
+Bumps the npm_and_yarn group with 2 updates in the /examples/ts-node-examples directory: [picomatch](https://github.com/micromatch/picomatch) and [rollup](https://github.com/rollup/rollup).
+Bumps the npm_and_yarn group with 2 updates in the /examples/python_agent_nodes/rag_evaluation/ui directory: [picomatch](https://github.com/micromatch/picomatch) and [next](https://github.com/vercel/next.js).
+Bumps the npm_and_yarn group with 1 update in the /examples/benchmarks/100k-scale/mastra-bench directory: [ai](https://github.com/vercel/ai).
+Bumps the npm_and_yarn group with 13 updates in the /control-plane/web/client directory:
+
+| Package | From | To |
+| --- | --- | --- |
+| [picomatch](https://github.com/micromatch/picomatch) | `2.3.1` | `2.3.2` |
+| [picomatch](https://github.com/micromatch/picomatch) | `4.0.2` | `4.0.4` |
+| [picomatch](https://github.com/micromatch/picomatch) | `4.0.3` | `4.0.4` |
+| [rollup](https://github.com/rollup/rollup) | `4.43.0` | `4.60.1` |
+| [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) | `6.3.5` | `6.4.2` |
+| [mdast-util-to-hast](https://github.com/syntax-tree/mdast-util-to-hast) | `13.2.0` | `13.2.1` |
+| [js-yaml](https://github.com/nodeca/js-yaml) | `4.1.0` | `4.1.1` |
+| [brace-expansion](https://github.com/juliangruber/brace-expansion) | `1.1.12` | `1.1.13` |
+| [flatted](https://github.com/WebReflection/flatted) | `3.3.3` | `3.4.2` |
+| [lodash](https://github.com/lodash/lodash) | `4.17.21` | `4.18.1` |
+| [minimatch](https://github.com/isaacs/minimatch) | `3.1.2` | `3.1.5` |
+| [preact](https://github.com/preactjs/preact) | `10.27.2` | `10.29.1` |
+| [react-router](https://github.com/remix-run/react-router/tree/HEAD/packages/react-router) | `7.6.2` | `7.14.0` |
+| [tmp](https://github.com/raszi/node-tmp) | `0.2.3` | `0.2.5` |
+| [yaml](https://github.com/eemeli/yaml) | `2.8.0` | `2.8.3` |
+| [yaml](https://github.com/eemeli/yaml) | `1.10.2` | `1.10.3` |
+
+
+
+Updates `axios` from 1.13.2 to 1.13.5
+- [Release notes](https://github.com/axios/axios/releases)
+- [Changelog](https://github.com/axios/axios/blob/v1.x/CHANGELOG.md)
+- [Commits](https://github.com/axios/axios/compare/v1.13.2...v1.13.5)
+
+Updates `express-rate-limit` from 8.2.1 to 8.2.2
+- [Release notes](https://github.com/express-rate-limit/express-rate-limit/releases)
+- [Commits](https://github.com/express-rate-limit/express-rate-limit/compare/v8.2.1...v8.2.2)
+
+Updates `esbuild` from 0.21.5 to 0.27.0
+- [Release notes](https://github.com/evanw/esbuild/releases)
+- [Changelog](https://github.com/evanw/esbuild/blob/main/CHANGELOG-2024.md)
+- [Commits](https://github.com/evanw/esbuild/compare/v0.21.5...v0.27.0)
+
+Updates `path-to-regexp` from 0.1.12 to 0.1.13
+- [Release notes](https://github.com/pillarjs/path-to-regexp/releases)
+- [Changelog](https://github.com/pillarjs/path-to-regexp/blob/v.0.1.13/History.md)
+- [Commits](https://github.com/pillarjs/path-to-regexp/compare/v0.1.12...v.0.1.13)
+
+Updates `picomatch` from 4.0.3 to 4.0.4
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `qs` from 6.13.0 to 6.14.2
+- [Changelog](https://github.com/ljharb/qs/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/ljharb/qs/compare/v6.13.0...v6.14.2)
+
+Updates `rollup` from 4.53.3 to 4.60.1
+- [Release notes](https://github.com/rollup/rollup/releases)
+- [Changelog](https://github.com/rollup/rollup/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rollup/rollup/compare/v4.53.3...v4.60.1)
+
+Updates `vite` from 5.4.21 to 8.0.5
+- [Release notes](https://github.com/vitejs/vite/releases)
+- [Changelog](https://github.com/vitejs/vite/blob/v6.4.2/packages/vite/CHANGELOG.md)
+- [Commits](https://github.com/vitejs/vite/commits/v6.4.2/packages/vite)
+
+Updates `picomatch` from 4.0.3 to 4.0.4
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `rollup` from 4.53.3 to 4.60.1
+- [Release notes](https://github.com/rollup/rollup/releases)
+- [Changelog](https://github.com/rollup/rollup/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rollup/rollup/compare/v4.53.3...v4.60.1)
+
+Updates `picomatch` from 2.3.1 to 2.3.2
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `picomatch` from 4.0.3 to 4.0.4
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `next` from 14.2.15 to 15.5.14
+- [Release notes](https://github.com/vercel/next.js/releases)
+- [Changelog](https://github.com/vercel/next.js/blob/canary/release.js)
+- [Commits](https://github.com/vercel/next.js/compare/v14.2.15...v15.5.14)
+
+Removes `ai`
+
+Updates `hono` from 4.11.3 to 4.12.12
+- [Release notes](https://github.com/honojs/hono/releases)
+- [Commits](https://github.com/honojs/hono/compare/v4.11.3...v4.12.12)
+
+Updates `picomatch` from 2.3.1 to 2.3.2
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `picomatch` from 4.0.2 to 4.0.4
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `picomatch` from 4.0.3 to 4.0.4
+- [Release notes](https://github.com/micromatch/picomatch/releases)
+- [Changelog](https://github.com/micromatch/picomatch/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/micromatch/picomatch/compare/4.0.3...4.0.4)
+
+Updates `rollup` from 4.43.0 to 4.60.1
+- [Release notes](https://github.com/rollup/rollup/releases)
+- [Changelog](https://github.com/rollup/rollup/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rollup/rollup/compare/v4.53.3...v4.60.1)
+
+Updates `vite` from 6.3.5 to 6.4.2
+- [Release notes](https://github.com/vitejs/vite/releases)
+- [Changelog](https://github.com/vitejs/vite/blob/v6.4.2/packages/vite/CHANGELOG.md)
+- [Commits](https://github.com/vitejs/vite/commits/v6.4.2/packages/vite)
+
+Updates `mdast-util-to-hast` from 13.2.0 to 13.2.1
+- [Release notes](https://github.com/syntax-tree/mdast-util-to-hast/releases)
+- [Commits](https://github.com/syntax-tree/mdast-util-to-hast/compare/13.2.0...13.2.1)
+
+Updates `js-yaml` from 4.1.0 to 4.1.1
+- [Changelog](https://github.com/nodeca/js-yaml/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/nodeca/js-yaml/compare/4.1.0...4.1.1)
+
+Updates `brace-expansion` from 1.1.12 to 1.1.13
+- [Release notes](https://github.com/juliangruber/brace-expansion/releases)
+- [Commits](https://github.com/juliangruber/brace-expansion/compare/v1.1.12...v1.1.13)
+
+Updates `flatted` from 3.3.3 to 3.4.2
+- [Commits](https://github.com/WebReflection/flatted/compare/v3.3.3...v3.4.2)
+
+Updates `lodash` from 4.17.21 to 4.18.1
+- [Release notes](https://github.com/lodash/lodash/releases)
+- [Commits](https://github.com/lodash/lodash/compare/4.17.21...4.18.1)
+
+Updates `minimatch` from 3.1.2 to 3.1.5
+- [Changelog](https://github.com/isaacs/minimatch/blob/main/changelog.md)
+- [Commits](https://github.com/isaacs/minimatch/compare/v3.1.2...v3.1.5)
+
+Updates `preact` from 10.27.2 to 10.29.1
+- [Release notes](https://github.com/preactjs/preact/releases)
+- [Commits](https://github.com/preactjs/preact/compare/10.27.2...10.29.1)
+
+Updates `react-router` from 7.6.2 to 7.14.0
+- [Release notes](https://github.com/remix-run/react-router/releases)
+- [Changelog](https://github.com/remix-run/react-router/blob/main/packages/react-router/CHANGELOG.md)
+- [Commits](https://github.com/remix-run/react-router/commits/react-router@7.14.0/packages/react-router)
+
+Updates `tmp` from 0.2.3 to 0.2.5
+- [Changelog](https://github.com/raszi/node-tmp/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/raszi/node-tmp/compare/v0.2.3...v0.2.5)
+
+Updates `yaml` from 2.8.0 to 2.8.3
+- [Release notes](https://github.com/eemeli/yaml/releases)
+- [Commits](https://github.com/eemeli/yaml/compare/v2.8.0...v2.8.3)
+
+Updates `yaml` from 1.10.2 to 1.10.3
+- [Release notes](https://github.com/eemeli/yaml/releases)
+- [Commits](https://github.com/eemeli/yaml/compare/v2.8.0...v2.8.3)
+
+---
+updated-dependencies:
+- dependency-name: axios
+  dependency-version: 1.13.5
+  dependency-type: direct:production
+  dependency-group: npm_and_yarn
+- dependency-name: express-rate-limit
+  dependency-version: 8.2.2
+  dependency-type: direct:production
+  dependency-group: npm_and_yarn
+- dependency-name: esbuild
+  dependency-version: 0.27.0
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: path-to-regexp
+  dependency-version: 0.1.13
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 4.0.4
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: qs
+  dependency-version: 6.14.2
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: rollup
+  dependency-version: 4.60.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: vite
+  dependency-version: 8.0.5
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 4.0.4
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: rollup
+  dependency-version: 4.60.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 2.3.2
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 4.0.4
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: next
+  dependency-version: 15.5.14
+  dependency-type: direct:production
+  dependency-group: npm_and_yarn
+- dependency-name: ai
+  dependency-version: 
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: hono
+  dependency-version: 4.12.12
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 2.3.2
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 4.0.4
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: picomatch
+  dependency-version: 4.0.4
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: rollup
+  dependency-version: 4.60.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: vite
+  dependency-version: 6.4.2
+  dependency-type: direct:development
+  dependency-group: npm_and_yarn
+- dependency-name: mdast-util-to-hast
+  dependency-version: 13.2.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: js-yaml
+  dependency-version: 4.1.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: brace-expansion
+  dependency-version: 1.1.13
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: flatted
+  dependency-version: 3.4.2
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: lodash
+  dependency-version: 4.18.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: minimatch
+  dependency-version: 3.1.5
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: preact
+  dependency-version: 10.29.1
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: react-router
+  dependency-version: 7.14.0
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: tmp
+  dependency-version: 0.2.5
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: yaml
+  dependency-version: 2.8.3
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: yaml
+  dependency-version: 1.10.3
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+* fix(ci): unbreak sdk and bot PR checks
+
+* fix(sdk): keep vitest on node 18 compatible track
+
+---------
+
+Signed-off-by: dependabot[bot] <support@github.com>
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (37ecbf6)
+
 ## [0.1.64] - 2026-04-06
 
 ## [0.1.64-rc.9] - 2026-04-06
