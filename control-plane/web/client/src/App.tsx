@@ -19,6 +19,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { NotificationProvider } from "./components/ui/notification";
 
 function NavigateToPlayground() {
   const { reasonerId } = useParams();
@@ -74,15 +75,17 @@ function App() {
         disableTransitionOnChange
       >
         <ModeProvider>
-          <AuthProvider>
-            <AuthGuard>
-              <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
-                <ErrorBoundary>
-                  <AppContent />
-                </ErrorBoundary>
-              </Router>
-            </AuthGuard>
-          </AuthProvider>
+          <NotificationProvider>
+            <AuthProvider>
+              <AuthGuard>
+                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                  <ErrorBoundary>
+                    <AppContent />
+                  </ErrorBoundary>
+                </Router>
+              </AuthGuard>
+            </AuthProvider>
+          </NotificationProvider>
         </ModeProvider>
       </ThemeProvider>
     </QueryClientProvider>

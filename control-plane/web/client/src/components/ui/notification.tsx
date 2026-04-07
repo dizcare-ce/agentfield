@@ -1,41 +1,89 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Info,
+  X,
+} from "lucide-react";
+
+import { cn } from "@/lib/utils";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
 
+/* ═══════════════════════════════════════════════════════════════
+   Types
+   ═══════════════════════════════════════════════════════════════ */
+
+export type NotificationType = "success" | "error" | "warning" | "info";
+
 export interface Notification {
   id: string;
-  type: "success" | "error" | "warning" | "info";
+  type: NotificationType;
   title: string;
   message?: string;
+  /** Toast auto-dismiss duration in ms. Set to 0 to keep the toast until clicked. */
   duration?: number;
   action?: {
     label: string;
     onClick: () => void;
   };
+  /** If true, the toast will not auto-dismiss. Log entry is always persistent regardless. */
   persistent?: boolean;
+  /** ms epoch, set automatically on creation. */
+  createdAt: number;
+  /** Whether the user has seen / acknowledged this in the bell popover. */
+  read: boolean;
 }
 
 interface NotificationContextType {
+  /** All notifications, newest first. Acts as the persistent log. */
   notifications: Notification[];
-  addNotification: (notification: Omit<Notification, "id">) => string;
+  /** Subset currently visible as toasts (transient). */
+  toasts: Notification[];
+  /** Count of unread notifications across the log. */
+  unreadCount: number;
+  addNotification: (
+    notification: Omit<Notification, "id" | "createdAt" | "read">,
+  ) => string;
+  markRead: (id: string) => void;
+  markAllRead: () => void;
+  /** Removes from both log and toast queue. */
   removeNotification: (id: string) => void;
+  /** Dismiss a single toast without removing it from the log. */
+  dismissToast: (id: string) => void;
+  /** Clear the entire log. Also dismisses any active toasts. */
   clearAll: () => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(
-  undefined
+  undefined,
 );
+
+/** Keep the log bounded — older entries roll off the end. */
+const MAX_LOG_SIZE = 50;
 
 export function useNotifications() {
   const context = useContext(NotificationContext);
   if (!context) {
     throw new Error(
-      "useNotifications must be used within a NotificationProvider"
+      "useNotifications must be used within a NotificationProvider",
     );
   }
   return context;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Provider
+   ═══════════════════════════════════════════════════════════════ */
 
 interface NotificationProviderProps {
   children: ReactNode;
@@ -43,249 +91,334 @@ interface NotificationProviderProps {
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [toastIds, setToastIds] = useState<Set<string>>(() => new Set());
 
-  const addNotification = (notification: Omit<Notification, "id">): string => {
-    const id = Math.random().toString(36).substr(2, 9);
-    const newNotification: Notification = {
-      ...notification,
-      id,
-      duration: notification.duration ?? 5000,
-    };
+  const dismissToast = useCallback((id: string) => {
+    setToastIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
-    setNotifications((prev) => [...prev, newNotification]);
+  const removeNotification = useCallback(
+    (id: string) => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      dismissToast(id);
+    },
+    [dismissToast],
+  );
 
-    // Auto-remove after duration (unless persistent)
-    if (!notification.persistent && newNotification.duration! > 0) {
-      setTimeout(() => {
-        removeNotification(id);
-      }, newNotification.duration);
-    }
+  const addNotification: NotificationContextType["addNotification"] =
+    useCallback(
+      (notification) => {
+        const id =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2, 11);
 
-    return id;
-  };
+        const entry: Notification = {
+          ...notification,
+          id,
+          createdAt: Date.now(),
+          read: false,
+          duration: notification.duration ?? 5000,
+        };
 
-  const removeNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  };
+        setNotifications((prev) => [entry, ...prev].slice(0, MAX_LOG_SIZE));
+        setToastIds((prev) => {
+          const next = new Set(prev);
+          next.add(id);
+          return next;
+        });
 
-  const clearAll = () => {
+        if (!entry.persistent && entry.duration && entry.duration > 0) {
+          window.setTimeout(() => {
+            dismissToast(id);
+          }, entry.duration);
+        }
+
+        return id;
+      },
+      [dismissToast],
+    );
+
+  const markRead = useCallback((id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+    );
+  }, []);
+
+  const markAllRead = useCallback(() => {
+    setNotifications((prev) =>
+      prev.every((n) => n.read) ? prev : prev.map((n) => ({ ...n, read: true })),
+    );
+  }, []);
+
+  const clearAll = useCallback(() => {
     setNotifications([]);
-  };
+    setToastIds(new Set());
+  }, []);
+
+  const toasts = useMemo(
+    () => notifications.filter((n) => toastIds.has(n.id)),
+    [notifications, toastIds],
+  );
+
+  const unreadCount = useMemo(
+    () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),
+    [notifications],
+  );
+
+  const contextValue = useMemo<NotificationContextType>(
+    () => ({
+      notifications,
+      toasts,
+      unreadCount,
+      addNotification,
+      markRead,
+      markAllRead,
+      removeNotification,
+      dismissToast,
+      clearAll,
+    }),
+    [
+      notifications,
+      toasts,
+      unreadCount,
+      addNotification,
+      markRead,
+      markAllRead,
+      removeNotification,
+      dismissToast,
+      clearAll,
+    ],
+  );
 
   return (
-    <NotificationContext.Provider
-      value={{
-        notifications,
-        addNotification,
-        removeNotification,
-        clearAll,
-      }}
-    >
+    <NotificationContext.Provider value={contextValue}>
       {children}
-      <NotificationContainer />
+      <NotificationToastContainer />
     </NotificationContext.Provider>
   );
 }
 
-function NotificationContainer() {
-  const { notifications, removeNotification } = useNotifications();
+/* ═══════════════════════════════════════════════════════════════
+   Icon + accent helpers — single source of truth
+   ═══════════════════════════════════════════════════════════════ */
 
-  if (notifications.length === 0) return null;
+const TYPE_ICON: Record<NotificationType, typeof CheckCircle2> = {
+  success: CheckCircle2,
+  error: XCircle,
+  warning: AlertTriangle,
+  info: Info,
+};
+
+/**
+ * Accent classes per notification type — uses existing Tailwind/shadcn tokens
+ * consistent with CompactExecutionHeader and other app chrome.
+ */
+const TYPE_ACCENT: Record<NotificationType, { icon: string; border: string }> = {
+  success: {
+    icon: "text-emerald-500 dark:text-emerald-400",
+    border: "border-l-emerald-500/60",
+  },
+  error: {
+    icon: "text-destructive",
+    border: "border-l-destructive/70",
+  },
+  warning: {
+    icon: "text-amber-500 dark:text-amber-400",
+    border: "border-l-amber-500/60",
+  },
+  info: {
+    icon: "text-sky-500 dark:text-sky-400",
+    border: "border-l-sky-500/60",
+  },
+};
+
+export function getNotificationIcon(type: NotificationType) {
+  return TYPE_ICON[type];
+}
+
+export function getNotificationAccent(type: NotificationType) {
+  return TYPE_ACCENT[type];
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Toast container — transient, bottom-right
+   ═══════════════════════════════════════════════════════════════ */
+
+function NotificationToastContainer() {
+  const { toasts, dismissToast } = useNotifications();
+
+  if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
-      {notifications.map((notification) => (
-        <NotificationItem
-          key={notification.id}
-          notification={notification}
-          onClose={() => removeNotification(notification.id)}
+    <div
+      aria-live="polite"
+      aria-label="Notifications"
+      className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(92vw,22rem)] flex-col gap-2"
+    >
+      {toasts.map((toast) => (
+        <NotificationToastItem
+          key={toast.id}
+          notification={toast}
+          onClose={() => dismissToast(toast.id)}
         />
       ))}
     </div>
   );
 }
 
-interface NotificationItemProps {
+interface NotificationToastItemProps {
   notification: Notification;
   onClose: () => void;
 }
 
-function NotificationItem({ notification, onClose }: NotificationItemProps) {
+function NotificationToastItem({
+  notification,
+  onClose,
+}: NotificationToastItemProps) {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    // Trigger animation
-    const timer = setTimeout(() => setIsVisible(true), 10);
-    return () => clearTimeout(timer);
+    const timer = window.setTimeout(() => setIsVisible(true), 10);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const handleClose = () => {
     setIsVisible(false);
-    setTimeout(onClose, 200); // Wait for animation
+    window.setTimeout(onClose, 200);
   };
 
-  const getNotificationStyles = (type: Notification["type"]) => {
-    switch (type) {
-      case "success":
-        return {
-          icon: "✅",
-          bgColor: "bg-green-50",
-          borderColor: "border-green-200",
-          textColor: "text-green-800",
-          badgeColor: "bg-green-100 text-green-700",
-        };
-      case "error":
-        return {
-          icon: "❌",
-          bgColor: "bg-red-50",
-          borderColor: "border-red-200",
-          textColor: "text-red-800",
-          badgeColor: "bg-red-100 text-red-700",
-        };
-      case "warning":
-        return {
-          icon: "⚠️",
-          bgColor: "bg-yellow-50",
-          borderColor: "border-yellow-200",
-          textColor: "text-yellow-800",
-          badgeColor: "bg-yellow-100 text-yellow-700",
-        };
-      case "info":
-        return {
-          icon: "ℹ️",
-          bgColor: "bg-blue-50",
-          borderColor: "border-blue-200",
-          textColor: "text-blue-800",
-          badgeColor: "bg-blue-100 text-blue-700",
-        };
-    }
-  };
-
-  const styles = getNotificationStyles(notification.type);
+  const accent = getNotificationAccent(notification.type);
+  const Icon = getNotificationIcon(notification.type);
 
   return (
     <Card
-      className={`
-        ${styles.bgColor} ${styles.borderColor} shadow-lg
-        transform transition-all duration-200 ease-in-out
-        ${
-          isVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"
-        }
-      `}
+      role="status"
+      className={cn(
+        "pointer-events-auto border-l-4 bg-card shadow-lg transition-all duration-200",
+        accent.border,
+        isVisible
+          ? "translate-x-0 opacity-100"
+          : "pointer-events-none translate-x-4 opacity-0",
+      )}
     >
-      <CardContent className="p-4">
-        <div className="flex items-start gap-3">
-          <span className="text-base font-semibold flex-shrink-0 mt-0.5" aria-hidden="true">
-            {styles.icon}
-          </span>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <h4 className={`font-medium text-sm ${styles.textColor}`}>
-                {notification.title}
-              </h4>
-              <button
-                onClick={handleClose}
-                className={`${styles.textColor} hover:opacity-70 transition-opacity`}
-                aria-label="Close notification"
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            {notification.message && (
-              <p className={`text-xs ${styles.textColor} opacity-90 mb-2`}>
-                {notification.message}
-              </p>
-            )}
-
-            {notification.action && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={notification.action.onClick}
-                className={`text-xs ${styles.badgeColor} border-current`}
-              >
-                {notification.action.label}
-              </Button>
-            )}
+      <CardContent className="flex items-start gap-3 p-3">
+        <Icon
+          className={cn("mt-0.5 size-4 shrink-0", accent.icon)}
+          aria-hidden
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-medium leading-tight text-foreground">
+              {notification.title}
+            </p>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="-mr-1 -mt-1 size-5 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={handleClose}
+              aria-label="Dismiss notification"
+            >
+              <X className="size-3.5" aria-hidden />
+            </Button>
           </div>
+          {notification.message ? (
+            <p className="text-xs leading-snug text-muted-foreground">
+              {notification.message}
+            </p>
+          ) : null}
+          {notification.action ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1.5 h-7 w-fit text-xs"
+              onClick={() => {
+                notification.action?.onClick();
+                handleClose();
+              }}
+            >
+              {notification.action.label}
+            </Button>
+          ) : null}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-// Convenience hooks for common notification types
+/* ═══════════════════════════════════════════════════════════════
+   Convenience hooks — backwards-compatible with existing callers
+   ═══════════════════════════════════════════════════════════════ */
+
 export function useSuccessNotification() {
   const { addNotification } = useNotifications();
-
-  return (title: string, message?: string, action?: Notification["action"]) => {
-    return addNotification({
-      type: "success",
-      title,
-      message,
-      action,
-      duration: 4000,
-    });
-  };
+  return useCallback(
+    (title: string, message?: string, action?: Notification["action"]) =>
+      addNotification({
+        type: "success",
+        title,
+        message,
+        action,
+        duration: 4000,
+      }),
+    [addNotification],
+  );
 }
 
 export function useErrorNotification() {
   const { addNotification } = useNotifications();
-
-  return (title: string, message?: string, action?: Notification["action"]) => {
-    return addNotification({
-      type: "error",
-      title,
-      message,
-      action,
-      duration: 6000,
-    });
-  };
+  return useCallback(
+    (title: string, message?: string, action?: Notification["action"]) =>
+      addNotification({
+        type: "error",
+        title,
+        message,
+        action,
+        duration: 6000,
+      }),
+    [addNotification],
+  );
 }
 
 export function useInfoNotification() {
   const { addNotification } = useNotifications();
-
-  return (title: string, message?: string, action?: Notification["action"]) => {
-    return addNotification({
-      type: "info",
-      title,
-      message,
-      action,
-      duration: 5000,
-    });
-  };
+  return useCallback(
+    (title: string, message?: string, action?: Notification["action"]) =>
+      addNotification({
+        type: "info",
+        title,
+        message,
+        action,
+        duration: 5000,
+      }),
+    [addNotification],
+  );
 }
 
 export function useWarningNotification() {
   const { addNotification } = useNotifications();
-
-  return (title: string, message?: string, action?: Notification["action"]) => {
-    return addNotification({
-      type: "warning",
-      title,
-      message,
-      action,
-      duration: 5000,
-    });
-  };
+  return useCallback(
+    (title: string, message?: string, action?: Notification["action"]) =>
+      addNotification({
+        type: "warning",
+        title,
+        message,
+        action,
+        duration: 5000,
+      }),
+    [addNotification],
+  );
 }
 
-// DID/VC specific notification hooks
+/* ═══════════════════════════════════════════════════════════════
+   DID/VC specific helpers — unchanged public API
+   ═══════════════════════════════════════════════════════════════ */
+
 export function useDIDNotifications() {
   const success = useSuccessNotification();
   const error = useErrorNotification();
@@ -317,7 +450,7 @@ export function useVCNotifications() {
     vcDownloaded: (filename?: string) =>
       success(
         "VC Downloaded",
-        filename ? `Downloaded as ${filename}` : "VC document downloaded"
+        filename ? `Downloaded as ${filename}` : "VC document downloaded",
       ),
 
     vcVerified: (valid: boolean) =>
@@ -325,7 +458,7 @@ export function useVCNotifications() {
         ? success("VC Verified", "Verifiable Credential is valid and verified")
         : error(
             "VC Verification Failed",
-            "Verifiable Credential verification failed"
+            "Verifiable Credential verification failed",
           ),
 
     vcError: (message: string) => error("VC Operation Failed", message),
