@@ -24,6 +24,11 @@ export const navigation = [
     path: "/dashboard",
   },
   {
+    title: "Playground",
+    icon: FlaskConical,
+    path: "/playground",
+  },
+  {
     title: "Runs",
     icon: Play,
     path: "/runs",
@@ -32,11 +37,6 @@ export const navigation = [
     title: "Agent nodes",
     icon: Server,
     path: "/agents",
-  },
-  {
-    title: "Playground",
-    icon: FlaskConical,
-    path: "/playground",
   },
   {
     title: "Access management",
