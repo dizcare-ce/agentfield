@@ -163,6 +163,18 @@ Workflows only run if you changed relevant files:
 - Manually trigger the workflow from GitHub Actions tab
 - Or make a trivial change to trigger it (e.g., add a comment)
 
+### `license/cla` is stuck pending on a bot PR
+- This repository uses the hosted `cla-assistant.io` integration for the
+  `license/cla` status.
+- Bot PRs such as Dependabot cannot sign the CLA interactively.
+- Maintainers must update the hosted CLA Assistant allowlist for approved bot
+  accounts such as `dependabot[bot]`, `github-actions[bot]`, and
+  `renovate[bot]`.
+- Workflow changes in this repo do not update the hosted CLA Assistant
+  configuration. If `license/cla` remains pending after code checks are green,
+  update the external CLA Assistant settings or recheck the PR from the
+  CLA Assistant UI.
+
 ## Getting Help
 
 If you're stuck with failing CI:
