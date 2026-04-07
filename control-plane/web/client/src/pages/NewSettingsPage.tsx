@@ -21,6 +21,16 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Trash,
   Plus,
   CheckCircle,
@@ -57,6 +67,36 @@ interface HeaderEntry {
   key: string;
   value: string;
 }
+
+const REMOVE_WEBHOOK_COPY = {
+  title: "Remove webhook configuration?",
+  description:
+    "The control plane will stop delivering events to this endpoint. You can reconfigure it later, but any events fired in the meantime will be dropped.",
+  confirmLabel: "Remove webhook",
+  keepLabel: "Keep webhook",
+} as const;
+
+const REDRIVE_DLQ_COPY = {
+  title: (count: number) =>
+    count > 1 ? `Retry ${count} failed events?` : "Retry this failed event?",
+  description:
+    "Each event will be re-delivered to the webhook. Events that still fail will return to the dead-letter queue.",
+  confirmLabel: (count: number) =>
+    count > 1 ? `Retry ${count} events` : "Retry event",
+  keepLabel: "Cancel",
+} as const;
+
+const CLEAR_DLQ_COPY = {
+  title: (count: number) =>
+    count > 1
+      ? `Permanently delete ${count} failed events?`
+      : "Permanently delete this failed event?",
+  description:
+    "This cannot be undone. The events will be removed from the dead-letter queue and will not be retried.",
+  confirmLabel: (count: number) =>
+    count > 1 ? `Delete ${count} events` : "Delete event",
+  keepLabel: "Keep events",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Tab: General
@@ -152,6 +192,9 @@ function ObservabilityTab() {
   const [deleting, setDeleting] = useState(false);
   const [redriving, setRedriving] = useState(false);
   const [clearingDlq, setClearingDlq] = useState(false);
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [redriveDialogOpen, setRedriveDialogOpen] = useState(false);
+  const [clearDlqDialogOpen, setClearDlqDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -240,7 +283,6 @@ function ObservabilityTab() {
   };
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to remove the webhook configuration?")) return;
     setDeleting(true);
     setError(null);
     setSuccess(null);
@@ -256,12 +298,12 @@ function ObservabilityTab() {
       setError(err instanceof Error ? err.message : "Failed to delete configuration");
     } finally {
       setDeleting(false);
+      setRemoveDialogOpen(false);
     }
   };
 
   const handleRedrive = async () => {
     if (!status?.dead_letter_count) return;
-    if (!confirm(`Are you sure you want to retry sending ${status.dead_letter_count} failed events?`)) return;
     setRedriving(true);
     setError(null);
     setSuccess(null);
@@ -273,12 +315,12 @@ function ObservabilityTab() {
       setError(err instanceof Error ? err.message : "Failed to redrive dead letter queue");
     } finally {
       setRedriving(false);
+      setRedriveDialogOpen(false);
     }
   };
 
   const handleClearDlq = async () => {
     if (!status?.dead_letter_count) return;
-    if (!confirm(`Are you sure you want to permanently delete ${status.dead_letter_count} failed events? This cannot be undone.`)) return;
     setClearingDlq(true);
     setError(null);
     setSuccess(null);
@@ -290,6 +332,7 @@ function ObservabilityTab() {
       setError(err instanceof Error ? err.message : "Failed to clear dead letter queue");
     } finally {
       setClearingDlq(false);
+      setClearDlqDialogOpen(false);
     }
   };
 
@@ -469,7 +512,11 @@ function ObservabilityTab() {
           <CardFooter className="flex justify-between border-t pt-6">
             <div>
               {isConfigured && (
-                <Button variant="destructive" onClick={handleDelete} disabled={deleting || saving}>
+                <Button
+                  variant="destructive"
+                  onClick={() => setRemoveDialogOpen(true)}
+                  disabled={deleting || saving}
+                >
                   {deleting ? (
                     <Renew className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
@@ -549,7 +596,7 @@ function ObservabilityTab() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleRedrive}
+                    onClick={() => setRedriveDialogOpen(true)}
                     disabled={redriving || clearingDlq}
                     className="flex-1"
                   >
@@ -559,7 +606,7 @@ function ObservabilityTab() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={handleClearDlq}
+                    onClick={() => setClearDlqDialogOpen(true)}
                     disabled={redriving || clearingDlq}
                     className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   >
@@ -649,6 +696,85 @@ function ObservabilityTab() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{REMOVE_WEBHOOK_COPY.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {REMOVE_WEBHOOK_COPY.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>
+              {REMOVE_WEBHOOK_COPY.keepLabel}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDelete();
+              }}
+            >
+              {REMOVE_WEBHOOK_COPY.confirmLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={redriveDialogOpen} onOpenChange={setRedriveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {REDRIVE_DLQ_COPY.title(status?.dead_letter_count ?? 0)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {REDRIVE_DLQ_COPY.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={redriving}>
+              {REDRIVE_DLQ_COPY.keepLabel}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={redriving}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleRedrive();
+              }}
+            >
+              {REDRIVE_DLQ_COPY.confirmLabel(status?.dead_letter_count ?? 0)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={clearDlqDialogOpen} onOpenChange={setClearDlqDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {CLEAR_DLQ_COPY.title(status?.dead_letter_count ?? 0)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {CLEAR_DLQ_COPY.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearingDlq}>
+              {CLEAR_DLQ_COPY.keepLabel}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearingDlq}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleClearDlq();
+              }}
+            >
+              {CLEAR_DLQ_COPY.confirmLabel(status?.dead_letter_count ?? 0)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
