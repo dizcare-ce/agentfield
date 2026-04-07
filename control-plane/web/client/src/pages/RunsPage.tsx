@@ -1623,7 +1623,6 @@ function RunRow({
       className="group/run-row cursor-pointer"
       data-state={isSelected ? "selected" : undefined}
       tabIndex={0}
-      role="link"
       onClick={() => onRowClick(run)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
