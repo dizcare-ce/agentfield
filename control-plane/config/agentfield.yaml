@@ -1,5 +1,7 @@
 agentfield:
   port: 8080
+  registration:
+    serverless_discovery_allowed_hosts: [] # Optional extra hosts allowed for server-side /discover fetches; localhost/loopback are always allowed.
   execution_cleanup:
     enabled: true
     retention_period: 72h

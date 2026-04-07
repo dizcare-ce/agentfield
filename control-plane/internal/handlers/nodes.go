@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,7 +33,7 @@ func (rc *readCloser) Close() error {
 
 var validate = validator.New()
 
-// validateCallbackURL validates that a callback URL is properly formatted and reachable
+// validateCallbackURL validates that a callback URL is properly formatted.
 func validateCallbackURL(baseURL string) error {
 	if baseURL == "" {
 		return fmt.Errorf("base_url cannot be empty")
@@ -49,39 +50,16 @@ func validateCallbackURL(baseURL string) error {
 		return fmt.Errorf("URL must use http or https scheme, got: %s", parsedURL.Scheme)
 	}
 
+	if parsedURL.User != nil {
+		return fmt.Errorf("URL must not include user info")
+	}
+
 	// Ensure host is present
 	if parsedURL.Host == "" {
 		return fmt.Errorf("URL must include a host")
 	}
 
-	// Basic reachability test with timeout
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	healthURL := strings.TrimSuffix(baseURL, "/") + "/health"
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		// Log the error but don't fail registration - agent might not be fully started yet
-		logger.Logger.Warn().Err(err).Msgf("⚠️ Callback URL health check failed for %s (agent may still be starting)", healthURL)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Logger.Warn().Msgf("⚠️ Callback URL health check returned status %d for %s", resp.StatusCode, healthURL)
-	} else {
-		logger.Logger.Debug().Msgf("✅ Callback URL validated successfully: %s", baseURL)
-	}
-
+	logger.Logger.Debug().Msgf("✅ Callback URL validated successfully: %s", baseURL)
 	return nil
 }
 
@@ -205,50 +183,12 @@ func normalizeCandidate(raw string, defaultPort string) (string, error) {
 	return fmt.Sprintf("%s://%s", scheme, netloc), nil
 }
 
-func probeCandidate(ctx context.Context, client *http.Client, baseURL string) types.CallbackTestResult {
-	result := types.CallbackTestResult{URL: baseURL}
-	trimmedBase := strings.TrimSuffix(baseURL, "/")
-	endpoints := []string{"/health"}
-
-	for _, endpoint := range endpoints {
-		start := time.Now()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimmedBase+endpoint, nil)
-		if err != nil {
-			result.Error = err.Error()
-			continue
-		}
-
-		resp, err := client.Do(req)
-		latency := time.Since(start).Milliseconds()
-		if err != nil {
-			result.Error = err.Error()
-			continue
-		}
-
-		result.Status = resp.StatusCode
-		result.Endpoint = endpoint
-		result.LatencyMS = latency
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			result.Success = true
-			result.Error = ""
-			return result
-		}
-	}
-
-	return result
-}
-
-func resolveCallbackCandidates(ctx context.Context, rawCandidates []string, defaultPort string) (string, []string, []types.CallbackTestResult) {
+func resolveCallbackCandidates(rawCandidates []string, defaultPort string) (string, []string, []types.CallbackTestResult) {
 	if len(rawCandidates) == 0 {
 		return "", nil, nil
 	}
 
-	client := &http.Client{Timeout: 2 * time.Second}
 	normalized := make([]string, 0, len(rawCandidates))
-	results := make([]types.CallbackTestResult, 0, len(rawCandidates))
 	seen := make(map[string]struct{})
 
 	for _, candidate := range rawCandidates {
@@ -263,18 +203,99 @@ func resolveCallbackCandidates(ctx context.Context, rawCandidates []string, defa
 		}
 		seen[normalizedURL] = struct{}{}
 		normalized = append(normalized, normalizedURL)
+	}
 
-		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		result := probeCandidate(probeCtx, client, normalizedURL)
-		cancel()
+	if len(normalized) == 0 {
+		return "", nil, nil
+	}
 
-		results = append(results, result)
-		if result.Success {
-			return normalizedURL, normalized, results
+	return normalized[0], normalized, nil
+}
+
+func normalizeServerlessDiscoveryURL(rawURL string, allowedHosts []string) (string, error) {
+	parsedURL, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return "", fmt.Errorf("invalid invocation_url format: %w", err)
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return "", fmt.Errorf("invocation_url must use http or https")
+	}
+
+	if parsedURL.User != nil {
+		return "", fmt.Errorf("invocation_url must not include user info")
+	}
+
+	if parsedURL.Host == "" {
+		return "", fmt.Errorf("invocation_url must include a host")
+	}
+
+	if parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		return "", fmt.Errorf("invocation_url must not include query parameters or fragments")
+	}
+
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return "", fmt.Errorf("invocation_url must include a host")
+	}
+
+	if hostname == "0.0.0.0" || hostname == "::" {
+		hostname = "localhost"
+		if port := parsedURL.Port(); port != "" {
+			parsedURL.Host = net.JoinHostPort(hostname, port)
+		} else {
+			parsedURL.Host = hostname
 		}
 	}
 
-	return "", normalized, results
+	if !isServerlessDiscoveryHostAllowed(hostname, allowedHosts) {
+		return "", fmt.Errorf("invocation_url host %q is not allowlisted for server-side discovery; configure agentfield.registration.serverless_discovery_allowed_hosts or AGENTFIELD_REGISTRATION_SERVERLESS_DISCOVERY_ALLOWED_HOSTS", hostname)
+	}
+
+	return strings.TrimSuffix(parsedURL.String(), "/"), nil
+}
+
+func isServerlessDiscoveryHostAllowed(host string, allowedHosts []string) bool {
+	if host == "" {
+		return false
+	}
+
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+
+	hostLower := strings.ToLower(host)
+	for _, entry := range allowedHosts {
+		candidate := strings.ToLower(strings.TrimSpace(entry))
+		if candidate == "" {
+			continue
+		}
+
+		if _, network, err := net.ParseCIDR(candidate); err == nil {
+			if ip := net.ParseIP(host); ip != nil && network.Contains(ip) {
+				return true
+			}
+			continue
+		}
+
+		if strings.HasPrefix(candidate, "*.") {
+			suffix := strings.TrimPrefix(candidate, "*")
+			if strings.HasSuffix(hostLower, suffix) && hostLower != strings.TrimPrefix(suffix, ".") {
+				return true
+			}
+			continue
+		}
+
+		if hostLower == candidate {
+			return true
+		}
+	}
+
+	return false
 }
 
 // CachedNodeData holds cached heartbeat data for a node
@@ -442,13 +463,11 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 			}
 		}
 
-		if len(candidateList) > 0 && !skipAutoDiscovery {
-			logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
-			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(probeCtx, candidateList, defaultPort)
-			cancel()
+			if len(candidateList) > 0 && !skipAutoDiscovery {
+				logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
+				resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(candidateList, defaultPort)
 
-			if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
+				if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
 				logger.Logger.Info().Msgf("🔗 Auto-discovered callback URL for %s: %s (was %s)", newNode.ID, resolvedBaseURL, newNode.BaseURL)
 				newNode.BaseURL = resolvedBaseURL
 			}
@@ -1246,7 +1265,7 @@ func BulkNodeStatusHandler(statusManager *services.StatusManager, storageProvide
 
 // RegisterServerlessAgentHandler handles the registration of a serverless agent node
 // by discovering its capabilities via the /discover endpoint
-func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager, didWebService *services.DIDWebService) gin.HandlerFunc {
+func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiService *services.UIService, didService *services.DIDService, presenceManager *services.PresenceManager, didWebService *services.DIDWebService, allowedDiscoveryHosts []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -1266,21 +1285,26 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 			return
 		}
 
-		logger.Logger.Info().Msgf("🔍 Discovering serverless agent at: %s", req.InvocationURL)
-
-		// Normalize 0.0.0.0 to localhost for discovery
-		// 0.0.0.0 is not a valid address for making HTTP requests
-		normalizedURL := req.InvocationURL
-		if strings.Contains(normalizedURL, "://0.0.0.0") {
-			normalizedURL = strings.Replace(normalizedURL, "://0.0.0.0", "://localhost", 1)
-			logger.Logger.Info().Msgf("🔄 Normalized invocation URL from %s to %s for discovery", req.InvocationURL, normalizedURL)
+		normalizedURL, err := normalizeServerlessDiscoveryURL(req.InvocationURL, allowedDiscoveryHosts)
+		if err != nil {
+			logger.Logger.Warn().Err(err).Msgf("❌ Rejected serverless discovery URL: %s", req.InvocationURL)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid invocation_url",
+				"details": err.Error(),
+			})
+			return
 		}
+
+		logger.Logger.Info().Msgf("🔍 Discovering serverless agent at: %s", normalizedURL)
 
 		// Call the discovery endpoint using normalized URL
 		discoveryURL := strings.TrimSuffix(normalizedURL, "/") + "/discover"
 
 		client := &http.Client{
 			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 
 		discoveryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

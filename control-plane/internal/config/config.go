@@ -34,6 +34,7 @@ type UIConfig struct {
 // AgentFieldConfig holds the core AgentField server configuration.
 type AgentFieldConfig struct {
 	Port             int                    `yaml:"port"`
+	Registration     RegistrationConfig     `yaml:"registration" mapstructure:"registration"`
 	NodeHealth       NodeHealthConfig       `yaml:"node_health" mapstructure:"node_health"`
 	LLMHealth        LLMHealthConfig        `yaml:"llm_health" mapstructure:"llm_health"`
 	ExecutionCleanup ExecutionCleanupConfig `yaml:"execution_cleanup" mapstructure:"execution_cleanup"`
@@ -41,6 +42,11 @@ type AgentFieldConfig struct {
 	Approval         ApprovalConfig         `yaml:"approval" mapstructure:"approval"`
 	NodeLogProxy     NodeLogProxyConfig     `yaml:"node_log_proxy" mapstructure:"node_log_proxy"`
 	ExecutionLogs    ExecutionLogsConfig    `yaml:"execution_logs" mapstructure:"execution_logs"`
+}
+
+// RegistrationConfig governs validation of agent-supplied registration endpoints.
+type RegistrationConfig struct {
+	ServerlessDiscoveryAllowedHosts []string `yaml:"serverless_discovery_allowed_hosts" mapstructure:"serverless_discovery_allowed_hosts"`
 }
 
 // NodeLogProxyConfig limits the control plane proxy to agent process logs (NDJSON).
@@ -359,6 +365,17 @@ func ApplyEnvOverrides(cfg *Config) {
 	// Also support the nested path format for consistency
 	if apiKey := os.Getenv("AGENTFIELD_API_AUTH_API_KEY"); apiKey != "" {
 		cfg.API.Auth.APIKey = apiKey
+	}
+
+	if val := os.Getenv("AGENTFIELD_REGISTRATION_SERVERLESS_DISCOVERY_ALLOWED_HOSTS"); val != "" {
+		parts := strings.Split(val, ",")
+		cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts = cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts[:0]
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts = append(cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts, trimmed)
+			}
+		}
 	}
 
 	// Node health monitoring overrides
