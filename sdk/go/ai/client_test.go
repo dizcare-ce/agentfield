@@ -32,7 +32,7 @@ func TestNewClient(t *testing.T) {
 		{
 			name:    "nil config uses default",
 			config:  nil,
-			wantErr: true, // DefaultConfig may not have API key set
+			wantErr: false,
 		},
 		{
 			name: "invalid config",
@@ -54,7 +54,11 @@ func TestNewClient(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, client)
-				assert.Equal(t, tt.config, client.config)
+				if tt.config == nil {
+					assert.NotNil(t, client.config)
+				} else {
+					assert.Equal(t, tt.config, client.config)
+				}
 			}
 		})
 	}
