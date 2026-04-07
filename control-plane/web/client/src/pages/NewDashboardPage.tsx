@@ -32,6 +32,7 @@ import { useRuns } from "@/hooks/queries";
 import { useLLMHealth, useQueueStatus } from "@/hooks/queries";
 import { useAgents } from "@/hooks/queries";
 import { getDashboardSummary } from "@/services/dashboardService";
+import { useDemoMode } from "@/demo/hooks/useDemoMode";
 import { formatRelativeTime } from "@/utils/dateFormat";
 import {
   getStatusTheme,
@@ -547,6 +548,7 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
 export function NewDashboardPage() {
   const navigate = useNavigate();
   const { execConnected } = useSSESync();
+  const { isDemoMode } = useDemoMode();
 
   const runsQuery = useRuns({
     timeRange: "all",
@@ -561,9 +563,18 @@ export function NewDashboardPage() {
   const agentsQuery = useAgents();
 
   const summaryQuery = useQuery({
-    queryKey: ["dashboard-summary"],
-    queryFn: getDashboardSummary,
-    refetchInterval: execConnected ? 30_000 : 15_000,
+    queryKey: ["dashboard-summary", isDemoMode ? "demo" : "live"],
+    queryFn: isDemoMode
+      ? () =>
+          Promise.resolve({
+            agents: { running: 4, total: 5 },
+            executions: { today: 47, yesterday: 38 },
+            success_rate: 0.91,
+            packages: { available: 12, installed: 8 },
+          })
+      : getDashboardSummary,
+    refetchInterval: isDemoMode ? false : (execConnected ? 30_000 : 15_000),
+    staleTime: isDemoMode ? Infinity : undefined,
   });
 
   const unhealthyEndpoints =

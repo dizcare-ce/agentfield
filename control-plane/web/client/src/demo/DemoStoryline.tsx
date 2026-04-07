@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { STORYLINE_BEATS } from './constants';
 import { useDemoMode } from './hooks/useDemoMode';
 import { getDemoRunIds } from './mock/interceptor';
@@ -52,6 +53,10 @@ export function DemoStoryline() {
     actions.advanceBeat();
   }, [targetRoute, navigate, actions]);
 
+  const handleContinue = useCallback(() => {
+    actions.advanceBeat();
+  }, [actions]);
+
   const handleSkip = useCallback(() => {
     actions.setAct(2);
   }, [actions]);
@@ -72,16 +77,18 @@ export function DemoStoryline() {
         exit={{ opacity: 0, y: 10, scale: 0.98 }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
       >
-        <Card className="border-primary/20 shadow-lg">
+        <Card className="border-border/60 bg-card/95 shadow-md backdrop-blur-sm">
           <CardContent className="relative p-4">
             {/* Dismiss button */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={handleDismiss}
-              className="absolute right-3 top-3 rounded-sm p-1 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+              className="absolute right-2 top-2 size-6"
               aria-label="Dismiss"
             >
               <X className="size-3.5" />
-            </button>
+            </Button>
 
             {/* Beat text */}
             <p className="pr-6 text-sm leading-relaxed text-foreground">
@@ -103,20 +110,26 @@ export function DemoStoryline() {
                   {STORYLINE_BEATS.map((_, i) => (
                     <div
                       key={i}
-                      className={`size-1.5 rounded-full transition-colors ${
+                      className={cn(
+                        'size-1.5 rounded-full transition-colors',
                         i === storyBeat
                           ? 'bg-primary'
                           : i < storyBeat
-                            ? 'bg-primary/40'
-                            : 'bg-muted-foreground/20'
-                      }`}
+                            ? 'bg-muted-foreground/50'
+                            : 'bg-muted',
+                      )}
                     />
                   ))}
                 </div>
 
-                {beat.actionLabel && (
+                {beat.actionLabel ? (
                   <Button size="sm" variant="default" onClick={handleAction} className="h-7 gap-1.5 text-xs">
                     {beat.actionLabel}
+                    <ArrowRight className="size-3" />
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={handleContinue} className="h-7 gap-1.5 text-xs text-muted-foreground">
+                    Continue
                     <ArrowRight className="size-3" />
                   </Button>
                 )}

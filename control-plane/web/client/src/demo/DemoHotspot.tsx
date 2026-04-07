@@ -45,9 +45,9 @@ export function DemoHotspot({ id, route, hint, children }: DemoHotspotProps) {
                   transition={{ duration: 0.3 }}
                 >
                   <motion.div
-                    className="absolute inset-0 rounded-md border-2 border-primary/30"
+                    className="absolute inset-0 rounded-md border-2 border-primary/20"
                     animate={{
-                      scale: [1, 1.06, 1],
+                      scale: [1, 1.03, 1],
                       opacity: [0.6, 1, 0.6],
                     }}
                     transition={{

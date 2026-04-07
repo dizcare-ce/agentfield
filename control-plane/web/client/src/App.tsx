@@ -134,17 +134,17 @@ function App() {
         disableTransitionOnChange
       >
         <ModeProvider>
-          <DemoModeProvider>
-            <AuthProvider>
-              <AuthGuard>
-                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+          <AuthProvider>
+            <AuthGuard>
+              <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                <DemoModeProvider>
                   <ErrorBoundary>
                     <AppContent />
                   </ErrorBoundary>
-                </Router>
-              </AuthGuard>
-            </AuthProvider>
-          </DemoModeProvider>
+                </DemoModeProvider>
+              </Router>
+            </AuthGuard>
+          </AuthProvider>
         </ModeProvider>
       </ThemeProvider>
     </QueryClientProvider>

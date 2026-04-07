@@ -137,4 +137,5 @@ export const DEMO_STORAGE_KEYS = {
   STORY_BEAT: 'af-demo-storyline-beat',
   VISITED_PAGES: 'af-demo-visited',
   EXIT_DISMISSED: 'af-demo-exit-dismissed',
+  AUTO_DISMISSED: 'af-demo-auto-dismissed',
 } as const;

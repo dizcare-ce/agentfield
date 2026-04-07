@@ -54,7 +54,7 @@ export function DemoPill({ onSwitchVertical }: DemoPillProps) {
           <DropdownMenuTrigger asChild>
             <Badge
               variant="outline"
-              className="cursor-pointer gap-1.5 border-primary/30 bg-background/80 px-3 py-1.5 backdrop-blur-sm hover:bg-accent transition-colors"
+              className="cursor-pointer gap-1.5 border-border/60 bg-card/95 px-3 py-1.5 shadow-sm backdrop-blur-sm hover:bg-accent transition-colors"
             >
               <Icon className="size-3.5 text-primary" />
               <span className="text-xs font-medium">Demo: {label}</span>

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   Sidebar,
@@ -18,6 +19,9 @@ import logoShortDark from "@/assets/logos/logo-short-dark-v2.svg?url";
 import { navigation, resourceLinks } from "@/config/navigation";
 import { ModeToggle } from "@/components/ui/mode-toggle";
 import { cn } from "@/lib/utils";
+import { useDemoMode } from "@/demo/hooks/useDemoMode";
+import { DemoHotspot } from "@/demo/DemoHotspot";
+import { HOTSPOT_ITEMS } from "@/demo/constants";
 
 function SidebarLogo() {
   const { state } = useSidebar();
@@ -70,6 +74,14 @@ function SidebarLogo() {
 
 export function AppSidebar() {
   const location = useLocation();
+  const { isDemoMode, actions } = useDemoMode();
+
+  // Track visited pages for demo hotspot visibility
+  useEffect(() => {
+    if (isDemoMode) {
+      actions.markPageVisited(location.pathname);
+    }
+  }, [isDemoMode, location.pathname, actions]);
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -102,12 +114,16 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {navigation.map((item) => {
-                const active = location.pathname.startsWith(item.path);
-                return (
+                const isActive = location.pathname.startsWith(item.path);
+                const hotspot = isDemoMode
+                  ? HOTSPOT_ITEMS.find((h) => h.route === item.path)
+                  : undefined;
+
+                const menuItem = (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
                       asChild
-                      isActive={active}
+                      isActive={isActive}
                       tooltip={item.title}
                     >
                       <Link to={item.path}>
@@ -117,6 +133,21 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
+
+                if (hotspot) {
+                  return (
+                    <DemoHotspot
+                      key={item.path}
+                      id={hotspot.id}
+                      route={hotspot.route}
+                      hint={hotspot.hint}
+                    >
+                      {menuItem}
+                    </DemoHotspot>
+                  );
+                }
+
+                return menuItem;
               })}
             </SidebarMenu>
           </SidebarGroupContent>

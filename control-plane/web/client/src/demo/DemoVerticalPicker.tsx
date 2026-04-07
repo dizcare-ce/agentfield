@@ -75,8 +75,8 @@ export function DemoVerticalPicker({
                 transition={{ delay: i * 0.08, duration: 0.3 }}
               >
                 <Card
-                  className={`cursor-pointer transition-all duration-200 hover:border-primary/50 hover:shadow-md ${
-                    hovered === v.id ? 'border-primary/50 shadow-md' : ''
+                  className={`cursor-pointer transition-all duration-150 hover:border-primary/40 hover:shadow-sm ${
+                    hovered === v.id ? 'border-primary/40 shadow-sm' : ''
                   }`}
                   onMouseEnter={() => setHovered(v.id)}
                   onMouseLeave={() => setHovered(null)}
