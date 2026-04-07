@@ -425,11 +425,13 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			SUM(CASE WHEN LOWER(status) = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
 			SUM(CASE WHEN LOWER(status) = 'timeout' THEN 1 ELSE 0 END) AS timeout_count,
 			SUM(CASE WHEN LOWER(status) = 'running' THEN 1 ELSE 0 END) AS running_count,
+			SUM(CASE WHEN LOWER(status) = 'paused' THEN 1 ELSE 0 END) AS paused_count,
 			SUM(CASE WHEN LOWER(status) = 'pending' THEN 1 ELSE 0 END) AS pending_count,
 			SUM(CASE WHEN LOWER(status) = 'queued' THEN 1 ELSE 0 END) AS queued_count,
 			SUM(CASE WHEN LOWER(status) = 'waiting' THEN 1 ELSE 0 END) AS waiting_count,
 			SUM(CASE WHEN LOWER(status) IN ('running','pending','queued','waiting') THEN 1 ELSE 0 END) AS active_executions,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN execution_id END) AS root_execution_id,
+			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN status END) AS root_status,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN agent_node_id END) AS root_agent_node_id,
 			MAX(CASE WHEN parent_execution_id IS NULL OR parent_execution_id = '' THEN reasoner_id END) AS root_reasoner_id,
 			MAX(session_id) AS session_id,
@@ -473,11 +475,13 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			cancelledCount     int
 			timeoutCount       int
 			runningCount       int
+			pausedCount        int
 			pendingCount       int
 			queuedCount        int
 			waitingCount       int
 			activeExecutions   int
 			rootExecutionID    sql.NullString
+			rootStatus         sql.NullString
 			rootAgentNodeID    sql.NullString
 			rootReasonerID     sql.NullString
 			sessionID          sql.NullString
@@ -495,11 +499,13 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 			&cancelledCount,
 			&timeoutCount,
 			&runningCount,
+			&pausedCount,
 			&pendingCount,
 			&queuedCount,
 			&waitingCount,
 			&activeExecutions,
 			&rootExecutionID,
+			&rootStatus,
 			&rootAgentNodeID,
 			&rootReasonerID,
 			&sessionID,
@@ -519,6 +525,7 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 				string(types.ExecutionStatusCancelled): cancelledCount,
 				string(types.ExecutionStatusTimeout):   timeoutCount,
 				string(types.ExecutionStatusRunning):   runningCount,
+				string(types.ExecutionStatusPaused):    pausedCount,
 				string(types.ExecutionStatusWaiting):   waitingCount,
 				string(types.ExecutionStatusPending):   pendingCount,
 				string(types.ExecutionStatusQueued):    queuedCount,
@@ -548,6 +555,10 @@ func (ls *LocalStorage) QueryRunSummaries(ctx context.Context, filter types.Exec
 
 		if rootExecutionID.Valid && rootExecutionID.String != "" {
 			summary.RootExecutionID = &rootExecutionID.String
+		}
+		if rootStatus.Valid && rootStatus.String != "" {
+			normalized := types.NormalizeExecutionStatus(rootStatus.String)
+			summary.RootStatus = &normalized
 		}
 		if rootAgentNodeID.Valid && rootAgentNodeID.String != "" {
 			summary.RootAgentNodeID = &rootAgentNodeID.String
@@ -728,16 +739,17 @@ func (ls *LocalStorage) getRunAggregation(ctx context.Context, runID string) (*R
 
 	// Query 3: Get root execution info (execution with no parent)
 	rootQuery := `
-		SELECT execution_id, agent_node_id, reasoner_id, session_id, actor_id
+		SELECT execution_id, status, agent_node_id, reasoner_id, session_id, actor_id
 		FROM executions
 		WHERE run_id = ? AND (parent_execution_id IS NULL OR parent_execution_id = '')
 		ORDER BY started_at ASC
 		LIMIT 1`
 
-	var rootExecID, rootAgentNodeID, rootReasonerID sql.NullString
+	var rootExecID, rootStatus, rootAgentNodeID, rootReasonerID sql.NullString
 	var sessionID, actorID sql.NullString
 	err = db.QueryRowContext(ctx, rootQuery, runID).Scan(
 		&rootExecID,
+		&rootStatus,
 		&rootAgentNodeID,
 		&rootReasonerID,
 		&sessionID,
@@ -749,6 +761,10 @@ func (ls *LocalStorage) getRunAggregation(ctx context.Context, runID string) (*R
 
 	if rootExecID.Valid {
 		summary.RootExecutionID = &rootExecID.String
+	}
+	if rootStatus.Valid && rootStatus.String != "" {
+		normalized := types.NormalizeExecutionStatus(rootStatus.String)
+		summary.RootStatus = &normalized
 	}
 	if rootAgentNodeID.Valid {
 		summary.RootAgentNodeID = &rootAgentNodeID.String

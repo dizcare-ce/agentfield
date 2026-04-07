@@ -18,6 +18,7 @@ type RunSummaryAggregation struct {
 	EarliestStarted  time.Time
 	LatestStarted    time.Time
 	RootExecutionID  *string
+	RootStatus       *string
 	RootAgentNodeID  *string
 	RootReasonerID   *string
 	SessionID        *string

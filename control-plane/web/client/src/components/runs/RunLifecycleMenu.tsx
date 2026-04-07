@@ -78,9 +78,15 @@ export function RunLifecycleMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const isRunning = run.status === "running";
-  const isPaused = run.status === "paused";
-  const isTerminal = isTerminalStatus(run.status);
+  // Prefer the root execution status when available — that's the row the
+  // user actually controls. The aggregate `run.status` can stay 'running'
+  // even after the user paused the root because in-flight children keep
+  // going (see backend execute.go dispatch-time guard). Falling back to
+  // the aggregate keeps things working for older API responses.
+  const effectiveStatus = run.root_execution_status ?? run.status;
+  const isRunning = effectiveStatus === "running";
+  const isPaused = effectiveStatus === "paused";
+  const isTerminal = isTerminalStatus(effectiveStatus);
   const canPause = isRunning && Boolean(run.root_execution_id);
   const canResume = isPaused && Boolean(run.root_execution_id);
   const canCancel = !isTerminal && Boolean(run.root_execution_id);

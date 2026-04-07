@@ -8,16 +8,19 @@ import {
   useState,
 } from "react";
 import {
-  CheckCircle2,
-  XCircle,
   AlertTriangle,
+  Ban,
+  CheckCircle2,
   Info,
-  X,
+  PauseCircle,
+  PlayCircle,
+  Sparkles,
+  type LucideIcon,
 } from "lucide-react";
+import { Toaster as SonnerToaster, toast as sonnerToast } from "sonner";
+import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
-import { Button } from "./button";
-import { Card, CardContent } from "./card";
 
 /* ═══════════════════════════════════════════════════════════════
    Types
@@ -25,9 +28,26 @@ import { Card, CardContent } from "./card";
 
 export type NotificationType = "success" | "error" | "warning" | "info";
 
+/**
+ * Narrower semantic for *what* happened. This drives the icon + tone
+ * independently of the sonner `type` (which only knows success/info/etc).
+ * A pause is not a "success" even though the API call succeeded — so we
+ * pick a pause glyph and neutral/amber tone, not a green checkmark.
+ */
+export type NotificationEventKind =
+  | "pause"
+  | "resume"
+  | "cancel"
+  | "error"
+  | "complete"
+  | "start"
+  | "info";
+
 export interface Notification {
   id: string;
   type: NotificationType;
+  /** What happened — overrides the type for icon/tone selection. */
+  eventKind?: NotificationEventKind;
   title: string;
   message?: string;
   /** Toast auto-dismiss duration in ms. Set to 0 to keep the toast until clicked. */
@@ -42,13 +62,21 @@ export interface Notification {
   createdAt: number;
   /** Whether the user has seen / acknowledged this in the bell popover. */
   read: boolean;
+  /**
+   * Optional run context. When set, the bell popover groups related
+   * notifications under a single run header and the toast/row can render
+   * a "View run" link automatically.
+   */
+  runId?: string;
+  /** Display label for the run — e.g. `sec-af.audit` or `parallel_pipeline`. */
+  runLabel?: string;
+  /** Path to navigate to when the user clicks the notification or action. */
+  href?: string;
 }
 
 interface NotificationContextType {
   /** All notifications, newest first. Acts as the persistent log. */
   notifications: Notification[];
-  /** Subset currently visible as toasts (transient). */
-  toasts: Notification[];
   /** Count of unread notifications across the log. */
   unreadCount: number;
   addNotification: (
@@ -56,10 +84,8 @@ interface NotificationContextType {
   ) => string;
   markRead: (id: string) => void;
   markAllRead: () => void;
-  /** Removes from both log and toast queue. */
+  /** Removes the entry from the log and dismisses any visible toast. */
   removeNotification: (id: string) => void;
-  /** Dismiss a single toast without removing it from the log. */
-  dismissToast: (id: string) => void;
   /** Clear the entire log. Also dismisses any active toasts. */
   clearAll: () => void;
 }
@@ -90,25 +116,13 @@ interface NotificationProviderProps {
 }
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
+  const { resolvedTheme } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [toastIds, setToastIds] = useState<Set<string>>(() => new Set());
 
-  const dismissToast = useCallback((id: string) => {
-    setToastIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  const removeNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    sonnerToast.dismiss(id);
   }, []);
-
-  const removeNotification = useCallback(
-    (id: string) => {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-      dismissToast(id);
-    },
-    [dismissToast],
-  );
 
   const addNotification: NotificationContextType["addNotification"] =
     useCallback(
@@ -126,22 +140,69 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
           duration: notification.duration ?? 5000,
         };
 
+        // 1. Persist into the bell log (capped at MAX_LOG_SIZE).
         setNotifications((prev) => [entry, ...prev].slice(0, MAX_LOG_SIZE));
-        setToastIds((prev) => {
-          const next = new Set(prev);
-          next.add(id);
-          return next;
-        });
 
-        if (!entry.persistent && entry.duration && entry.duration > 0) {
-          window.setTimeout(() => {
-            dismissToast(id);
-          }, entry.duration);
-        }
+        // 2. Surface as a transient sonner toast — this is the source of
+        //    truth for the live visual; the bell shows history.
+        const toastFn =
+          entry.type === "success"
+            ? sonnerToast.success
+            : entry.type === "error"
+              ? sonnerToast.error
+              : entry.type === "warning"
+                ? sonnerToast.warning
+                : sonnerToast.info;
+
+        // If the entry has a runId but no explicit action, synthesize a
+        // "View run" button pointing at the run detail page. Builds an
+        // absolute path using the Vite base path so basename-aware routing
+        // stays intact regardless of where the toast fires from.
+        const synthAction =
+          entry.action ??
+          (entry.runId
+            ? {
+                label: "View run",
+                onClick: () => {
+                  const base =
+                    (import.meta.env.VITE_BASE_PATH as string | undefined) ??
+                    "/ui";
+                  const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+                  window.location.assign(`${trimmed}/runs/${entry.runId}`);
+                },
+              }
+            : undefined);
+
+        // Pick the correct glyph for pause/resume/cancel/etc so the toast
+        // icon matches the bell popover. Use sonner's generic toast() with
+        // an `icon` option rather than type-specific calls — that way the
+        // left border still gets set via classNames but the glyph reflects
+        // the actual event instead of sonner's default checkmark.
+        const { Icon: EventIcon, iconClass: eventIconClass } =
+          getNotificationGlyph(entry);
+        // React element for sonner's icon slot. We intentionally do not
+        // import React.createElement here (already in scope via React 19
+        // JSX transform).
+        const iconElement = (
+          <EventIcon className={`size-4 ${eventIconClass}`} aria-hidden />
+        );
+
+        toastFn(entry.title, {
+          id,
+          description: entry.message,
+          duration: entry.persistent ? Infinity : entry.duration,
+          icon: iconElement,
+          action: synthAction
+            ? {
+                label: synthAction.label,
+                onClick: synthAction.onClick,
+              }
+            : undefined,
+        });
 
         return id;
       },
-      [dismissToast],
+      [],
     );
 
   const markRead = useCallback((id: string) => {
@@ -158,197 +219,137 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
   const clearAll = useCallback(() => {
     setNotifications([]);
-    setToastIds(new Set());
+    sonnerToast.dismiss();
   }, []);
-
-  const toasts = useMemo(
-    () => notifications.filter((n) => toastIds.has(n.id)),
-    [notifications, toastIds],
-  );
 
   const unreadCount = useMemo(
     () => notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0),
     [notifications],
   );
 
+  // Reflect unread count in the browser tab title so the user sees "(3)"
+  // in the Chrome tab when a notification comes in while they're on
+  // another tab. The base title is captured once on mount so we don't
+  // accumulate "(N) (N) Title" if this effect runs repeatedly.
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, "");
+    document.title = unreadCount > 0 ? `(${unreadCount}) ${base}` : base;
+  }, [unreadCount]);
+
   const contextValue = useMemo<NotificationContextType>(
     () => ({
       notifications,
-      toasts,
       unreadCount,
       addNotification,
       markRead,
       markAllRead,
       removeNotification,
-      dismissToast,
       clearAll,
     }),
     [
       notifications,
-      toasts,
       unreadCount,
       addNotification,
       markRead,
       markAllRead,
       removeNotification,
-      dismissToast,
       clearAll,
     ],
   );
 
+  // Sonner reads its theme from the next-themes resolved value so the
+  // toast colors match the rest of the app's dark/light mode.
+  const sonnerTheme = resolvedTheme === "light" ? "light" : "dark";
+
   return (
     <NotificationContext.Provider value={contextValue}>
       {children}
-      <NotificationToastContainer />
+      <SonnerToaster
+        theme={sonnerTheme}
+        position="bottom-right"
+        closeButton
+        visibleToasts={4}
+        toastOptions={{
+          // Neutral card background everywhere — only the type icon carries
+          // colour. This matches the shadcn philosophy: the surface stays
+          // quiet, the icon does the signalling. A thin left border picks
+          // up the tone so the type is readable at a glance without
+          // flooding the card.
+          unstyled: false,
+          classNames: {
+            toast: cn(
+              "group toast !bg-card !text-foreground !border !border-border !shadow-lg",
+              "gap-3 rounded-md border-l-4",
+            ),
+            title: "text-sm font-medium leading-snug text-foreground",
+            description: "text-xs leading-snug text-muted-foreground",
+            icon: "size-4",
+            success: "!border-l-emerald-500/70 [&>[data-icon]]:text-emerald-500",
+            error: "!border-l-destructive/80 [&>[data-icon]]:text-destructive",
+            warning: "!border-l-amber-500/70 [&>[data-icon]]:text-amber-500",
+            info: "!border-l-sky-500/70 [&>[data-icon]]:text-sky-500",
+            closeButton:
+              "!bg-transparent !border-border/60 !text-muted-foreground hover:!bg-muted hover:!text-foreground",
+            actionButton:
+              "!bg-primary !text-primary-foreground hover:!bg-primary/90",
+            cancelButton:
+              "!bg-muted !text-muted-foreground hover:!bg-muted/80",
+          },
+        }}
+      />
     </NotificationContext.Provider>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Icon + accent helpers — single source of truth
+   Glyph + accent helpers — single source of truth
+
+   Notifications are described in two dimensions:
+     - `eventKind` (pause, resume, cancel, error, complete, start, info)
+       picks the GLYPH and accent tone.
+     - `type` (success, error, warning, info) is the fallback for any
+       notification without an explicit eventKind, and is what sonner's
+       built-in styling keys off.
    ═══════════════════════════════════════════════════════════════ */
 
-const TYPE_ICON: Record<NotificationType, typeof CheckCircle2> = {
-  success: CheckCircle2,
-  error: XCircle,
-  warning: AlertTriangle,
+const EVENT_ICON: Record<NotificationEventKind, LucideIcon> = {
+  pause: PauseCircle,
+  resume: PlayCircle,
+  cancel: Ban,
+  error: AlertTriangle,
+  complete: CheckCircle2,
+  start: Sparkles,
   info: Info,
 };
 
-/**
- * Accent classes per notification type — uses existing Tailwind/shadcn tokens
- * consistent with CompactExecutionHeader and other app chrome.
- */
-const TYPE_ACCENT: Record<NotificationType, { icon: string; border: string }> = {
-  success: {
-    icon: "text-emerald-500 dark:text-emerald-400",
-    border: "border-l-emerald-500/60",
-  },
-  error: {
-    icon: "text-destructive",
-    border: "border-l-destructive/70",
-  },
-  warning: {
-    icon: "text-amber-500 dark:text-amber-400",
-    border: "border-l-amber-500/60",
-  },
-  info: {
-    icon: "text-sky-500 dark:text-sky-400",
-    border: "border-l-sky-500/60",
-  },
+const EVENT_ACCENT: Record<NotificationEventKind, { icon: string }> = {
+  pause: { icon: "text-amber-500 dark:text-amber-400" },
+  resume: { icon: "text-emerald-500 dark:text-emerald-400" },
+  cancel: { icon: "text-muted-foreground" },
+  error: { icon: "text-destructive" },
+  complete: { icon: "text-emerald-500 dark:text-emerald-400" },
+  start: { icon: "text-sky-500 dark:text-sky-400" },
+  info: { icon: "text-sky-500 dark:text-sky-400" },
 };
 
-export function getNotificationIcon(type: NotificationType) {
-  return TYPE_ICON[type];
+const TYPE_FALLBACK_KIND: Record<NotificationType, NotificationEventKind> = {
+  success: "complete",
+  error: "error",
+  warning: "info",
+  info: "info",
+};
+
+export function resolveEventKind(
+  notification: Pick<Notification, "eventKind" | "type">,
+): NotificationEventKind {
+  return notification.eventKind ?? TYPE_FALLBACK_KIND[notification.type];
 }
 
-export function getNotificationAccent(type: NotificationType) {
-  return TYPE_ACCENT[type];
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   Toast container — transient, bottom-right
-   ═══════════════════════════════════════════════════════════════ */
-
-function NotificationToastContainer() {
-  const { toasts, dismissToast } = useNotifications();
-
-  if (toasts.length === 0) return null;
-
-  return (
-    <div
-      aria-live="polite"
-      aria-label="Notifications"
-      className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(92vw,22rem)] flex-col gap-2"
-    >
-      {toasts.map((toast) => (
-        <NotificationToastItem
-          key={toast.id}
-          notification={toast}
-          onClose={() => dismissToast(toast.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-interface NotificationToastItemProps {
-  notification: Notification;
-  onClose: () => void;
-}
-
-function NotificationToastItem({
-  notification,
-  onClose,
-}: NotificationToastItemProps) {
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setIsVisible(true), 10);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const handleClose = () => {
-    setIsVisible(false);
-    window.setTimeout(onClose, 200);
-  };
-
-  const accent = getNotificationAccent(notification.type);
-  const Icon = getNotificationIcon(notification.type);
-
-  return (
-    <Card
-      role="status"
-      className={cn(
-        "pointer-events-auto border-l-4 bg-card shadow-lg transition-all duration-200",
-        accent.border,
-        isVisible
-          ? "translate-x-0 opacity-100"
-          : "pointer-events-none translate-x-4 opacity-0",
-      )}
-    >
-      <CardContent className="flex items-start gap-3 p-3">
-        <Icon
-          className={cn("mt-0.5 size-4 shrink-0", accent.icon)}
-          aria-hidden
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium leading-tight text-foreground">
-              {notification.title}
-            </p>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="-mr-1 -mt-1 size-5 shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={handleClose}
-              aria-label="Dismiss notification"
-            >
-              <X className="size-3.5" aria-hidden />
-            </Button>
-          </div>
-          {notification.message ? (
-            <p className="text-xs leading-snug text-muted-foreground">
-              {notification.message}
-            </p>
-          ) : null}
-          {notification.action ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-1.5 h-7 w-fit text-xs"
-              onClick={() => {
-                notification.action?.onClick();
-                handleClose();
-              }}
-            >
-              {notification.action.label}
-            </Button>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
-  );
+export function getNotificationGlyph(
+  notification: Pick<Notification, "eventKind" | "type">,
+): { Icon: LucideIcon; iconClass: string } {
+  const kind = resolveEventKind(notification);
+  return { Icon: EVENT_ICON[kind], iconClass: EVENT_ACCENT[kind].icon };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -411,6 +412,47 @@ export function useWarningNotification() {
         action,
         duration: 5000,
       }),
+    [addNotification],
+  );
+}
+
+/**
+ * Run-scoped notification hook. Emits a notification tagged with a runId
+ * so the bell popover can group it under a shared run header. If `href`
+ * is omitted it defaults to `/ui/runs/{runId}`, so a "View run" action is
+ * automatically synthesized in the toast.
+ */
+export interface RunNotificationOptions {
+  type?: NotificationType;
+  /** What happened — drives icon + tone. Prefer this over `type`. */
+  eventKind?: NotificationEventKind;
+  title: string;
+  message?: string;
+  runId: string;
+  runLabel?: string;
+  href?: string;
+  persistent?: boolean;
+}
+
+export function useRunNotification() {
+  const { addNotification } = useNotifications();
+  return useCallback(
+    (opts: RunNotificationOptions) => {
+      const defaultDuration =
+        opts.type === "error" ? 6000 : opts.type === "warning" ? 5000 : 4000;
+      const baseUrl = import.meta.env.VITE_BASE_PATH || "/ui";
+      return addNotification({
+        type: opts.type ?? "info",
+        eventKind: opts.eventKind,
+        title: opts.title,
+        message: opts.message,
+        runId: opts.runId,
+        runLabel: opts.runLabel,
+        href: opts.href ?? `${baseUrl}/runs/${opts.runId}`,
+        duration: defaultDuration,
+        persistent: opts.persistent,
+      });
+    },
     [addNotification],
   );
 }

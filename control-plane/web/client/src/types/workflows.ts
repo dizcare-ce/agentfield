@@ -6,6 +6,13 @@ export interface WorkflowSummary {
   run_id: string;
   workflow_id: string;
   root_execution_id?: string;
+  /**
+   * Status of the root execution row, which is the unit the user actually
+   * controls via Pause/Resume/Cancel. The aggregate `status` field can
+   * drift from this when in-flight children are still running after the
+   * user pauses or cancels the root.
+   */
+  root_execution_status?: CanonicalStatus;
   status: CanonicalStatus;
   root_reasoner: string;
   current_task: string;

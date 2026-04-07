@@ -17,7 +17,6 @@ import logoShortLight from "@/assets/logos/logo-short-light-v2.svg?url";
 import logoShortDark from "@/assets/logos/logo-short-dark-v2.svg?url";
 import { navigation, resourceLinks } from "@/config/navigation";
 import { ModeToggle } from "@/components/ui/mode-toggle";
-import { NotificationBell } from "@/components/NotificationBell";
 import { cn } from "@/lib/utils";
 
 function SidebarLogo() {
@@ -84,7 +83,6 @@ export function AppSidebar() {
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:w-full">
             <SidebarLogo />
           </div>
-          <NotificationBell />
           <ModeToggle
             className={cn(
               "size-10 shrink-0 rounded-md text-sidebar-foreground",

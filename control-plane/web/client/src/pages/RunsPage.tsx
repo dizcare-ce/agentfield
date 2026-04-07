@@ -24,6 +24,7 @@ import {
 } from "@/utils/status";
 import {
   useErrorNotification,
+  useRunNotification,
   useSuccessNotification,
   useWarningNotification,
 } from "@/components/ui/notification";
@@ -41,6 +42,7 @@ import {
   RunLifecycleMenu,
   CANCEL_RUN_COPY,
 } from "@/components/runs/RunLifecycleMenu";
+import { StatusDot } from "@/components/ui/status-pill";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -122,8 +124,9 @@ function formatAbsoluteStarted(iso: string): string {
 
 /**
  * Human-readable time since `startedMs` relative to `nowMs`.
- * When `liveGranular` is true (running), uses second-level precision under 1h, then hours/minutes under 24h.
- * Other in-flight states still re-render on the same tick but use natural phrasing via RelativeTimeFormat.
+ * Motion is proportional to information: second-level only under 60s,
+ * minute-level up to 1h, hour-level above that. This keeps running rows
+ * from becoming a noisy clock at scale.
  */
 function formatRelativeStarted(
   startedMs: number,
@@ -135,11 +138,13 @@ function formatRelativeStarted(
 
   if (liveGranular) {
     if (s < 8) return "just now";
+    if (s < 60) return `${s}s ago`;
     if (s < 3600) {
-      if (s < 60) return `${s}s ago`;
+      // Minute granularity past the first minute — drop seconds to calm
+      // the motion. "5m ago" reads as live because it's running; the
+      // precise seconds aren't information a user needs.
       const m = Math.floor(s / 60);
-      const rs = s % 60;
-      return `${m}m ${rs}s ago`;
+      return `${m}m ago`;
     }
     if (s < 86400) {
       const h = Math.floor(s / 3600);
@@ -165,18 +170,49 @@ function formatRelativeStarted(
   return rtf.format(-Math.max(1, years), "year");
 }
 
+/**
+ * Returns the tick interval (ms) appropriate for a given run age, or null
+ * if the cell should not tick at all. Motion is proportional to
+ * information: fast for the first minute, slow as the run ages, frozen
+ * past an hour.
+ */
+function liveTickIntervalMs(ageMs: number): number | null {
+  if (ageMs < 60_000) return 1000; // <1m → 1s tick, show seconds
+  if (ageMs < 5 * 60_000) return 5_000; // 1–5m → 5s tick
+  if (ageMs < 60 * 60_000) return 30_000; // 5m–1h → 30s tick
+  return null; // >=1h → frozen, no motion
+}
+
 function StartedAtCell({ run }: { run: WorkflowSummary }) {
   const iso = run.started_at;
-  const canonical = normalizeExecutionStatus(run.status);
-  const tick = !run.terminal;
-  const liveGranular = tick && canonical === "running";
+  // Use the ROOT execution status, not the aggregate — a cancelled or
+  // paused root should freeze this cell even when children are still in
+  // flight (backend cancel semantics).
+  const effective = run.root_execution_status ?? run.status;
+  const liveGranular = effective === "running";
+  const tick = liveGranular; // only genuinely running runs tick
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!tick) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [tick]);
+    if (!tick || !iso) return;
+    const startedMs = new Date(iso).getTime();
+    if (Number.isNaN(startedMs)) return;
+
+    let id: number | undefined;
+    const schedule = () => {
+      const ageMs = Date.now() - startedMs;
+      const interval = liveTickIntervalMs(ageMs);
+      if (interval == null) return; // age past 1h, freeze
+      id = window.setTimeout(() => {
+        setNow(Date.now());
+        schedule(); // re-schedule so the interval can widen as the run ages
+      }, interval);
+    };
+    schedule();
+    return () => {
+      if (id != null) window.clearTimeout(id);
+    };
+  }, [tick, iso]);
 
   if (!iso) {
     return <span className="text-micro-plus text-muted-foreground">—</span>;
@@ -233,9 +269,18 @@ function formatDuration(ms: number | undefined, terminal?: boolean): string {
   const secs = ms / 1000;
   if (secs < 60) return `${secs.toFixed(1)}s`;
   const mins = Math.floor(secs / 60);
-  if (mins < 60) {
+  if (mins < 5) {
+    // Under 5 minutes we still want second-level precision for a live
+    // running run — the user is watching something short and the seconds
+    // matter.
     const rem = Math.round(secs % 60);
     return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  }
+  if (mins < 60) {
+    // Past 5 minutes drop seconds — the tick interval widens to 30s so
+    // sub-minute updates are already invisible, and "12m 47s" reads as
+    // over-precise when the bar is changing slowly.
+    return `${mins}m`;
   }
   const hours = Math.floor(mins / 60);
   if (hours < 24) {
@@ -247,39 +292,83 @@ function formatDuration(ms: number | undefined, terminal?: boolean): string {
   return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
-function StatusDot({ status }: { status: string }) {
-  const canonical = normalizeExecutionStatus(status);
-  const color =
-    canonical === "succeeded"
-      ? "bg-green-500"
-      : canonical === "failed" || canonical === "timeout"
-        ? "bg-red-500"
-        : canonical === "running"
-          ? "bg-blue-500"
-          : "bg-muted-foreground";
+/**
+ * Live-updating duration cell. For terminal runs we show the recorded
+ * duration_ms straight from the API. For in-flight runs (running, paused,
+ * queued, etc.) we compute elapsed time from started_at every second so
+ * the user sees how long the run has been alive — same pattern as
+ * StartedAtCell.
+ *
+ * Uses the root execution status (not the children-aggregated one) so the
+ * cell stops ticking in blue as soon as the user pauses, even if
+ * stragglers are still in flight.
+ */
+function DurationCell({ run }: { run: WorkflowSummary }) {
+  const effectiveStatus = run.root_execution_status ?? run.status;
+  const isTerminal = isTerminalStatus(effectiveStatus);
+  // Only a truly running root drives motion. Paused / cancelled / terminal
+  // all freeze the duration at whatever the backend last reported, avoiding
+  // the "dead run still counting" noise.
+  const isRunning = effectiveStatus === "running";
+  const tick = isRunning;
+  const [now, setNow] = useState(() => Date.now());
 
-  const label =
-    canonical === "succeeded"
-      ? "ok"
-      : canonical === "failed"
-        ? "failed"
-        : canonical === "running"
-          ? "running"
-          : canonical === "timeout"
-            ? "timeout"
-            : canonical === "cancelled"
-              ? "cancelled"
-              : canonical === "pending" || canonical === "queued"
-                ? "pending"
-                : canonical;
+  useEffect(() => {
+    if (!tick || !run.started_at) return;
+    const startedMs = new Date(run.started_at).getTime();
+    if (Number.isNaN(startedMs)) return;
 
+    let id: number | undefined;
+    const schedule = () => {
+      const ageMs = Date.now() - startedMs;
+      const interval = liveTickIntervalMs(ageMs);
+      if (interval == null) return;
+      id = window.setTimeout(() => {
+        setNow(Date.now());
+        schedule();
+      }, interval);
+    };
+    schedule();
+    return () => {
+      if (id != null) window.clearTimeout(id);
+    };
+  }, [tick, run.started_at]);
+
+  if (isTerminal) {
+    return (
+      <span className="text-xs tabular-nums text-muted-foreground">
+        {formatDuration(run.duration_ms, true)}
+      </span>
+    );
+  }
+
+  // Non-terminal: live elapsed from started_at. If we have no start time
+  // yet (e.g. queued and never dispatched), fall back to the dash.
+  const startedMs = run.started_at ? new Date(run.started_at).getTime() : NaN;
+  if (Number.isNaN(startedMs)) {
+    return <span className="text-xs tabular-nums text-muted-foreground">—</span>;
+  }
+  const elapsed = Math.max(0, now - startedMs);
   return (
-    <div className="flex items-center gap-1.5">
-      <div className={cn("size-1.5 rounded-full shrink-0", color)} />
-      <span className="text-micro-plus">{label}</span>
-    </div>
+    <span
+      className={cn(
+        "text-xs tabular-nums",
+        isRunning ? "text-sky-400/95" : "text-muted-foreground",
+      )}
+      title={
+        isRunning
+          ? "Live elapsed time — updates every second"
+          : "Elapsed since the run started"
+      }
+    >
+      {formatDuration(elapsed, false)}
+    </span>
   );
 }
+
+// StatusDot / StatusPill / StatusIcon now live in @/components/ui/status-pill
+// and are the single source of truth for status visuals across the app.
+// See components/ui/status-pill.tsx for the primitive.
 
 // ─── RunPreview ────────────────────────────────────────────────────────────────
 
@@ -618,6 +707,7 @@ export function RunsPage() {
   const showSuccess = useSuccessNotification();
   const showError = useErrorNotification();
   const showWarning = useWarningNotification();
+  const showRunNotification = useRunNotification();
   const { state: sidebarState, isMobile } = useSidebar();
 
   // Per-row mutation tracking — keyed by root_execution_id so each row can
@@ -643,10 +733,11 @@ export function RunsPage() {
     });
   }, []);
 
-  const runShortLabel = useCallback(
-    (run: WorkflowSummary) => run.run_id.slice(0, 8),
-    [],
-  );
+  /** Human-readable label for a run — e.g. `demo-runs.slow_task`. */
+  const runDisplayLabel = useCallback((run: WorkflowSummary) => {
+    const reasoner = run.root_reasoner || run.display_name || "run";
+    return run.agent_id ? `${run.agent_id}.${reasoner}` : reasoner;
+  }, []);
 
   const handlePauseRun = useCallback(
     async (run: WorkflowSummary) => {
@@ -655,17 +746,28 @@ export function RunsPage() {
       markPending(execId);
       try {
         await pauseMutation.mutateAsync(execId);
-        showSuccess("Run paused", `Run ${runShortLabel(run)} is now paused.`);
+        showRunNotification({
+          type: "success",
+          eventKind: "pause",
+          title: "Paused",
+          message: `${runDisplayLabel(run)} is now paused. In-flight steps will finish; no new steps will start until you resume.`,
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } catch (err) {
-        showError(
-          "Pause failed",
-          err instanceof Error ? err.message : "Unable to pause run.",
-        );
+        showRunNotification({
+          type: "error",
+          eventKind: "error",
+          title: "Pause failed",
+          message: err instanceof Error ? err.message : "Unable to pause run.",
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } finally {
         clearPending(execId);
       }
     },
-    [pauseMutation, showSuccess, showError, markPending, clearPending, runShortLabel],
+    [pauseMutation, showRunNotification, markPending, clearPending, runDisplayLabel],
   );
 
   const handleResumeRun = useCallback(
@@ -675,17 +777,28 @@ export function RunsPage() {
       markPending(execId);
       try {
         await resumeMutation.mutateAsync(execId);
-        showSuccess("Run resumed", `Run ${runShortLabel(run)} is running again.`);
+        showRunNotification({
+          type: "success",
+          eventKind: "resume",
+          title: "Resumed",
+          message: `${runDisplayLabel(run)} is running again.`,
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } catch (err) {
-        showError(
-          "Resume failed",
-          err instanceof Error ? err.message : "Unable to resume run.",
-        );
+        showRunNotification({
+          type: "error",
+          eventKind: "error",
+          title: "Resume failed",
+          message: err instanceof Error ? err.message : "Unable to resume run.",
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } finally {
         clearPending(execId);
       }
     },
-    [resumeMutation, showSuccess, showError, markPending, clearPending, runShortLabel],
+    [resumeMutation, showRunNotification, markPending, clearPending, runDisplayLabel],
   );
 
   const handleCancelRun = useCallback(
@@ -695,20 +808,28 @@ export function RunsPage() {
       markPending(execId);
       try {
         await cancelMutation.mutateAsync(execId);
-        showSuccess(
-          "Cancellation registered",
-          `Run ${runShortLabel(run)} will stop after its current step finishes.`,
-        );
+        showRunNotification({
+          type: "success",
+          eventKind: "cancel",
+          title: "Cancelled",
+          message: `${runDisplayLabel(run)} will stop after its current step finishes. In-flight work will be discarded.`,
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } catch (err) {
-        showError(
-          "Cancel failed",
-          err instanceof Error ? err.message : "Unable to cancel run.",
-        );
+        showRunNotification({
+          type: "error",
+          eventKind: "error",
+          title: "Cancel failed",
+          message: err instanceof Error ? err.message : "Unable to cancel run.",
+          runId: run.run_id,
+          runLabel: runDisplayLabel(run),
+        });
       } finally {
         clearPending(execId);
       }
     },
-    [cancelMutation, showSuccess, showError, markPending, clearPending, runShortLabel],
+    [cancelMutation, showRunNotification, markPending, clearPending, runDisplayLabel],
   );
 
   // Bulk confirmation dialog state — a single shared AlertDialog for the
@@ -1155,7 +1276,9 @@ export function RunsPage() {
               .map((id) => filteredRuns.find((r) => r.run_id === id))
               .filter(
                 (r): r is WorkflowSummary =>
-                  !!r && r.status === "running" && !!r.root_execution_id,
+                  !!r &&
+                  (r.root_execution_status ?? r.status) === "running" &&
+                  !!r.root_execution_id,
               );
             await runBulkMutation({
               targets,
@@ -1180,7 +1303,9 @@ export function RunsPage() {
               .map((id) => filteredRuns.find((r) => r.run_id === id))
               .filter(
                 (r): r is WorkflowSummary =>
-                  !!r && r.status === "paused" && !!r.root_execution_id,
+                  !!r &&
+                  (r.root_execution_status ?? r.status) === "paused" &&
+                  !!r.root_execution_id,
               );
             await runBulkMutation({
               targets,
@@ -1216,7 +1341,9 @@ export function RunsPage() {
                   .map((id) => filteredRuns.find((r) => r.run_id === id))
                   .filter(
                     (r): r is WorkflowSummary =>
-                      !!r && !isTerminalStatus(r.status) && !!r.root_execution_id,
+                      !!r &&
+                      !isTerminalStatus(r.root_execution_status ?? r.status) &&
+                      !!r.root_execution_id,
                   );
                 return CANCEL_RUN_COPY.title(cancellable.length);
               })()}
@@ -1237,7 +1364,9 @@ export function RunsPage() {
                   .map((id) => filteredRuns.find((r) => r.run_id === id))
                   .filter(
                     (r): r is WorkflowSummary =>
-                      !!r && !isTerminalStatus(r.status) && !!r.root_execution_id,
+                      !!r &&
+                      !isTerminalStatus(r.root_execution_status ?? r.status) &&
+                      !!r.root_execution_id,
                   );
                 setBulkCancelOpen(false);
                 await runBulkMutation({
@@ -1265,7 +1394,9 @@ export function RunsPage() {
                   .map((id) => filteredRuns.find((r) => r.run_id === id))
                   .filter(
                     (r): r is WorkflowSummary =>
-                      !!r && !isTerminalStatus(r.status) && !!r.root_execution_id,
+                      !!r &&
+                      !isTerminalStatus(r.root_execution_status ?? r.status) &&
+                      !!r.root_execution_id,
                   );
                 return CANCEL_RUN_COPY.confirmLabel(cancellable.length);
               })()}
@@ -1379,14 +1510,15 @@ function BulkActionBar({
     [selected, filteredRuns],
   );
 
+  const effective = (r: WorkflowSummary) => r.root_execution_status ?? r.status;
   const hasRunning = selectedRuns.some(
-    (r) => r.status === "running" && !!r.root_execution_id,
+    (r) => effective(r) === "running" && !!r.root_execution_id,
   );
   const hasPaused = selectedRuns.some(
-    (r) => r.status === "paused" && !!r.root_execution_id,
+    (r) => effective(r) === "paused" && !!r.root_execution_id,
   );
   const hasCancellable = selectedRuns.some(
-    (r) => !isTerminalStatus(r.status) && !!r.root_execution_id,
+    (r) => !isTerminalStatus(effective(r)) && !!r.root_execution_id,
   );
   const anyPending =
     bulkBusy ||
@@ -1522,9 +1654,10 @@ function RunRow({
           onCheckedChange={() => {}}
         />
       </TableCell>
-      {/* Status dot */}
+      {/* Status dot — prefer the root execution status so pause/cancel are
+          reflected immediately, even when stragglers are still in-flight */}
       <TableCell className="px-3 py-1.5 w-24">
-        <StatusDot status={run.status} />
+        <StatusDot status={run.root_execution_status ?? run.status} />
       </TableCell>
       {/* Target name, then inline copy-chip for run id (no sub-column) */}
       <TableCell
@@ -1602,9 +1735,9 @@ function RunRow({
       <TableCell className="px-3 py-1.5 text-xs tabular-nums w-20">
         {run.total_executions ?? 1}
       </TableCell>
-      {/* Duration */}
-      <TableCell className="px-3 py-1.5 text-xs tabular-nums text-muted-foreground w-24">
-        {formatDuration(run.duration_ms, run.terminal)}
+      {/* Duration — live elapsed for in-flight rows, recorded value for terminal */}
+      <TableCell className="px-3 py-1.5 w-24">
+        <DurationCell run={run} />
       </TableCell>
       {/* Started — relative + absolute; live seconds for running */}
       <TableCell

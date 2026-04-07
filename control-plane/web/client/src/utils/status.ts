@@ -131,6 +131,19 @@ export function getStatusLabel(status?: string | null): string {
   }
 }
 
+import {
+  Ban,
+  CheckCircle2,
+  Circle,
+  Clock,
+  HelpCircle,
+  Hourglass,
+  Loader2,
+  PauseCircle,
+  TimerOff,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { statusTone, type StatusTone as ThemeStatusTone } from "../lib/theme";
 
 export interface StatusTheme {
@@ -146,6 +159,13 @@ export interface StatusTheme {
   hexColor: string;
   iconHex: string;
   glowColor: string;
+  /** Icon component for this status — used by StatusPill, Badge, and anywhere
+   * else that renders a glyph representation. */
+  icon: LucideIcon;
+  /** Motion behaviour. "live" = actively progressing (halo ping on the dot,
+   * slow spin on the icon). Anything else = static. Only running is "live"
+   * today but keeping the enum leaves room for "blocked" spinner, etc. */
+  motion: "none" | "live";
 }
 
 const STATUS_HEX: Record<CanonicalStatus, { base: string; light: string }> = {
@@ -187,6 +207,38 @@ const BADGE_VARIANT: Record<CanonicalStatus, StatusTheme['badgeVariant']> = {
   unknown: 'outline',
 };
 
+/** Icon glyph per canonical status. Single source of truth consumed by
+ * StatusPill, StatusDot, Badge, the DAG, and anything else that wants to
+ * show a status. */
+const STATUS_ICON: Record<CanonicalStatus, LucideIcon> = {
+  pending: Clock,
+  queued: Clock,
+  waiting: Hourglass,
+  running: Loader2,
+  paused: PauseCircle,
+  succeeded: CheckCircle2,
+  failed: XCircle,
+  cancelled: Ban,
+  timeout: TimerOff,
+  unknown: HelpCircle,
+};
+
+/** Which statuses render with motion. Keeping this a small enum rather
+ * than a freeform CSS string so consumers can interpret "live" in their
+ * own idiomatic way (halo ping for a dot, slow spin for an icon, etc). */
+const STATUS_MOTION: Record<CanonicalStatus, StatusTheme["motion"]> = {
+  pending: "none",
+  queued: "none",
+  waiting: "none",
+  running: "live",
+  paused: "none",
+  succeeded: "none",
+  failed: "none",
+  cancelled: "none",
+  timeout: "none",
+  unknown: "none",
+};
+
 function createStatusTheme(status: CanonicalStatus): StatusTheme {
   const toneKey = STATUS_TONE_MAP[status];
   const tone = statusTone[toneKey];
@@ -205,6 +257,8 @@ function createStatusTheme(status: CanonicalStatus): StatusTheme {
     hexColor: base,
     iconHex: light,
     glowColor: `color-mix(in srgb, ${base} 40%, transparent)`,
+    icon: STATUS_ICON[status] ?? Circle,
+    motion: STATUS_MOTION[status] ?? "none",
   };
 }
 

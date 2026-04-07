@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import { getStatusTheme, normalizeExecutionStatus } from "@/utils/status";
+import { StatusDot } from "@/components/ui/status-pill";
 import type { WorkflowDAGLightweightNode } from "@/types/workflows";
 
 // ─── Tree node type (runtime-constructed) ────────────────────────────────────
@@ -163,24 +164,9 @@ function buildFlatSteps(root: TraceTreeNode): FlatStep[] {
   return result;
 }
 
-// ─── Status dot ───────────────────────────────────────────────────────────────
-
-function StatusDot({ status }: { status: string }) {
-  // Route colors through the canonical status theme so cancelled/paused/timeout
-  // are visually distinct from pending. The own-status of this row drives the
-  // color — never propagate parent status here.
-  const theme = getStatusTheme(status);
-  const isRunning = theme.status === "running";
-  return (
-    <span
-      className={cn(
-        "size-1.5 rounded-full shrink-0 inline-block",
-        theme.indicatorClass,
-        isRunning && "animate-pulse",
-      )}
-    />
-  );
-}
+// StatusDot now comes from @/components/ui/status-pill so the trace dot,
+// the runs-table dot, and any future consumer all share the same colour,
+// motion, and label logic.
 
 // ─── Single trace row ─────────────────────────────────────────────────────────
 
@@ -190,6 +176,11 @@ interface TraceRowProps {
   selectedId: string | null;
   onSelect: (executionId: string) => void;
   runStartedAt?: string | null;
+  /** When the root execution is already in a terminal state, suppress
+   * motion on child rows even if their own status is still running. The
+   * control plane has given up on the run so any "live" motion would be
+   * misleading. */
+  rootTerminal: boolean;
 }
 
 function TraceRow({
@@ -198,6 +189,7 @@ function TraceRow({
   selectedId,
   onSelect,
   runStartedAt,
+  rootTerminal,
 }: TraceRowProps) {
   const { node, depth, index, isFirstOfGroup, effectiveGroupCount, showSeparator } = step;
 
@@ -208,10 +200,18 @@ function TraceRow({
   const isSelected = node.execution_id === selectedId;
 
   // Bar color derives from this row's own canonical status — covers
-  // cancelled/paused/timeout that previously fell through to a generic gray.
+  // cancelled/paused/timeout via the theme. Motion comes from the theme
+  // too, BUT the root-terminal gate wins: if the whole run has already
+  // ended, no child should pretend to be making progress.
   const barTheme = getStatusTheme(node.status);
-  const isBarRunning = barTheme.status === "running";
-  const barColor = cn(barTheme.indicatorClass, isBarRunning && "animate-pulse");
+  const rowLive = barTheme.motion === "live" && !rootTerminal;
+  const barColor = cn(
+    barTheme.indicatorClass,
+    rowLive && "motion-safe:animate-pulse",
+    // When the root is terminal but this child is still "running" in the
+    // DB, desaturate the bar so it reads as abandoned rather than active.
+    rootTerminal && barTheme.motion === "live" && "opacity-50",
+  );
   const isCancelled = normalizeExecutionStatus(node.status) === "cancelled";
 
   let relativeStart: string | null = null;
@@ -250,8 +250,12 @@ function TraceRow({
           </span>
         )}
 
-        {/* Status dot */}
-        <StatusDot status={node.status} />
+        {/* Status dot — forced to "cancelled" gray when the whole run is
+            terminal so child rows don't advertise motion on a dead run. */}
+        <StatusDot
+          status={rootTerminal && rowLive ? "cancelled" : node.status}
+          label={false}
+        />
 
         {/* Reasoner name */}
         <span
@@ -305,6 +309,9 @@ interface RunTraceProps {
   onSelect: (executionId: string) => void;
   /** ISO string of the run's start time, used to compute relative step start offsets */
   runStartedAt?: string | null;
+  /** Root execution status — when terminal (cancelled/timeout/failed/
+   * succeeded) any still-running children are rendered without motion. */
+  rootStatus?: string | null;
 }
 
 export function RunTrace({
@@ -313,7 +320,13 @@ export function RunTrace({
   selectedId,
   onSelect,
   runStartedAt,
+  rootStatus,
 }: RunTraceProps) {
+  const rootTerminal = rootStatus
+    ? ["succeeded", "failed", "cancelled", "timeout"].includes(
+        normalizeExecutionStatus(rootStatus),
+      )
+    : false;
   const flatSteps = useMemo(() => buildFlatSteps(node), [node]);
 
   const parentRef = useRef<HTMLDivElement>(null);
@@ -353,6 +366,7 @@ export function RunTrace({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 runStartedAt={runStartedAt}
+                rootTerminal={rootTerminal}
               />
             </div>
           );

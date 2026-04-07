@@ -104,6 +104,12 @@ function Badge({ className, variant, size, icon, showIcon = true, children, ...p
   const statusIconEntry = shouldShowIcon ? statusIcons[variant] : null;
   const StatusIconComponent = statusIconEntry?.icon;
   const iconTone = variant ? toneByVariant[variant] : undefined;
+  // Subtle spin on the running badge so the user sees motion without the
+  // page becoming busy when many runs are live. Uses Tailwind's built-in
+  // `animate-spin` (which resolves to the standard keyframes) with an
+  // inline style override to slow it from 1s → 2.5s. More reliable than
+  // the arbitrary-property form on some Tailwind setups.
+  const shouldSpinIcon = variant === "running";
 
   return (
     <div className={cn(badgeVariants({ variant, size }), className)} {...props}>
@@ -112,8 +118,12 @@ function Badge({ className, variant, size, icon, showIcon = true, children, ...p
           size={12}
           className={cn(
             "flex-shrink-0",
-            iconTone ? statusTone[iconTone].accent : undefined
+            iconTone ? statusTone[iconTone].accent : undefined,
+            shouldSpinIcon && "motion-safe:animate-spin"
           )}
+          style={
+            shouldSpinIcon ? { animationDuration: "2.5s" } : undefined
+          }
         />
       ))}
       {children}
