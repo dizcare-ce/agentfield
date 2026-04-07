@@ -26,6 +26,17 @@ import { VirtualizedDAG } from "./VirtualizedDAG";
 import { WorkflowNode } from "./WorkflowNode";
 import { LayoutManager, type AllLayoutType } from "./layouts/LayoutManager";
 import {
+  adaptLightweightResponse,
+  applySimpleGridLayout,
+  decorateEdgesWithStatus,
+  decorateNodesWithViewMode,
+  isLightweightDAGResponse,
+  LARGE_GRAPH_LAYOUT_THRESHOLD,
+  PERFORMANCE_THRESHOLD,
+  type WorkflowDAGNode,
+  type WorkflowDAGResponse,
+} from "./workflowDagUtils";
+import {
   WorkflowDeckGLView,
   WorkflowDeckGraphControls,
   type WorkflowDeckGLViewHandle,
@@ -34,7 +45,6 @@ import { buildDeckGraph, type DeckGraphData } from "./DeckGLGraph";
 
 import { getWorkflowDAG } from "../../services/workflowsApi";
 import type {
-  WorkflowDAGLightweightNode,
   WorkflowDAGLightweightResponse,
 } from "../../types/workflows";
 import { X } from "@/components/ui/icon-bridge";
@@ -43,37 +53,7 @@ import { Card, CardContent } from "../ui/card";
 import { cn } from "../../lib/utils";
 import { formatNumberWithCommas } from "../../utils/numberFormat";
 
-interface WorkflowDAGNode {
-  workflow_id: string;
-  execution_id: string;
-  agent_node_id: string;
-  reasoner_id: string;
-  status: string;
-  started_at: string;
-  completed_at?: string;
-  duration_ms?: number;
-  parent_workflow_id?: string;
-  parent_execution_id?: string;
-  workflow_depth: number;
-  agent_name?: string;
-  task_name?: string;
-  children?: WorkflowDAGNode[];
-}
-
-export interface WorkflowDAGResponse {
-  root_workflow_id: string;
-  session_id?: string;
-  actor_id?: string;
-  total_nodes: number;
-  displayed_nodes?: number;
-  max_depth: number;
-  dag?: WorkflowDAGNode;
-  timeline: WorkflowDAGNode[];
-  workflow_status?: string;
-  workflow_name?: string;
-  mode?: "lightweight";
-  status_counts?: Record<string, number>;
-}
+export type { WorkflowDAGNode, WorkflowDAGResponse } from "./workflowDagUtils";
 
 export interface LayoutInfo {
   currentLayout: AllLayoutType;
@@ -89,56 +69,6 @@ export interface WorkflowDAGControls {
   changeLayout: (layout: AllLayoutType) => void;
 }
 
-function isLightweightDAGResponse(
-  data: WorkflowDAGResponse | WorkflowDAGLightweightResponse | null
-): data is WorkflowDAGLightweightResponse {
-  if (!data) {
-    return false;
-  }
-  return (data as WorkflowDAGLightweightResponse).mode === "lightweight";
-}
-
-function mapLightweightNode(
-  node: WorkflowDAGLightweightNode,
-  workflowId: string
-): WorkflowDAGNode {
-  return {
-    workflow_id: workflowId,
-    execution_id: node.execution_id,
-    agent_node_id: node.agent_node_id,
-    reasoner_id: node.reasoner_id,
-    status: node.status,
-    started_at: node.started_at,
-    completed_at: node.completed_at,
-    duration_ms: node.duration_ms,
-    parent_execution_id: node.parent_execution_id,
-    workflow_depth: node.workflow_depth,
-  };
-}
-
-function adaptLightweightResponse(
-  response: WorkflowDAGLightweightResponse
-): WorkflowDAGResponse {
-  const timeline = response.timeline.map((node) =>
-    mapLightweightNode(node, response.root_workflow_id)
-  );
-
-  const dag = timeline.length > 0 ? { ...timeline[0] } : undefined;
-
-  return {
-    root_workflow_id: response.root_workflow_id,
-    session_id: response.session_id,
-    actor_id: response.actor_id,
-    total_nodes: response.total_nodes,
-    displayed_nodes: timeline.length,
-    max_depth: response.max_depth,
-    dag,
-    timeline,
-    workflow_status: response.workflow_status,
-    workflow_name: response.workflow_name,
-    mode: "lightweight",
-  };
-}
 
 interface WorkflowDAGViewerProps {
   workflowId: string;
@@ -409,82 +339,6 @@ function WorkflowDAGViewerInner({
     );
   }
 
-  // Performance threshold for switching to virtualized rendering
-const PERFORMANCE_THRESHOLD = 300;
-const LARGE_GRAPH_LAYOUT_THRESHOLD = 2000;
-const SIMPLE_LAYOUT_COLUMNS = 40;
-const SIMPLE_LAYOUT_X_SPACING = 240;
-const SIMPLE_LAYOUT_Y_SPACING = 120;
-
-function applySimpleGridLayout(
-  nodes: Node[],
-  executionMap: Map<string, WorkflowDAGNode>
-): Node[] {
-  const sortedNodes = [...nodes].sort((a, b) => {
-    const depthA =
-      (executionMap.get(a.id)?.workflow_depth as number | undefined) ?? 0;
-    const depthB =
-      (executionMap.get(b.id)?.workflow_depth as number | undefined) ?? 0;
-    if (depthA !== depthB) {
-      return depthA - depthB;
-    }
-    const startedA =
-      executionMap.get(a.id)?.started_at ?? "1970-01-01T00:00:00Z";
-    const startedB =
-      executionMap.get(b.id)?.started_at ?? "1970-01-01T00:00:00Z";
-    if (startedA !== startedB) {
-      return startedA.localeCompare(startedB);
-    }
-    return a.id.localeCompare(b.id);
-  });
-
-  const columns = Math.max(1, SIMPLE_LAYOUT_COLUMNS);
-
-  return sortedNodes.map((node, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    return {
-      ...node,
-      position: {
-        x: column * SIMPLE_LAYOUT_X_SPACING,
-        y: row * SIMPLE_LAYOUT_Y_SPACING,
-      },
-    };
-  });
-}
-
-function decorateNodesWithViewMode(nodes: Node[], viewMode: string): Node[] {
-  return nodes.map((node) => ({
-    ...node,
-    data: {
-      ...(node.data as object),
-      viewMode,
-    },
-  }));
-}
-
-function decorateEdgesWithStatus(
-  edges: Edge[],
-  executionMap: Map<string, WorkflowDAGNode>
-): Edge[] {
-  return edges.map((edge) => {
-    const targetExecution = executionMap.get(edge.target);
-    if (!targetExecution) {
-      return edge;
-    }
-    const animated = targetExecution.status === "running";
-    return {
-      ...edge,
-      animated,
-      data: {
-        ...(edge.data as object),
-        status: targetExecution.status,
-        duration: targetExecution.duration_ms,
-        animated,
-      },
-    } as Edge;
-  });
-}
   const shouldUseVirtualizedDAG = useMemo(() => {
     return nodes.length > PERFORMANCE_THRESHOLD;
   }, [nodes.length]);
