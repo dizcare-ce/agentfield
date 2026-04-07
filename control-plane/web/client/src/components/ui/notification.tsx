@@ -20,6 +20,7 @@ import {
 import { Toaster as SonnerToaster, toast as sonnerToast } from "sonner";
 import { useTheme } from "next-themes";
 
+import { statusTone } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -284,10 +285,13 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
             title: "text-sm font-medium leading-snug text-foreground",
             description: "text-xs leading-snug text-muted-foreground",
             icon: "size-4",
-            success: "!border-l-emerald-500/70 [&>[data-icon]]:text-emerald-500",
-            error: "!border-l-destructive/80 [&>[data-icon]]:text-destructive",
-            warning: "!border-l-amber-500/70 [&>[data-icon]]:text-amber-500",
-            info: "!border-l-sky-500/70 [&>[data-icon]]:text-sky-500",
+            success:
+              "!border-l-status-success/70 [&>[data-icon]]:text-status-success",
+            error:
+              "!border-l-status-error/80 [&>[data-icon]]:text-status-error",
+            warning:
+              "!border-l-status-warning/70 [&>[data-icon]]:text-status-warning",
+            info: "!border-l-status-info/70 [&>[data-icon]]:text-status-info",
             closeButton:
               "!bg-transparent !border-border/60 !text-muted-foreground hover:!bg-muted hover:!text-foreground",
             actionButton:
@@ -323,13 +327,13 @@ const EVENT_ICON: Record<NotificationEventKind, LucideIcon> = {
 };
 
 const EVENT_ACCENT: Record<NotificationEventKind, { icon: string }> = {
-  pause: { icon: "text-amber-500 dark:text-amber-400" },
-  resume: { icon: "text-emerald-500 dark:text-emerald-400" },
-  cancel: { icon: "text-muted-foreground" },
-  error: { icon: "text-destructive" },
-  complete: { icon: "text-emerald-500 dark:text-emerald-400" },
-  start: { icon: "text-sky-500 dark:text-sky-400" },
-  info: { icon: "text-sky-500 dark:text-sky-400" },
+  pause: { icon: statusTone.warning.accent },
+  resume: { icon: statusTone.success.accent },
+  cancel: { icon: statusTone.neutral.accent },
+  error: { icon: statusTone.error.accent },
+  complete: { icon: statusTone.success.accent },
+  start: { icon: statusTone.info.accent },
+  info: { icon: statusTone.info.accent },
 };
 
 const TYPE_FALLBACK_KIND: Record<NotificationType, NotificationEventKind> = {
