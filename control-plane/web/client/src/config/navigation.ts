@@ -17,41 +17,34 @@ export type ResourceLinkItem = {
   href: string;
 };
 
-export const navigation = [
+export type NavItem = {
+  title: string;
+  icon: LucideIcon;
+  path: string;
+};
+
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+export const navigation: NavGroup[] = [
   {
-    title: "Dashboard",
-    icon: LayoutDashboard,
-    path: "/dashboard",
+    label: "Build",
+    items: [
+      { title: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+      { title: "Playground", icon: FlaskConical, path: "/playground" },
+      { title: "Runs", icon: Play, path: "/runs" },
+      { title: "Agent nodes", icon: Server, path: "/agents" },
+    ],
   },
   {
-    title: "Playground",
-    icon: FlaskConical,
-    path: "/playground",
-  },
-  {
-    title: "Runs",
-    icon: Play,
-    path: "/runs",
-  },
-  {
-    title: "Agent nodes",
-    icon: Server,
-    path: "/agents",
-  },
-  {
-    title: "Access management",
-    icon: KeyRound,
-    path: "/access",
-  },
-  {
-    title: "Audit",
-    icon: FileCheck2,
-    path: "/verify",
-  },
-  {
-    title: "Settings",
-    icon: Settings,
-    path: "/settings",
+    label: "Govern",
+    items: [
+      { title: "Access management", icon: KeyRound, path: "/access" },
+      { title: "Provenance", icon: FileCheck2, path: "/verify" },
+      { title: "Settings", icon: Settings, path: "/settings" },
+    ],
   },
 ];
 

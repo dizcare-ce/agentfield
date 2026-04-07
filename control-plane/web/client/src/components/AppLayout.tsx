@@ -24,7 +24,7 @@ const routeNames: Record<string, string> = {
   "/runs": "Runs",
   "/agents": "Agent nodes",
   "/playground": "Playground",
-  "/verify": "Audit",
+  "/verify": "Provenance",
   "/access": "Access management",
   "/settings": "Settings",
 };
