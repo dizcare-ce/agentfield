@@ -1209,7 +1209,7 @@ export function NewSettingsPage() {
     <div className="flex flex-col gap-6">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground text-sm mt-1">
           Manage platform configuration, webhooks, and identity.
         </p>
