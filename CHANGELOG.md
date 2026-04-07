@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.3] - 2026-04-07
+
+
+### Chores
+
+- Chore(deps): bump the npm_and_yarn group across 1 directory with 3 updates (#349)
+
+* chore(deps): bump the npm_and_yarn group across 1 directory with 3 updates
+
+Bumps the npm_and_yarn group with 2 updates in the /sdk/typescript directory: [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) and [path-to-regexp](https://github.com/pillarjs/path-to-regexp).
+
+
+Updates `vite` from 5.4.21 to 8.0.5
+- [Release notes](https://github.com/vitejs/vite/releases)
+- [Changelog](https://github.com/vitejs/vite/blob/main/packages/vite/CHANGELOG.md)
+- [Commits](https://github.com/vitejs/vite/commits/v8.0.5/packages/vite)
+
+Updates `esbuild` from 0.21.5 to 0.25.12
+- [Release notes](https://github.com/evanw/esbuild/releases)
+- [Changelog](https://github.com/evanw/esbuild/blob/main/CHANGELOG-2024.md)
+- [Commits](https://github.com/evanw/esbuild/compare/v0.21.5...v0.25.12)
+
+Updates `path-to-regexp` from 0.1.12 to 0.1.13
+- [Release notes](https://github.com/pillarjs/path-to-regexp/releases)
+- [Changelog](https://github.com/pillarjs/path-to-regexp/blob/v.0.1.13/History.md)
+- [Commits](https://github.com/pillarjs/path-to-regexp/compare/v0.1.12...v.0.1.13)
+
+---
+updated-dependencies:
+- dependency-name: vite
+  dependency-version: 8.0.5
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: esbuild
+  dependency-version: 0.25.12
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: path-to-regexp
+  dependency-version: 0.1.13
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+* fix(ci): restore dependency compatibility
+
+---------
+
+Signed-off-by: dependabot[bot] <support@github.com>
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+Co-authored-by: Santosh <santosh@agentfield.ai> (a912244)
+
 ## [0.1.65-rc.2] - 2026-04-07
 
 
