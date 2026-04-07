@@ -208,16 +208,13 @@ func TestMemoryEventsHandler_WebSocketUpgradeAndPatternFilter(t *testing.T) {
 }
 
 func TestMemoryEventsHandler_SSEHappyPathHonorsScopeFilter(t *testing.T) {
-	// The SSE handler in memory_events.go does not flush headers until it
-	// writes its first event, and it relies on c.Writer.CloseNotify() for
-	// disconnect detection. Both behaviors are version-dependent across
-	// gin/httptest combinations and produce a hang in CI even though the
-	// test passes locally. Other tests in this file (WS happy path,
-	// invalid-pattern subscription cleanup, backpressure disconnect) cover
-	// the same code paths, so we skip this specific shape until the source
-	// handler is reworked. Tracked in #358.
-	t.Skip("flaky in CI: SSE handler defers header flush; covered by WS + cleanup tests — see #358")
-
+	// NOTE: The SSE handler in memory_events.go does not flush response
+	// headers until it writes its first matching event, so http.Client.Do
+	// would block waiting for headers if we did the request synchronously.
+	// We work around it here by running the request in a goroutine and
+	// publishing events after the subscription is registered. The source
+	//-side flush refactor is tracked in #358; once that lands, this test
+	// can be simplified.
 	gin.SetMode(gin.TestMode)
 
 	store := newMemoryEventStorageStub()
