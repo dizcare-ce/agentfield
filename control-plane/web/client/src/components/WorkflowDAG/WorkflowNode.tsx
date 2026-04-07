@@ -134,6 +134,9 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
       className: iconClass,
     } as const;
 
+    // Icon reflects this node's OWN canonical status only. A running child
+    // under a cancelled parent must still spin/pulse — do not propagate parent
+    // state into child node visuals.
     switch (status) {
       case "succeeded":
         return <CheckmarkFilled {...iconProps} />;
@@ -141,6 +144,8 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
         return <ErrorFilled {...iconProps} />;
       case "running":
         return <InProgress {...iconProps} className={cn(iconClass, "animate-spin")} />;
+      case "paused":
+      case "waiting":
       case "pending":
       case "queued":
         return <PauseFilled {...iconProps} />;
@@ -414,7 +419,8 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
               <div
                 className={cn(
                   "flex flex-col justify-start text-sm font-semibold leading-[1.15] text-foreground",
-                  taskFormatted.isSingleLine ? "min-h-[16px]" : "min-h-[32px]"
+                  taskFormatted.isSingleLine ? "min-h-[16px]" : "min-h-[32px]",
+                  normalizedStatus === "cancelled" && "line-through opacity-60",
                 )}
               >
                 <div
