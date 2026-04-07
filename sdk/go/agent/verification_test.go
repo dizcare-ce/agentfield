@@ -3,11 +3,15 @@ package agent
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -230,4 +234,102 @@ func TestLocalVerifier_RefreshUsesProvidedAPIKey(t *testing.T) {
 	v := NewLocalVerifier(server.URL, time.Minute, "secret-key")
 	require.NoError(t, v.Refresh())
 	assert.Equal(t, "secret-key", seenAPIKey.Load())
+}
+
+func TestLocalVerifier_VerifySignature(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	v := NewLocalVerifier("http://example.invalid", time.Minute, "")
+	v.adminPublicKey = pub
+	v.timestampWindow = 300
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	body := []byte(`{"hello":"world"}`)
+	bodyHash := sha256.Sum256(body)
+	nonce := "nonce-123"
+	payload := []byte(timestamp + ":" + nonce + ":" + fmt.Sprintf("%x", bodyHash))
+	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+
+	callerDID := "did:key:z" + base64.RawURLEncoding.EncodeToString(append([]byte{0xed, 0x01}, pub...))
+	assert.True(t, v.VerifySignature(callerDID, signature, timestamp, body, nonce))
+	assert.False(t, v.VerifySignature(callerDID, "not-base64", timestamp, body, nonce))
+	assert.False(t, v.VerifySignature(callerDID, signature, "bad-ts", body, nonce))
+	assert.False(t, v.VerifySignature(callerDID, signature, strconv.FormatInt(time.Now().Add(-10*time.Minute).Unix(), 10), body, nonce))
+
+	noNoncePayload := []byte(timestamp + ":" + fmt.Sprintf("%x", bodyHash))
+	noNonceSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, noNoncePayload))
+	assert.True(t, v.VerifySignature("did:example:caller", noNonceSig, timestamp, body, ""))
+	assert.False(t, v.VerifySignature("did:key:zbad", signature, timestamp, body, nonce))
+}
+
+func TestLocalVerifier_EvaluatePolicyAndHelpers(t *testing.T) {
+	v := NewLocalVerifier("http://example.invalid", time.Minute, "")
+	assert.False(t, v.EvaluatePolicy(nil, nil, "agent.read", nil))
+
+	disabled := false
+	v.policies = []PolicyEntry{
+		{
+			Name:           "disabled-deny",
+			DenyFunctions:  []string{"agent.*"},
+			Priority:       100,
+			Enabled:        &disabled,
+		},
+		{
+			Name:           "allow-read",
+			CallerTags:     []string{"internal"},
+			TargetTags:     []string{"finance"},
+			AllowFunctions: []string{"agent.read*"},
+			Constraints: map[string]ConstraintEntry{
+				"limit": {Operator: "<=", Value: 5},
+			},
+			Action:   "allow",
+			Priority: 10,
+		},
+		{
+			Name:          "deny-write",
+			DenyFunctions: []string{"agent.write"},
+			Priority:      5,
+		},
+	}
+
+	assert.True(t, v.EvaluatePolicy([]string{"internal"}, []string{"finance"}, "agent.read.summary", map[string]any{"limit": 3}))
+	assert.False(t, v.EvaluatePolicy([]string{"internal"}, []string{"finance"}, "agent.read.summary", map[string]any{"limit": 8}))
+	assert.False(t, v.EvaluatePolicy([]string{"internal"}, []string{"finance"}, "agent.read.summary", map[string]any{}))
+	assert.False(t, v.EvaluatePolicy([]string{"internal"}, []string{"finance"}, "agent.write", map[string]any{"limit": 1}))
+	assert.True(t, v.EvaluatePolicy([]string{"other"}, []string{"other"}, "agent.other", map[string]any{"limit": 1}))
+
+	assert.True(t, anyTagMatch([]string{"finance", "ops"}, []string{"ops"}))
+	assert.False(t, anyTagMatch([]string{"finance"}, []string{"eng"}))
+	assert.True(t, functionMatches("agent.read.summary", []string{"agent.read*"}))
+	assert.True(t, matchWildcard("agent.read.summary", "*summary"))
+	assert.True(t, matchWildcard("anything", "*"))
+	assert.False(t, matchWildcard("agent.read", "agent.write"))
+
+	assert.True(t, evaluateConstraints(map[string]ConstraintEntry{"value": {Operator: ">", Value: 1}}, "agent.read", map[string]any{"value": 2}))
+	assert.False(t, evaluateConstraints(map[string]ConstraintEntry{"value": {Operator: "==", Value: 1}}, "agent.read", map[string]any{"value": 2}))
+	assert.False(t, evaluateConstraints(map[string]ConstraintEntry{"value": {Operator: ">=", Value: 1}}, "agent.read", map[string]any{"value": "bad"}))
+
+	for _, tc := range []struct {
+		name string
+		in   any
+		want float64
+	}{
+		{name: "float64", in: 1.5, want: 1.5},
+		{name: "float32", in: float32(2.5), want: 2.5},
+		{name: "int", in: 3, want: 3},
+		{name: "int64", in: int64(4), want: 4},
+		{name: "json-number", in: json.Number("5.5"), want: 5.5},
+		{name: "string", in: "6.5", want: 6.5},
+	} {
+		got, err := toFloat64(tc.in)
+		require.NoError(t, err, tc.name)
+		assert.InDelta(t, tc.want, got, 1e-9, tc.name)
+	}
+
+	_, err := toFloat64(struct{}{})
+	assert.Error(t, err)
+	assert.Equal(t, int64(5), abs64(-5))
+	assert.Equal(t, int64(5), abs64(5))
+	assert.Equal(t, int64(math.MaxInt64), abs64(math.MinInt64))
 }
