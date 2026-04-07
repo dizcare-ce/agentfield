@@ -1632,7 +1632,7 @@ function RunRow({
       }}
     >
       {/* Checkbox */}
-      <TableCell className="px-3 py-1.5 w-10" onClick={(e) => onToggleSelect(run.run_id, e)}>
+      <TableCell className="w-10" onClick={(e) => onToggleSelect(run.run_id, e)}>
         <Checkbox
           checked={isSelected}
           aria-label={`Select run ${run.run_id}`}
@@ -1641,12 +1641,12 @@ function RunRow({
       </TableCell>
       {/* Status dot — prefer the root execution status so pause/cancel are
           reflected immediately, even when stragglers are still in-flight */}
-      <TableCell className="px-3 py-1.5 w-24">
+      <TableCell className="w-24">
         <StatusDot status={run.root_execution_status ?? run.status} />
       </TableCell>
       {/* Target name, then inline copy-chip for run id (no sub-column) */}
       <TableCell
-        className="px-3 py-1.5 min-w-0 max-w-[min(36rem,72vw)]"
+        className="min-w-0 max-w-[min(36rem,72vw)]"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <span
@@ -1717,16 +1717,16 @@ function RunRow({
         </div>
       </TableCell>
       {/* Steps */}
-      <TableCell className="px-3 py-1.5 text-xs tabular-nums w-20">
+      <TableCell className="text-xs tabular-nums w-20">
         {run.total_executions ?? 1}
       </TableCell>
       {/* Duration — live elapsed for in-flight rows, recorded value for terminal */}
-      <TableCell className="px-3 py-1.5 w-24">
+      <TableCell className="w-24">
         <DurationCell run={run} />
       </TableCell>
       {/* Started — relative + absolute; live seconds for running */}
       <TableCell
-        className="px-3 py-1.5 min-w-[9.5rem] w-44 align-top"
+        className="min-w-[9.5rem] w-44 align-top"
         onClick={(e) => e.stopPropagation()}
       >
         <StartedAtCell run={run} />
