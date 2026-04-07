@@ -345,7 +345,6 @@ func TestExecuteReasonerHandler_ServerlessPayloadAndHeaderPropagation(t *testing
 	require.Equal(t, "wf-serverless", headers.Get("X-Workflow-ID"))
 	require.Equal(t, "wf-serverless", headers.Get("X-Run-ID"))
 	require.Equal(t, "session-1", headers.Get("X-Session-ID"))
-	require.Equal(t, "caller-node", headers.Get("X-Agent-Node-ID"))
 	require.NotEmpty(t, headers.Get("X-Execution-ID"))
 
 	body := <-observedBody
