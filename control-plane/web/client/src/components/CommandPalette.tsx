@@ -20,6 +20,8 @@ import {
   Search,
 } from "lucide-react";
 
+// Navigation jumper — this palette does not search runs/workflows/nodes.
+// The backing search API was never implemented; treat Cmd-K as Cmd-P.
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
