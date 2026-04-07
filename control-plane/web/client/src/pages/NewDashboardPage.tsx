@@ -568,7 +568,7 @@ export function NewDashboardPage() {
 
   const llmHealthQuery = useLLMHealth();
   const queueQuery = useQueueStatus();
-  const agentsQuery = useAgents();
+  const agentsQuery = useAgents({ refetchInterval: 10_000 });
 
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary"],
