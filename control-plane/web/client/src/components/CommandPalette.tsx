@@ -42,7 +42,7 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search pages, runs, agents..." />
+      <CommandInput placeholder="Jump to page..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
@@ -104,7 +104,7 @@ export function CommandPalette() {
             }
           >
             <Search className="mr-2 size-4" />
-            Show running executions
+            Show active runs
           </CommandItem>
           <CommandItem
             onSelect={() => runAction(() => navigate("/settings"))}
