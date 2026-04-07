@@ -6,6 +6,248 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.9] - 2026-04-07
+
+
+### Added
+
+- Feat(runs): pause/resume/cancel + unified status primitives + notification center (#345)
+
+* fix(ui): cancelled + paused node colors in run trace and DAG graph
+
+- Route RunTrace StatusDot/TraceRow colors through getStatusTheme
+- Add strikethrough to cancelled reasoner labels in waterfall
+- Add cancelled/paused cases to FloatingEdge and EnhancedEdge
+- Fix DAG node component to honor own-status (not parent) for color
+- No hardcoded colors; everything routed through existing theme system
+
+* feat(web): notification center with bell popover and persistent log
+
+Replaces the toast-only notification system with a dual-mode center:
+
+- Persistent in-session log backing the new NotificationBell (sidebar
+  header, next to ModeToggle). Shows an unread count Badge and opens a
+  shadcn Popover with the full notification history, mark-read,
+  mark-all-read, and clear-all controls.
+- Transient bottom-right toasts continue to fire for live feedback and
+  auto-dismiss on their existing schedule; dismissing a toast no longer
+  removes it from the log.
+- <NotificationProvider> mounted globally in App.tsx so any page can
+  surface notifications without local wiring.
+- Cleaned up NotificationToastItem styling to use theme-consistent
+  tokens (left accent border per type, shadcn Card/Button) instead of
+  hardcoded tailwind color classes.
+- Existing useSuccess/Error/Info/WarningNotification hook signatures
+  preserved — no downstream caller changes required.
+
+* feat(web): runs table pause/resume/cancel via per-row kebab + bulk bar
+
+Adds full lifecycle controls to the runs index page:
+
+- Per-row kebab (MoreHorizontal) DropdownMenu with Pause / Resume /
+  Cancel items, shown based on each run's status. Muted at rest,
+  brightens on row hover via a group/run-row selector so it stays
+  discoverable without adding visual noise. Cancel opens an AlertDialog
+  with honest copy explaining that in-flight nodes finish their current
+  step and their output is discarded.
+- New RunLifecycleMenu component in components/runs/ centralises the
+  menu, dialog, and the shared CANCEL_RUN_COPY constants so the bulk
+  bar can mirror the exact same language.
+- Bulk bar (shown when >=1 row is selected) upgraded from a single
+  "Cancel running" button to Pause / Resume / Cancel alongside the
+  existing Compare selected action. Buttons enable only when at least
+  one selected row is eligible. A single shared AlertDialog with
+  count-aware title confirms bulk cancels.
+- Bulk mutations fire via Promise.allSettled and emit one summary
+  notification — success, partial failure ("4 of 5 cancelled — 1 could
+  not be stopped"), or full failure.
+- Per-row spinner via pendingIds Set so each row reflects its own
+  mutation state independently of the mutation hook's global isPending.
+- Replay of existing success/error notifications via the global
+  notification provider — no new toast plumbing.
+
+* feat(web): run detail page pause/resume/cancel cluster + cancellation strip
+
+- Replace the lone Cancel button in the run detail header with a full
+  Pause / Resume / Cancel lifecycle cluster matching the h-8 text-xs
+  sizing and outline/destructive variants used elsewhere in the header.
+  All three share a single lifecycleBusy flag so mutations are
+  serialized and the active control renders a spinner (Activity icon).
+- Cancel opens a shadcn AlertDialog that reuses the CANCEL_RUN_COPY
+  constants from the runs table, so the dialog body language is
+  identical across single-run and bulk confirmation flows.
+- Success and error surfaces through the global notification provider
+  via useSuccessNotification / useErrorNotification — no local toast.
+- Add a muted "Cancellation registered" info strip that renders only
+  when the run is in the cancelled state AND at least one child node
+  is still reporting running. Copy makes the asymmetry explicit:
+  "No new nodes will start; their output will be discarded." The strip
+  disappears naturally once every node reaches a terminal state via
+  react-query refetch / SSE.
+
+* feat(web): unified status primitives, semantic notifications, consistent liveness
+
+Cross-cutting UX pass addressing multiple issues from rapid review:
+
+Backend
+- Expose RootExecutionStatus in WorkflowRunSummary so the UI can reflect
+  what the user actually controls (the root execution) instead of the
+  children-aggregated status, which lies in the presence of in-flight
+  stragglers after a pause or cancel.
+- Add paused_count to the run summary SQL aggregation and root_status
+  column so both ListWorkflowRuns and getRunAggregation populate it.
+- Normalise root status via types.NormalizeExecutionStatus on the way
+  out so downstream consumers see canonical values.
+
+Unified status primitives (web)
+- Extend StatusTheme in utils/status.ts with `icon: LucideIcon` and
+  `motion: "none" | "live"`. Single source of truth for glyph and motion
+  per canonical status.
+- Rebuild components/ui/status-pill.tsx into three shared primitives —
+  StatusDot, StatusIcon, StatusPill — each deriving colour/glyph/motion
+  from getStatusTheme(). Running statuses get a pinging halo on dots
+  and a slow (2.5s) spin on icons.
+- Replace inline StatusDot implementations in RunsPage and RunTrace
+  with the shared primitive. Badge "running" variant auto-spins its
+  icon via the same theme.
+
+Runs table liveness
+- RunsPage kebab + StatusDot + DurationCell + bulk bar eligibility all
+  key on `root_execution_status ?? status`. Paused/cancelled rows stop
+  ticking immediately even when aggregate stays running.
+- Adaptive tick intervals: 1s under 1m, 5s under 5m, 30s under 1h,
+  frozen past 1h. Duration format drops seconds after 5 min. Motion
+  is proportional to information; no more 19m runs counting seconds.
+
+Run detail page
+- Lifecycle cluster (Pause/Resume/Cancel) uses root execution status
+  from the DAG timeline instead of the aggregated workflow status.
+- Status badge at the top reflects the root status.
+- "Cancellation registered" info strip also recognises paused-with-
+  running-children and adjusts copy.
+- RunTrace receives rootStatus; child rows whose own status is still
+  running but whose root is terminal render desaturated with motion
+  suppressed — honest depiction of abandoned stragglers.
+
+Dashboard
+- partitionDashboardRuns active/terminal split now uses
+  root_execution_status so a timed-out run with stale children no
+  longer appears in "Active runs".
+- All RunStatusBadge call sites pass the effective status.
+
+Notification center — compact tree, semantic icons
+- Add NotificationEventKind (pause/resume/cancel/error/complete/start/
+  info) driving a dedicated icon + accent map. Pause uses PauseCircle
+  amber, Resume PlayCircle emerald, Cancel Ban muted, Error
+  AlertTriangle destructive. No more universal green checkmark.
+- Sonner toasts now pass a custom icon element so the glyph matches
+  the bell popover; richColors removed for a quiet neutral card with
+  only a thin type-tinted left border.
+- Bell popover redesigned as a collapsed-by-default run tree: each run
+  group shows one header line + one latest-event summary (~44px);
+  expand via chevron to see the full timeline with a connector line
+  on the left. Event rows are single-line with hover tooltip for the
+  full message, hover-reveal dismiss ×, and compact timestamps
+  ("now", "2m", "3h").
+- useRunNotification accepts an eventKind parameter; RunsPage and
+  RunDetailPage handlers pass explicit kinds.
+- Replace Radix ScrollArea inside the popover with a plain overflow
+  div — Radix was eating wheel events.
+- Fix "View run" navigation: Link uses `to={`/runs/${runId}`}`
+  directly (no href string manipulation) so basename=/ui prepends
+  properly. Sonner toast action builds the URL from VITE_BASE_PATH.
+
+Top bar + layout
+- Move NotificationBell from the sidebar header to the main content
+  top bar, next to the ⌘K hint. Sidebar header is back to just logo
+  + ModeToggle.
+- Constrain SidebarProvider to h-svh overflow-hidden so the inner
+  content div is the scroll container — top header stays pinned at
+  the viewport top without needing a sticky hack.
+- NotificationProvider reflects unreadCount in the browser tab title
+  as "(N) …" so notifications surface in the Chrome tab when the
+  window is unfocused.
+
+Dependencies
+- Add sonner ^2.0.7 for standard shadcn toasts.
+
+* fix(runs-cancel-pause): address multi-pass review findings (H1-3, M1-10)
+
+Backend
+- H1 deriveStatusFromCounts: add explicit paused branch before succeeded
+  fallback so all-paused runs no longer collapse to succeeded. Terminal
+  check already excludes paused, so completed_at/duration_ms stay nil.
+
+Frontend — single source of truth via getStatusTheme()
+- H3 WorkflowNode: delete duplicate STATUS_TONE_TOKEN_MAP and switch-based
+  getStatusIcon; route icon, color, motion through getStatusTheme().
+- H2 RunsPage: StatusMenuDot delegates to <StatusDot/> instead of
+  hardcoding bg-green/red/blue.
+- M3+M4 RunDetailPage: statusVariant helper removed; header now uses
+  <StatusPill/> for unified status visual.
+- M1+M2 badge: swap Phosphor → Lucide icons; derive spin from
+  StatusTheme.motion === "live" via variantToCanonical map instead of
+  hardcoding `variant === "running"`.
+
+Frontend — root-effective status consistency
+- M5 RunsPage filteredRuns: filter on root_execution_status ?? r.status
+  so client-side filter agrees with the dot.
+- M6 NewDashboardPage: duration cell uses isTerminalStatus(effective)
+  instead of aggregate run.terminal so cancelled/paused roots freeze the
+  timer even while children drain.
+- M7 RunDetailPage lifecycle cluster: render for any non-terminal root
+  (Cancel now available for pending/queued/waiting), Pause/Resume still
+  gated on running/paused.
+
+Frontend — accessibility + contrast
+- M8 NotificationBell: remove nested role="button" + key handler on
+  NotificationRow (was wrapping a real <button>), drop ambiguous tree
+  semantics.
+- L2 NotificationBell: bump timestamp from text-[10px]/80 to text-[11px]
+  text-muted-foreground to clear WCAG AA contrast for small metadata.
+- M9 RunLifecycleMenu: kebab opacity text-muted-foreground/40 → /70 to
+  meet contrast at rest; group-hover lifts to text-foreground.
+- L3 RunLifecycleMenu: add aria-busy={isPending} on the trigger so AT
+  hears the in-flight state, not just visually.
+- M10 status-pill StatusDot: add role="img" + aria-label when label is
+  hidden so the dot is not skipped by screen readers.
+
+Deferred (recorded for follow-up, out of scope for this pass)
+- M11 execution_records.go ranked-root CTE: medium-confidence edge case;
+  current MAX(CASE ...) projection is correct under one-root-per-run
+  invariant. Will revisit if multi-root data shows up in practice.
+- L1/L4/L5: selectedRuns Map memo, WorkflowDAGLightweightResponse type
+  field, nested-button a11y note — non-blocking polish.
+
+Verified: tsc clean, go build clean, go vet clean, no new lint errors
+in touched files.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* chore: add .hypothesis/ to .gitignore
+
+Prevents Hypothesis test framework cache files from being tracked.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix: make pause/resume/cancel work without workflow_executions row
+
+The pause, resume, and cancel handlers required a workflow_executions
+entry to exist, but simple async single-node executions only create
+rows in the executions table. This caused a 404 for all lifecycle
+actions in local mode.
+
+Make the workflow_executions lookup non-fatal: use it when available
+for UpdateWorkflowExecution and event metadata, otherwise fall back
+to the execution record's RunID.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com> (3b8d302)
+
 ## [0.1.65-rc.8] - 2026-04-07
 
 
