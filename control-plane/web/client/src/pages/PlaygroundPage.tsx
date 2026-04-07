@@ -393,23 +393,38 @@ export function PlaygroundPage() {
         {/* INPUT */}
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <label
+              htmlFor="playground-input"
+              className="text-sm font-semibold uppercase tracking-wider text-muted-foreground leading-none"
+            >
               Input
-            </CardTitle>
+            </label>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 flex-1">
             <textarea
+              id="playground-input"
+              autoFocus
               className="flex-1 min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm resize-vertical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
                 if (inputError) setInputError(null);
               }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  if (!executing && selectedId) handleExecute();
+                }
+              }}
               placeholder={inputPlaceholder}
               spellCheck={false}
+              aria-describedby={inputError ? "playground-input-error" : undefined}
+              aria-invalid={inputError ? true : undefined}
             />
             {inputError && (
-              <p className="text-xs text-destructive">{inputError}</p>
+              <p id="playground-input-error" className="text-xs text-destructive">
+                {inputError}
+              </p>
             )}
 
             {/* ── Schema collapsible ──────────────────────────────────── */}
