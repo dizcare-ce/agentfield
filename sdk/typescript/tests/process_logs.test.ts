@@ -48,6 +48,8 @@ async function withLogsServer(
     const address = server.address() as AddressInfo;
     await callback(`http://127.0.0.1:${address.port}`);
   } finally {
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       server.close((error?: Error) => (error ? reject(error) : resolve()));
     });

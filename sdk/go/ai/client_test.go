@@ -47,6 +47,12 @@ func TestNewClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.config == nil {
+				t.Setenv("OPENAI_API_KEY", "default-test-key")
+				t.Setenv("OPENROUTER_API_KEY", "")
+				t.Setenv("AI_BASE_URL", "")
+				t.Setenv("AI_MODEL", "")
+			}
 			client, err := NewClient(tt.config)
 			if tt.wantErr {
 				assert.Error(t, err)
