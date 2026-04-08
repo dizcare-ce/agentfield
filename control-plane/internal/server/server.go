@@ -1158,7 +1158,6 @@ func (s *AgentFieldServer) setupRoutes() {
 				nodes.GET("/:nodeId/did", didHandler.GetNodeDIDHandler)
 				nodes.GET("/:nodeId/vc-status", didHandler.GetNodeVCStatusHandler)
 
-	
 			}
 
 			// Executions management group
@@ -1210,6 +1209,14 @@ func (s *AgentFieldServer) setupRoutes() {
 			})
 			uiAPI.GET("/llm/health", llmHandler.GetLLMHealthHandler)
 			uiAPI.GET("/queue/status", llmHandler.GetExecutionQueueStatusHandler)
+
+			hitl := s.Router.Group("/api/hitl/v1")
+			{
+				hitl.GET("/pending", handlers.HitlListPendingHandler(s.storage))
+				hitl.GET("/pending/:request_id", handlers.HitlGetPendingHandler(s.storage))
+				hitl.POST("/pending/:request_id/respond", handlers.HitlRespondHandler(s.storage, s.config.AgentField.Approval.WebhookSecret))
+				hitl.GET("/stream", handlers.HitlStreamHandler(s.storage))
+			}
 
 			// Workflows management group
 			workflows := uiAPI.Group("/workflows")
