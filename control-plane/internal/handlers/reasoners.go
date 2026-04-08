@@ -131,6 +131,13 @@ func ExecuteReasonerHandler(storageProvider storage.StorageProvider) gin.Handler
 			})
 			return
 		}
+		if targetNode.LifecycleStatus == types.AgentStatusPendingApproval {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "agent_pending_approval",
+				"message": fmt.Sprintf("agent node '%s' is awaiting tag approval and cannot execute", nodeID),
+			})
+			return
+		}
 
 		// Check if reasoner exists on the node
 		reasonerExists := false
@@ -495,6 +502,13 @@ func ExecuteSkillHandler(storageProvider storage.StorageProvider) gin.HandlerFun
 		if targetNode.LifecycleStatus == types.AgentStatusOffline {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": fmt.Sprintf("agent node '%s' is offline", nodeID),
+			})
+			return
+		}
+		if targetNode.LifecycleStatus == types.AgentStatusPendingApproval {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "agent_pending_approval",
+				"message": fmt.Sprintf("agent node '%s' is awaiting tag approval and cannot execute", nodeID),
 			})
 			return
 		}
