@@ -10,13 +10,14 @@ Use the UI or Postman to watch its live status.
 import asyncio
 import os
 
-from agentfield import AgentFieldClient
+from agentfield.client import AgentFieldClient
 
 AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "http://localhost:8080")
+AGENTFIELD_API_KEY = os.getenv("AGENTFIELD_API_KEY", "")
 
 
 async def main():
-    client = AgentFieldClient(server_url=AGENTFIELD_URL)
+    client = AgentFieldClient(base_url=AGENTFIELD_URL, api_key=AGENTFIELD_API_KEY or None)
 
     print("Submitting workflow-long (70 s run) via agent-alpha.slow_work ...")
     print("The workflow will keep running after this script exits.")
@@ -29,9 +30,10 @@ async def main():
         headers={},
     )
 
-    workflow_id = submission.get("workflow_id") or submission.get("execution_id", "N/A")
+    workflow_id = getattr(submission, "execution_id", None) or getattr(submission, "run_id", "N/A")
+    status = getattr(submission, "status", "running")
     print(f"workflow_id : {workflow_id}")
-    print(f"status      : {submission.get('status', 'running')}")
+    print(f"status      : {status}")
     print(f"\nCheck status: GET {AGENTFIELD_URL}/api/v1/executions/{workflow_id}")
     return submission
 

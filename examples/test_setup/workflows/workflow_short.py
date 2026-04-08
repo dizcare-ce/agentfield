@@ -8,13 +8,14 @@ Prints the workflow_id so you can look it up in the UI.
 import asyncio
 import os
 
-from agentfield import AgentFieldClient
+from agentfield.client import AgentFieldClient
 
 AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "http://localhost:8080")
+AGENTFIELD_API_KEY = os.getenv("AGENTFIELD_API_KEY", "")
 
 
 async def main():
-    client = AgentFieldClient(server_url=AGENTFIELD_URL)
+    client = AgentFieldClient(base_url=AGENTFIELD_URL, api_key=AGENTFIELD_API_KEY or None)
 
     print("Triggering workflow-short via agent-alpha.fast_work ...")
     result = await client.execute(

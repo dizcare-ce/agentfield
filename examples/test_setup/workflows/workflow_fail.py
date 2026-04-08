@@ -11,13 +11,14 @@ visible in the UI and queryable via the API.
 import asyncio
 import os
 
-from agentfield import AgentFieldClient
+from agentfield.client import AgentFieldClient
 
 AGENTFIELD_URL = os.getenv("AGENTFIELD_URL", "http://localhost:8080")
+AGENTFIELD_API_KEY = os.getenv("AGENTFIELD_API_KEY", "")
 
 
 async def main():
-    client = AgentFieldClient(server_url=AGENTFIELD_URL)
+    client = AgentFieldClient(base_url=AGENTFIELD_URL, api_key=AGENTFIELD_API_KEY or None)
 
     print("Step 1: calling agent-alpha.step_one ...")
     step1 = await client.execute(

@@ -57,6 +57,12 @@ def step_one(payload: str = "start") -> dict:
     return {"step": 1, "status": "ok", "payload": payload}
 
 
+@app.reasoner()
+async def summarize(text: str = "hello") -> dict:
+    """TC-020: New reasoner added to test live UI invalidation."""
+    return {"summary": text[:100], "agent": "agent-alpha", "ts": time.time()}
+
+
 if __name__ == "__main__":
     print("agent-alpha starting (healthy agent)")
     app.run(port=int(os.getenv("AGENT_PORT", "9001")), auto_port=False)
