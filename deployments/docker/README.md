@@ -5,6 +5,40 @@ This folder contains a small Docker Compose setup for evaluating AgentField loca
 - Control plane (UI + REST API)
 - PostgreSQL (pgvector)
 - Optional demo agents (Go + Python)
+- **Native HITL forms** end-to-end demo (on the `hitl` profile)
+
+## HITL end-to-end demo (one command)
+
+Spin up the control plane + the PR-review agent and drive the full native HITL
+forms flow with zero configuration:
+
+```bash
+cd deployments/docker
+docker compose --profile hitl up --build
+
+# In another terminal:
+./e2e-hitl.sh
+```
+
+Then open [http://localhost:8080/hitl](http://localhost:8080/hitl) in your
+browser. You'll see one inbox item — "Review PR #1138". Click it, pick a
+decision button (Approve / Request changes / Reject), and watch the agent
+resume with your submitted values:
+
+```bash
+docker compose logs -f hitl-example-agent
+```
+
+The agent reuses the AI risk summary from the LLM **only** if you export
+`OPENAI_API_KEY` (or `ANTHROPIC_API_KEY` / `AGENTFIELD_AI_KEY`) before
+`docker compose up`. With no key set, the demo falls back to a stubbed
+summary so nothing blocks the flow.
+
+To clean up:
+
+```bash
+docker compose --profile hitl down -v
+```
 
 ## Quick start
 
