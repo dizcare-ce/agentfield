@@ -20,6 +20,10 @@ import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NotificationProvider } from "./components/ui/notification";
+import { HitlLayout } from "./hitl/layout/HitlLayout";
+import { HitlInboxPage } from "./hitl/pages/HitlInboxPage";
+import { HitlFormPage } from "./hitl/pages/HitlFormPage";
+import { HitlDonePage } from "./hitl/pages/HitlDonePage";
 
 function NavigateToPlayground() {
   const { reasonerId } = useParams();
@@ -31,6 +35,11 @@ function AppContent() {
 
   return (
     <Routes>
+      <Route path="/hitl/*" element={<HitlLayout />}>
+        <Route index element={<HitlInboxPage />} />
+        <Route path=":requestId" element={<HitlFormPage />} />
+        <Route path=":requestId/done" element={<HitlDonePage />} />
+      </Route>
       <Route element={<AppLayout />}>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/dashboard" element={<NewDashboardPage />} />
@@ -66,6 +75,10 @@ function AppContent() {
 }
 
 function App() {
+  const routerBaseName = window.location.pathname.startsWith("/hitl")
+    ? "/"
+    : (import.meta.env.VITE_BASE_PATH || "/ui");
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
@@ -78,7 +91,7 @@ function App() {
           <NotificationProvider>
             <AuthProvider>
               <AuthGuard>
-                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                <Router basename={routerBaseName}>
                   <ErrorBoundary>
                     <AppContent />
                   </ErrorBoundary>
