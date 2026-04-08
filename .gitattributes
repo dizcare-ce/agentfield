@@ -21,3 +21,11 @@ scripts/** linguist-vendored
 
 # Exclude migrations (SQL)
 control-plane/migrations/** linguist-vendored
+
+# Force LF for shell scripts so they execute cleanly regardless of a
+# client's core.autocrlf setting. Without this, a clone on a machine with
+# autocrlf=true rewrites the shebang to "#!/usr/bin/env bash\r" and the
+# kernel fails the exec with ENOENT (manifests as "no such file or directory"
+# even though the file is clearly present in ls).
+*.sh text eol=lf
+

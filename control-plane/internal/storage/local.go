@@ -1339,11 +1339,15 @@ func (ls *LocalStorage) runPostgresMigrations(ctx context.Context) error {
 		{
 			version:     "016",
 			description: "Add native HITL form fields to workflow_executions",
+			// Idempotent: ADD COLUMN IF NOT EXISTS lets us recover from a
+			// partial previous run where the columns were added but the
+			// migration was not marked applied (e.g. container restart loop
+			// before the schema_migrations insert landed).
 			sql: `
-				ALTER TABLE workflow_executions ADD COLUMN approval_form_schema TEXT;
-				ALTER TABLE workflow_executions ADD COLUMN approval_responder TEXT;
-				ALTER TABLE workflow_executions ADD COLUMN approval_tags TEXT;
-				ALTER TABLE workflow_executions ADD COLUMN approval_priority TEXT;
+				ALTER TABLE workflow_executions ADD COLUMN IF NOT EXISTS approval_form_schema TEXT;
+				ALTER TABLE workflow_executions ADD COLUMN IF NOT EXISTS approval_responder TEXT;
+				ALTER TABLE workflow_executions ADD COLUMN IF NOT EXISTS approval_tags TEXT;
+				ALTER TABLE workflow_executions ADD COLUMN IF NOT EXISTS approval_priority TEXT;
 				CREATE INDEX IF NOT EXISTS idx_workflow_executions_hitl_pending
 					ON workflow_executions (approval_status)
 					WHERE approval_form_schema IS NOT NULL;`,
