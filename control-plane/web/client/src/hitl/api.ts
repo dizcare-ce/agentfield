@@ -68,8 +68,16 @@ function buildQueryString(filters: HitlInboxFilters): string {
   return query ? `?${query}` : "";
 }
 
-export function listHitlPending(filters: HitlInboxFilters = {}): Promise<HitlPendingItem[]> {
-  return hitlFetch<HitlPendingItem[]>(`/pending${buildQueryString(filters)}`);
+export async function listHitlPending(
+  filters: HitlInboxFilters = {},
+): Promise<HitlPendingItem[]> {
+  // Backend returns an envelope: { items: HitlPendingItem[] }.
+  // Unwrap here so callers (and the react-query cache) see a plain array.
+  const response = await hitlFetch<{ items?: HitlPendingItem[] } | HitlPendingItem[]>(
+    `/pending${buildQueryString(filters)}`,
+  );
+  if (Array.isArray(response)) return response;
+  return response.items ?? [];
 }
 
 export function getHitlItem(requestId: string): Promise<HitlDetail> {

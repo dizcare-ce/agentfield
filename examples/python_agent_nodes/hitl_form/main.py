@@ -251,6 +251,217 @@ def _outcome_message(decision: str) -> str:
     }.get(decision, f"Unknown decision: {decision}")
 
 
+# ============= SECOND REASONER: COMPLEX FORM =============
+#
+# Showcases the full spread of HITL field types in one form, for
+# users who want to see what's possible: markdown, heading, divider,
+# text, textarea, number, select, multiselect, radio, checkbox,
+# switch, date, button_group — plus conditional visibility.
+#
+# Trigger with:
+#   curl -X POST http://localhost:8080/api/v1/execute/pr-review-bot.triage_incident \
+#     -H "Content-Type: application/json" \
+#     -d '{"input": {"incident_id": "INC-2031", "severity_hint": "high"}}'
+
+
+@app.reasoner()
+async def triage_incident(incident_id: str, severity_hint: str = "medium") -> dict:
+    """
+    Triage an incident via a rich HITL form.
+
+    Paused form showcases every v1 field type: markdown context,
+    heading/divider structure, text + textarea + number inputs,
+    single/multi select, radio, checkbox, switch, date picker, and
+    a final button_group to submit with a decision value.
+    """
+    context_md = f"""\
+## Incident {incident_id}
+
+An automated alert fired on the **payments-api** service at
+`2026-04-08T16:42:00Z`. Preliminary severity hint: **{severity_hint}**.
+
+> Fill in the triage form below. Several fields are conditional —
+> for example, the rollback plan only appears if you select
+> "rollback" as the remediation path.
+"""
+
+    schema = hitl.Form(
+        title=f"Triage incident {incident_id}",
+        description=context_md,
+        tags=["incident", "triage", f"severity:{severity_hint}"],
+        priority="high",
+        submit_label="Submit triage",
+        fields=[
+            # ── Context block
+            hitl.Markdown(context_md),
+            hitl.Divider(),
+
+            # ── Identification
+            hitl.Heading("1. Identification"),
+            hitl.Text(
+                name="incident_name",
+                label="Short name",
+                help="A concise human-readable title for the postmortem.",
+                placeholder="payments-api 5xx spike",
+                required=True,
+                max_length=80,
+            ),
+            hitl.Select(
+                name="severity",
+                label="Confirmed severity",
+                required=True,
+                default=severity_hint,
+                options=[
+                    hitl.Option("sev1", "SEV-1 — critical"),
+                    hitl.Option("sev2", "SEV-2 — major"),
+                    hitl.Option("sev3", "SEV-3 — minor"),
+                    hitl.Option("sev4", "SEV-4 — cosmetic"),
+                ],
+            ),
+            hitl.Radio(
+                name="impact",
+                label="User impact",
+                required=True,
+                options=[
+                    hitl.Option("none", "None — internal only"),
+                    hitl.Option("partial", "Partial — some users"),
+                    hitl.Option("full", "Full — all users"),
+                ],
+            ),
+
+            hitl.Divider(),
+
+            # ── Scope
+            hitl.Heading("2. Scope"),
+            hitl.MultiSelect(
+                name="affected_services",
+                label="Affected services",
+                help="Select every service you've confirmed is impacted.",
+                required=True,
+                options=[
+                    hitl.Option("payments-api", "payments-api"),
+                    hitl.Option("checkout-web", "checkout-web"),
+                    hitl.Option("fraud-scoring", "fraud-scoring"),
+                    hitl.Option("notifications", "notifications"),
+                    hitl.Option("analytics-pipeline", "analytics-pipeline"),
+                ],
+            ),
+            hitl.Number(
+                name="affected_users_estimate",
+                label="Estimated affected users",
+                help="Rough order of magnitude — exact count later.",
+                min=0,
+                max=10_000_000,
+                step=100,
+                default=0,
+            ),
+            hitl.Date(
+                name="symptoms_first_seen",
+                label="Symptoms first observed",
+                help="Date the first signal appeared (UTC).",
+                required=True,
+            ),
+
+            hitl.Divider(),
+
+            # ── Remediation
+            hitl.Heading("3. Remediation"),
+            hitl.Radio(
+                name="remediation",
+                label="Chosen remediation path",
+                required=True,
+                options=[
+                    hitl.Option("rollback", "Rollback last deploy"),
+                    hitl.Option("hotfix", "Roll forward with hotfix"),
+                    hitl.Option("feature_flag", "Disable via feature flag"),
+                    hitl.Option("investigate", "Continue investigating"),
+                ],
+            ),
+            # Only shown when the chosen path is "rollback"
+            hitl.Textarea(
+                name="rollback_plan",
+                label="Rollback plan",
+                placeholder="Which commit/deploy are we reverting to, and who's driving?",
+                rows=4,
+                required=True,
+                hidden_when={"field": "remediation", "notEquals": "rollback"},
+            ),
+            # Only shown when the chosen path is "feature_flag"
+            hitl.Text(
+                name="feature_flag_name",
+                label="Feature flag to disable",
+                placeholder="e.g. payments.new_fraud_scorer",
+                required=True,
+                hidden_when={"field": "remediation", "notEquals": "feature_flag"},
+            ),
+            hitl.Switch(
+                name="page_oncall",
+                label="Page the secondary on-call",
+                default=False,
+            ),
+            hitl.Checkbox(
+                name="comms_draft_ready",
+                label="Customer comms draft ready for review",
+                default=False,
+            ),
+
+            hitl.Divider(),
+
+            # ── Notes + decision
+            hitl.Heading("4. Notes"),
+            hitl.Textarea(
+                name="notes",
+                label="Free-form notes",
+                placeholder="Anything responders should know — context, hypotheses, links.",
+                rows=4,
+            ),
+            hitl.ButtonGroup(
+                name="decision",
+                label="Triage decision",
+                required=True,
+                options=[
+                    hitl.Option("escalate", "Escalate", variant="destructive"),
+                    hitl.Option("mitigate", "Mitigate now", variant="default"),
+                    hitl.Option("monitor", "Monitor only", variant="secondary"),
+                ],
+            ),
+        ],
+    ).to_dict()
+
+    result: ApprovalResult = await app.pause(
+        form_schema=schema,
+        tags=["incident", "triage"],
+        priority="high",
+        expires_in_hours=8,
+    )
+
+    payload = result.raw_response or {}
+    print("\n=== Incident Triage Result ===")
+    print(f"  Incident:      {incident_id}")
+    print(f"  Name:          {payload.get('incident_name')}")
+    print(f"  Severity:      {payload.get('severity')}")
+    print(f"  Impact:        {payload.get('impact')}")
+    print(f"  Services:      {payload.get('affected_services')}")
+    print(f"  Users (est):   {payload.get('affected_users_estimate')}")
+    print(f"  First seen:    {payload.get('symptoms_first_seen')}")
+    print(f"  Remediation:   {payload.get('remediation')}")
+    if payload.get("rollback_plan"):
+        print(f"  Rollback plan: {payload.get('rollback_plan')}")
+    if payload.get("feature_flag_name"):
+        print(f"  Flag:          {payload.get('feature_flag_name')}")
+    print(f"  Page oncall:   {payload.get('page_oncall')}")
+    print(f"  Comms ready:   {payload.get('comms_draft_ready')}")
+    print(f"  Notes:         {payload.get('notes') or '(none)'}")
+    print(f"  Decision:      {payload.get('decision')}")
+    print("==============================\n")
+
+    return {
+        "incident_id": incident_id,
+        "triage": payload,
+        "decision": payload.get("decision", "unknown"),
+    }
+
+
 # ============= START SERVER OR CLI =============
 
 if __name__ == "__main__":
@@ -259,15 +470,21 @@ if __name__ == "__main__":
     print("Control Plane: http://localhost:8080")
     print()
     print("Reasoners:")
-    print("  - review_pr(pr_number): Fetch PR, render diff, pause for human decision")
+    print("  - review_pr(pr_number):")
+    print("      Simple 3-field form: markdown diff + button_group + conditional textarea")
+    print("  - triage_incident(incident_id, severity_hint='medium'):")
+    print("      COMPLEX form showcasing every v1 field type + conditional visibility")
     print()
-    print("Once running, trigger a review:")
-    print(
-        "  curl -X POST http://localhost:8080/api/v1/execute/pr-review-bot.review_pr \\"
-    )
+    print("Trigger the simple PR-review form:")
+    print("  curl -X POST http://localhost:8080/api/v1/execute/pr-review-bot.review_pr \\")
     print('    -H "Content-Type: application/json" \\')
     print('    -d \'{"input": {"pr_number": 1138}}\'')
     print()
-    print("Then open http://localhost:8080/hitl to see the form.")
+    print("Trigger the complex incident-triage form:")
+    print("  curl -X POST http://localhost:8080/api/v1/execute/pr-review-bot.triage_incident \\")
+    print('    -H "Content-Type: application/json" \\')
+    print('    -d \'{"input": {"incident_id": "INC-2031", "severity_hint": "high"}}\'')
+    print()
+    print("Then open http://localhost:8080/hitl to see the forms.")
 
     app.run(auto_port=True)
