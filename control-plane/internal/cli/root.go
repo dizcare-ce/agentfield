@@ -90,6 +90,9 @@ AI Agent? Run "af agent help" for structured JSON output optimized for programma
 	// Add init command
 	RootCmd.AddCommand(NewInitCommand())
 
+	// Add doctor command — environment introspection for skills/coding agents
+	RootCmd.AddCommand(NewDoctorCommand())
+
 	// Create service container for framework commands
 	cfg := &config.Config{} // Use default config for now
 	services := application.CreateServiceContainer(cfg, getAgentFieldHomeDir())

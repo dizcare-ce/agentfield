@@ -1,0 +1,39 @@
+services:
+  control-plane:
+    image: {{.ControlPlaneImage}}
+    environment:
+      AGENTFIELD_STORAGE_MODE: local
+      AGENTFIELD_HTTP_ADDR: 0.0.0.0:8080
+    ports:
+      - "${AGENTFIELD_HTTP_PORT:-{{.ControlPlanePort}}}:8080"
+    volumes:
+      - agentfield-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  {{.NodeID}}:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AGENTFIELD_SERVER: http://control-plane:8080
+      AGENT_CALLBACK_URL: http://{{.NodeID}}:{{.AgentPort}}
+      AGENT_NODE_ID: ${AGENT_NODE_ID:-{{.NodeID}}}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-{{.DefaultModel}}}
+      PORT: ${PORT:-{{.AgentPort}}}
+    ports:
+      - "${AGENT_NODE_PORT:-{{.AgentPort}}}:{{.AgentPort}}"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  agentfield-data:
