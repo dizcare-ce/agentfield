@@ -150,6 +150,10 @@ type WorkflowExecutionModel struct {
 	ApprovalRespondedAt   *time.Time `gorm:"column:approval_responded_at"`
 	ApprovalCallbackURL   *string    `gorm:"column:approval_callback_url"`
 	ApprovalExpiresAt     *time.Time `gorm:"column:approval_expires_at"`
+	ApprovalFormSchema    *string    `gorm:"column:approval_form_schema"`
+	ApprovalResponder     *string    `gorm:"column:approval_responder"`
+	ApprovalTags          *string    `gorm:"column:approval_tags"`
+	ApprovalPriority      *string    `gorm:"column:approval_priority"`
 	Notes                 string     `gorm:"column:notes;default:'[]'"`
 	CreatedAt             time.Time  `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;autoUpdateTime"`

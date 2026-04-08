@@ -44,6 +44,10 @@ var workflowExecutionLifecycleColumns = []string{
 	"approval_responded_at",
 	"approval_callback_url",
 	"approval_expires_at",
+	"approval_form_schema",
+	"approval_responder",
+	"approval_tags",
+	"approval_priority",
 	"workflow_name",
 	"workflow_tags",
 	"notes",
@@ -61,7 +65,7 @@ func TestWorkflowExecutionInsertQueriesCoverLifecycleColumns(t *testing.T) {
 		{name: "sqlite", query: sqliteWorkflowExecutionInsertQuery, placeholder: "?"},
 	}
 
-	const expectedPlaceholders = 43
+	const expectedPlaceholders = 47
 
 	for _, tc := range tests {
 		tc := tc

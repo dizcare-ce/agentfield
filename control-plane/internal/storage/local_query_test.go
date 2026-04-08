@@ -140,6 +140,53 @@ func TestQueryWorkflowExecutionsFiltersAndSearch(t *testing.T) {
 	require.Equal(t, "exec-alpha", paggined[0].ExecutionID)
 }
 
+func TestQueryWorkflowExecutionsHitlFilters(t *testing.T) {
+	ls, ctx := setupLocalStorage(t)
+
+	now := time.Now().UTC()
+	runID := "run-hitl"
+	priority := "high"
+	approvalStatus := "pending"
+	tags := `["pr-review","ops"]`
+	schema := `{"title":"Review","fields":[{"type":"text","name":"summary"}]}`
+
+	require.NoError(t, ls.StoreWorkflowRun(ctx, &types.WorkflowRun{
+		RunID:          runID,
+		RootWorkflowID: "wf-hitl",
+		Status:         string(types.ExecutionStatusRunning),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	require.NoError(t, ls.StoreWorkflowExecution(ctx, &types.WorkflowExecution{
+		WorkflowID:          "wf-hitl",
+		ExecutionID:         "exec-hitl",
+		AgentFieldRequestID: "req-hitl",
+		RunID:               &runID,
+		AgentNodeID:         "agent-hitl",
+		ReasonerID:          "reasoner.hitl",
+		Status:              string(types.ExecutionStatusWaiting),
+		StartedAt:           now,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		ApprovalStatus:      &approvalStatus,
+		ApprovalFormSchema:  &schema,
+		ApprovalTags:        &tags,
+		ApprovalPriority:    &priority,
+	}))
+
+	hasFormSchema := true
+	results, err := ls.QueryWorkflowExecutions(ctx, types.WorkflowExecutionFilters{
+		HasFormSchema:    &hasFormSchema,
+		ApprovalStatusEq: &approvalStatus,
+		Tags:             []string{"pr-review"},
+		Priority:         &priority,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "exec-hitl", results[0].ExecutionID)
+}
+
 func TestGetReasonerExecutionHistory_EnrichesExecutionFacts(t *testing.T) {
 	ls, ctx := setupLocalStorage(t)
 

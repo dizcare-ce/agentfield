@@ -280,8 +280,41 @@ func (s *testExecutionStorage) QueryWorkflowExecutions(ctx context.Context, filt
 
 	var results []*types.WorkflowExecution
 	for _, wfExec := range s.workflowExecutions {
+		if filters.Status != nil && wfExec.Status != *filters.Status {
+			continue
+		}
 		if filters.ApprovalRequestID != nil && (wfExec.ApprovalRequestID == nil || *wfExec.ApprovalRequestID != *filters.ApprovalRequestID) {
 			continue
+		}
+		if filters.ApprovalStatusEq != nil && (wfExec.ApprovalStatus == nil || *wfExec.ApprovalStatus != *filters.ApprovalStatusEq) {
+			continue
+		}
+		if filters.HasFormSchema != nil {
+			hasFormSchema := wfExec.ApprovalFormSchema != nil
+			if hasFormSchema != *filters.HasFormSchema {
+				continue
+			}
+		}
+		if filters.Priority != nil && (wfExec.ApprovalPriority == nil || *wfExec.ApprovalPriority != *filters.Priority) {
+			continue
+		}
+		if len(filters.Tags) > 0 {
+			tags := parseJSONStrings(wfExec.ApprovalTags)
+			match := false
+			for _, wanted := range filters.Tags {
+				for _, tag := range tags {
+					if tag == wanted {
+						match = true
+						break
+					}
+				}
+				if match {
+					break
+				}
+			}
+			if !match {
+				continue
+			}
 		}
 		results = append(results, wfExec)
 	}

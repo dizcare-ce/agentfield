@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/events"
@@ -24,10 +26,13 @@ type approvalController struct {
 // The agent creates the approval request externally and passes the metadata here
 // so the CP can track it and transition the execution to "waiting".
 type RequestApprovalRequest struct {
-	ApprovalRequestID  string `json:"approval_request_id" binding:"required"`
-	ApprovalRequestURL string `json:"approval_request_url,omitempty"`
-	CallbackURL        string `json:"callback_url,omitempty"`
-	ExpiresInHours     *int   `json:"expires_in_hours,omitempty"`
+	ApprovalRequestID  string          `json:"approval_request_id" binding:"required"`
+	ApprovalRequestURL string          `json:"approval_request_url,omitempty"`
+	CallbackURL        string          `json:"callback_url,omitempty"`
+	ExpiresInHours     *int            `json:"expires_in_hours,omitempty"`
+	FormSchema         json.RawMessage `json:"form_schema,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
+	Priority           string          `json:"priority,omitempty"`
 }
 
 // RequestApprovalResponse is returned when the execution transitions to waiting.
@@ -72,6 +77,19 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request body: %v", err)})
 		return
 	}
+	if err := validateApprovalFormSchema(req.FormSchema); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	priority, err := normalizeApprovalPriority(req.Priority)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Priority = priority
+	if len(req.FormSchema) > 0 && strings.TrimSpace(req.ApprovalRequestURL) == "" {
+		req.ApprovalRequestURL = buildApprovalRequestURL(ctx, req.ApprovalRequestID)
+	}
 
 	reqCtx := ctx.Request.Context()
 
@@ -104,8 +122,8 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 	approvalPending := wfExec.ApprovalStatus == nil || *wfExec.ApprovalStatus == "pending"
 	if wfExec.ApprovalRequestID != nil && *wfExec.ApprovalRequestID != "" && approvalPending {
 		ctx.JSON(http.StatusConflict, gin.H{
-			"error":                "approval_already_requested",
-			"message":              "An approval request already exists for this execution",
+			"error":               "approval_already_requested",
+			"message":             "An approval request already exists for this execution",
 			"approval_request_id": *wfExec.ApprovalRequestID,
 		})
 		return
@@ -114,6 +132,24 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 	now := time.Now().UTC()
 	statusReason := "waiting_for_approval"
 	approvalStatus := "pending"
+	var formSchemaStr *string
+	var tagsJSONStr *string
+	var priorityPtr *string
+	if len(req.FormSchema) > 0 {
+		schema := string(req.FormSchema)
+		formSchemaStr = &schema
+	}
+	if len(req.Tags) > 0 {
+		tagsJSON, marshalErr := json.Marshal(req.Tags)
+		if marshalErr != nil {
+			logger.Logger.Error().Err(marshalErr).Str("execution_id", executionID).Msg("failed to marshal approval tags")
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to serialize approval tags"})
+			return
+		}
+		tags := string(tagsJSON)
+		tagsJSONStr = &tags
+	}
+	priorityPtr = &req.Priority
 
 	// Compute expiry timestamp from expires_in_hours (default 72h)
 	expiryHours := 72
@@ -154,6 +190,10 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 			current.ApprovalCallbackURL = &req.CallbackURL
 		}
 		current.ApprovalExpiresAt = &expiresAt
+		current.ApprovalFormSchema = formSchemaStr
+		current.ApprovalTags = tagsJSONStr
+		current.ApprovalPriority = priorityPtr
+		current.ApprovalResponder = nil
 		return current, nil
 	})
 	if err != nil {
@@ -168,16 +208,19 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 		"approval_request_id":  req.ApprovalRequestID,
 		"approval_request_url": req.ApprovalRequestURL,
 		"wait_kind":            "approval",
+		"form_schema_present":  len(req.FormSchema) > 0,
+		"tags":                 req.Tags,
+		"priority":             req.Priority,
 	})
 	event := &types.WorkflowExecutionEvent{
-		ExecutionID: executionID,
-		WorkflowID:  wfExec.WorkflowID,
-		RunID:       wfExec.RunID,
-		EventType:   "execution.waiting",
-		Status:      &waitingStatus,
+		ExecutionID:  executionID,
+		WorkflowID:   wfExec.WorkflowID,
+		RunID:        wfExec.RunID,
+		EventType:    "execution.waiting",
+		Status:       &waitingStatus,
 		StatusReason: &statusReason,
-		Payload:     eventPayload,
-		EmittedAt:   now,
+		Payload:      eventPayload,
+		EmittedAt:    now,
 	}
 	if storeErr := c.store.StoreWorkflowExecutionEvent(reqCtx, event); storeErr != nil {
 		logger.Logger.Warn().Err(storeErr).Str("execution_id", executionID).Msg("failed to store approval event (non-fatal)")
@@ -197,6 +240,9 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 				"approval_request_id":  req.ApprovalRequestID,
 				"approval_request_url": req.ApprovalRequestURL,
 				"wait_kind":            "approval",
+				"form_schema_present":  len(req.FormSchema) > 0,
+				"tags":                 req.Tags,
+				"priority":             req.Priority,
 			},
 		})
 	}
@@ -211,6 +257,52 @@ func (c *approvalController) handleRequestApproval(ctx *gin.Context) {
 		ApprovalRequestURL: req.ApprovalRequestURL,
 		Status:             "pending",
 	})
+}
+
+func validateApprovalFormSchema(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var payload struct {
+		Fields []json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return fmt.Errorf("form_schema must be valid JSON")
+	}
+	if len(payload.Fields) == 0 {
+		return fmt.Errorf("form_schema must contain a non-empty fields array")
+	}
+	return nil
+}
+
+func normalizeApprovalPriority(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "":
+		return "normal", nil
+	case "low", "normal", "high", "urgent":
+		return raw, nil
+	default:
+		return "", fmt.Errorf("priority must be one of: low, normal, high, urgent")
+	}
+}
+
+func buildApprovalRequestURL(ctx *gin.Context, requestID string) string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTFIELD_SERVER")), "/")
+	if base == "" {
+		base = strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTFIELD_SERVER_URL")), "/")
+	}
+	if base == "" {
+		scheme := "http"
+		if ctx.Request.TLS != nil {
+			scheme = "https"
+		}
+		if forwarded := strings.TrimSpace(ctx.GetHeader("X-Forwarded-Proto")); forwarded != "" {
+			scheme = forwarded
+		}
+		base = fmt.Sprintf("%s://%s", scheme, ctx.Request.Host)
+	}
+	return fmt.Sprintf("%s/hitl/%s", base, requestID)
 }
 
 func (c *approvalController) handleGetApprovalStatus(ctx *gin.Context) {
