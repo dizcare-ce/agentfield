@@ -15,6 +15,18 @@ import os
 from agentfield import Agent, AIConfig, ApprovalResult
 from agentfield import hitl
 
+FALLBACK_RISK_SUMMARY = (
+    "Removes plaintext token storage in favour of AES-256-GCM envelope "
+    "encryption — reduces blast radius on session store compromise but adds "
+    "a crypto dependency to verify."
+)
+AI_KEY_ENV_VARS = (
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "AGENTFIELD_AI_KEY",
+)
+
 # ============= AGENT SETUP =============
 
 app = Agent(
@@ -104,11 +116,25 @@ async def review_pr(pr_number: int) -> dict:
     pr = fetch_pr_details(pr_number)
 
     # Step 2: Use AI to write a one-sentence risk summary
-    risk = await app.ai(
-        system="You are a security-focused code reviewer. In one sentence, summarise the main risk or benefit of this diff.",
-        user=f"PR title: {pr['title']}\n\nDiff:\n{pr['diff']}",
-    )
-    risk_summary = risk.text if hasattr(risk, "text") else str(risk)
+    risk_summary = FALLBACK_RISK_SUMMARY
+    configured_ai_keys = [name for name in AI_KEY_ENV_VARS if os.getenv(name)]
+    if not configured_ai_keys:
+        print(
+            "[hitl_form] No AI provider key configured "
+            f"({', '.join(AI_KEY_ENV_VARS)}); using stubbed risk summary."
+        )
+    else:
+        try:
+            risk = await app.ai(
+                system="You are a security-focused code reviewer. In one sentence, summarise the main risk or benefit of this diff.",
+                user=f"PR title: {pr['title']}\n\nDiff:\n{pr['diff']}",
+            )
+            risk_summary = risk.text if hasattr(risk, "text") else str(risk)
+        except Exception as exc:
+            print(
+                "[hitl_form] AI risk summary unavailable; "
+                f"falling back to stubbed summary. Error: {exc}"
+            )
 
     # Step 3: Build the HITL form schema
     #
