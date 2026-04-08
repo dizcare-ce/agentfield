@@ -3770,39 +3770,74 @@ class Agent(FastAPI):
 
     async def pause(
         self,
-        approval_request_id: str,
+        approval_request_id: Optional[str] = None,
         approval_request_url: str = "",
         expires_in_hours: int = 72,
         timeout: Optional[float] = None,
         execution_id: Optional[str] = None,
+        form_schema: Optional[dict] = None,
+        tags: Optional[list] = None,
+        priority: Optional[str] = None,
     ) -> ApprovalResult:
-        """Pause the current execution for external approval.
+        """Pause the current execution for human approval.
 
         Transitions the execution to "waiting" on the control plane, then
         blocks until the approval webhook callback resolves it or the timeout
         is reached.
 
-        The agent is responsible for creating the approval request on an
-        external service (e.g. hax-sdk) *before* calling this method and
-        passing the resulting ``approval_request_id``.
+        **External approval flow (legacy):** The agent creates an approval
+        request on an external service (e.g. hax-sdk) *before* calling this
+        method and passes the resulting ``approval_request_id``.
+
+        **Native portal flow:** Pass ``form_schema`` (built with
+        ``agentfield.hitl``) and omit ``approval_request_id``.  A UUID is
+        auto-generated and the control plane renders the form at
+        ``/hitl/<request_id>``.  No external approval service required.
 
         Args:
-            approval_request_id: ID of the approval request on the external service.
+            approval_request_id: ID of the approval request.  Required for the
+                external approval flow.  Optional when ``form_schema`` is
+                provided — if omitted, a UUID is auto-generated.
             approval_request_url: URL where the human can review the request.
+                If ``form_schema`` is set and this is empty, the control plane
+                auto-generates ``{server_base}/hitl/{request_id}``.
             expires_in_hours: Expiry passed to the control plane.
             timeout: Max seconds to wait.  ``None`` defaults to ``expires_in_hours``.
             execution_id: Override the current execution.  Defaults to active context.
+            form_schema: Native HITL form schema dict (see ``agentfield.hitl``).
+                When provided, the control plane stores the schema and renders
+                a native form.  Pass the result of ``hitl.Form(...).to_dict()``.
+            tags: Optional list of tags for inbox filtering (e.g. ``["pr-review"]``).
+            priority: Optional priority: ``"low"``, ``"normal"``, ``"high"``,
+                or ``"urgent"``.
 
         Returns:
             ApprovalResult with the human's decision and feedback.
+            ``ApprovalResult.raw_response`` carries the submitted form values
+            when using the native portal flow.
             If the timeout elapses without resolution, returns
             ``ApprovalResult(decision="expired")``.
 
         Raises:
+            ValueError: If neither ``approval_request_id`` nor ``form_schema``
+                is provided.
             AgentFieldClientError: If the control plane request fails.
             RuntimeError: If the agent is not serving (no callback URL).
         """
+        import uuid as _uuid
+
         from agentfield.exceptions import AgentFieldClientError
+
+        # Resolve approval_request_id
+        if approval_request_id is None:
+            if form_schema is not None:
+                approval_request_id = str(_uuid.uuid4())
+            else:
+                raise ValueError(
+                    "approval_request_id is required when form_schema is not provided. "
+                    "For the native portal flow, pass form_schema and omit "
+                    "approval_request_id — a UUID will be auto-generated."
+                )
 
         # Resolve execution_id from context if not provided
         if not execution_id:
@@ -3832,6 +3867,9 @@ class Agent(FastAPI):
                 approval_request_url=approval_request_url,
                 callback_url=callback_url,
                 expires_in_hours=expires_in_hours,
+                form_schema=form_schema,
+                tags=tags,
+                priority=priority,
             )
         except Exception:
             # Clean up the future if we couldn't even tell the CP

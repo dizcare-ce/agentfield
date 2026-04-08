@@ -1,3 +1,4 @@
+from . import hitl
 from .agent import Agent
 from .cost_tracker import CostTracker
 from .router import AgentRouter
@@ -68,6 +69,7 @@ from .tool_calling import (
 )
 
 __all__ = [
+    "hitl",
     "Agent",
     "CostTracker",
     "AIConfig",

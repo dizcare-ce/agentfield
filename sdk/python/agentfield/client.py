@@ -1700,6 +1700,9 @@ class AgentFieldClient:
         approval_request_url: str = "",
         callback_url: str = "",
         expires_in_hours: int = 72,
+        form_schema: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        priority: Optional[str] = None,
     ) -> ApprovalRequestResponse:
         """Request human approval for an execution, transitioning it to ``waiting``.
 
@@ -1708,12 +1711,22 @@ class AgentFieldClient:
         approval request on an external service (e.g. hax-sdk) first and
         passing the resulting IDs here so the CP can track it.
 
+        When ``form_schema`` is provided, the control plane renders a native
+        HITL form at ``/hitl/<request_id>``.  In this mode the agent does
+        **not** need an external approval service.
+
         Args:
             execution_id: The execution to pause for approval.
             approval_request_id: ID of the approval request on the external service.
             approval_request_url: URL where the human can review the request.
             callback_url: URL the CP should POST to when the approval resolves.
             expires_in_hours: Time before the request expires.
+            form_schema: Optional native HITL form schema dict (see ``agentfield.hitl``).
+                When set, the control plane stores the schema and renders it at
+                ``/hitl/<request_id>``.  Omit for legacy external-approval flows.
+            tags: Optional list of tags for inbox filtering (e.g. ``["pr-review"]``).
+            priority: Optional priority level: ``"low"``, ``"normal"``, ``"high"``,
+                or ``"urgent"``.  Defaults to ``"normal"`` on the control plane.
 
         Returns:
             ApprovalRequestResponse with ``approval_request_id`` and ``approval_request_url``.
@@ -1730,6 +1743,12 @@ class AgentFieldClient:
             body["approval_request_url"] = approval_request_url
         if callback_url:
             body["callback_url"] = callback_url
+        if form_schema is not None:
+            body["form_schema"] = form_schema
+        if tags is not None:
+            body["tags"] = tags
+        if priority is not None:
+            body["priority"] = priority
         url = f"{self.api_base}/agents/{node_id}/executions/{execution_id}/request-approval"
 
         try:
