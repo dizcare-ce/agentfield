@@ -29,6 +29,23 @@ func RegisterUIRoutes(router *gin.Engine) {
 
 	fileServer := http.FileServer(http.FS(uiFS))
 
+	// Serve the HITL portal at /hitl and /hitl/* — same embedded bundle,
+	// but React Router flips basename to "/" when pathname starts with
+	// "/hitl", so the HitlLayout is mounted instead of the dev UI.
+	hitlHandler := func(c *gin.Context) {
+		indexHTML, err := UIFiles.ReadFile("dist/index.html")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to load UI index",
+			})
+			return
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, string(indexHTML))
+	}
+	router.GET("/hitl", hitlHandler)
+	router.GET("/hitl/*any", hitlHandler)
+
 	router.GET("/ui/*filepath", func(c *gin.Context) {
 		path := c.Param("filepath")
 

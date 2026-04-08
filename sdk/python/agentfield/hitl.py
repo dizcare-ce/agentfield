@@ -103,6 +103,30 @@ class HiddenWhen:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _hidden_when_to_dict(hw: Any) -> Dict[str, Any]:
+    """Normalise a hidden_when value to a plain dict.
+
+    Accepts either a ``HiddenWhen`` instance (typed, with a ``to_dict``
+    method) or a plain ``dict`` — the latter is common because callers
+    often write ``hidden_when={"field": "decision", "equals": "approve"}``
+    inline.
+    """
+    if hw is None:
+        return {}
+    if isinstance(hw, dict):
+        return hw
+    if hasattr(hw, "to_dict"):
+        return hw.to_dict()
+    raise TypeError(
+        f"hidden_when must be a HiddenWhen or dict, got {type(hw).__name__}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Base Field
 # ---------------------------------------------------------------------------
 
@@ -187,7 +211,7 @@ class Text(Field):
         if self.pattern is not None:
             d["pattern"] = self.pattern
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -239,7 +263,7 @@ class Textarea(Field):
         if self.max_length is not None:
             d["max_length"] = self.max_length
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -291,7 +315,7 @@ class Number(Field):
         if self.step is not None:
             d["step"] = self.step
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -337,7 +361,7 @@ class Select(Field):
         if self.disabled:
             d["disabled"] = self.disabled
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -391,7 +415,7 @@ class MultiSelect(Field):
         if self.max_items is not None:
             d["max_items"] = self.max_items
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -437,7 +461,7 @@ class Radio(Field):
         if self.disabled:
             d["disabled"] = self.disabled
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -477,7 +501,7 @@ class Checkbox(Field):
         if self.disabled:
             d["disabled"] = self.disabled
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -517,7 +541,7 @@ class Switch(Field):
         if self.disabled:
             d["disabled"] = self.disabled
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -565,7 +589,7 @@ class Date(Field):
         if self.max_date is not None:
             d["max_date"] = self.max_date
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
@@ -603,7 +627,7 @@ class ButtonGroup(Field):
         if self.required:
             d["required"] = self.required
         if self.hidden_when is not None:
-            d["hidden_when"] = self.hidden_when.to_dict()
+            d["hidden_when"] = _hidden_when_to_dict(self.hidden_when)
         return d
 
 
