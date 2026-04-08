@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.14] - 2026-04-08
+
+
+### Chores
+
+- Chore(skill): bump agentfield-multi-reasoner-builder to v0.3.0
+
+The previous commit (1f0c8872) rewrote the skill content (meta-philosophy
+rewrite, async curl, post-mortem hardenings, memory surface, cross-boundary
+data rules, mandatory live smoke test) but forgot to bump the SkillVersion
+constant in catalog.go, so the binary kept reporting v0.2.0 even with the
+new embedded content.
+
+Bumps agentfield-multi-reasoner-builder Version from 0.2.0 -> 0.3.0 and
+refreshes the Description to match the rewritten skill. The version-store
+symlink logic in skillkit/install.go will now recognize the new content as
+a new version on re-install:
+
+  ~/.agentfield/skills/agentfield-multi-reasoner-builder/
+  ├── current → ./0.3.0/   (atomic swap on install)
+  ├── 0.2.0/               (previous version, kept as rollback)
+  └── 0.3.0/               (new version with rewritten content)
+
+Users with an existing install get the new content via:
+  af skill update                      # preferred — re-installs into all
+                                       # currently-installed targets at
+                                       # the binary's embedded version
+  OR
+  af skill install --all --force       # explicit full re-install
+
+Users installing fresh from the next staging release pull 0.3.0 automatically.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (6a41ddf)
+
 ## [0.1.65-rc.13] - 2026-04-08
 
 
