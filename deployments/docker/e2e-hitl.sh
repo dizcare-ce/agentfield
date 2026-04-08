@@ -1,107 +1,54 @@
 #!/usr/bin/env bash
-# End-to-end test driver for the native HITL forms demo.
-#
-# Assumes you've already started the stack in another terminal with:
-#     docker compose --profile hitl up --build
-#
-# What this script does:
-#   1. Waits for the control plane at localhost:8080 to be reachable
-#   2. Waits for the pr-review-bot agent to be registered
-#   3. Fires a reasoner execution (POST /api/v1/execute/pr-review-bot.review_pr)
-#   4. Prints the execution_id and tells you to open http://localhost:8080/hitl
-#
-# The agent will pause on `app.pause(form_schema=...)`. You respond via the
-# portal at /hitl, and the agent resumes with your submitted values — visible
-# in `docker compose logs -f hitl-example-agent`.
-
 set -euo pipefail
 
-BASE_URL="${AGENTFIELD_URL:-http://localhost:8080}"
-NODE_ID="${AGENT_NODE_ID:-pr-review-bot}"
-REASONER="${HITL_REASONER:-review_pr}"
-PR_NUMBER="${HITL_PR_NUMBER:-1138}"
-TIMEOUT_SECONDS="${HITL_TIMEOUT_SECONDS:-120}"
+CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-http://localhost:8080}"
+NODE_ID="${NODE_ID:-pr-review-bot}"
+TARGET="${TARGET:-${NODE_ID}.review_pr}"
+REQUEST_BODY='{"input": {"pr_number": 1138}}'
 
-cyan()  { printf '\033[36m%s\033[0m\n' "$*"; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-dim()   { printf '\033[2m%s\033[0m\n' "$*"; }
-
-banner() {
-  cyan "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
-  cyan "┃                                                                  ┃"
-  cyan "┃   AgentField — Native HITL forms end-to-end demo                 ┃"
-  cyan "┃                                                                  ┃"
-  cyan "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-  echo
+extract_execution_id() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.execution_id // empty'
+  else
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("execution_id",""))'
+  fi
 }
 
-wait_for() {
+wait_for_url() {
   local label="$1"
   local url="$2"
-  local deadline=$((SECONDS + TIMEOUT_SECONDS))
-  printf '  ◦ waiting for %s ... ' "$label"
-  while (( SECONDS < deadline )); do
-    if curl -sf -o /dev/null --connect-timeout 2 "$url"; then
-      green "ready"
+  for _attempt in $(seq 1 60); do
+    if curl -sf "$url" >/dev/null; then
+      printf '✓ %s is ready\n' "$label"
       return 0
     fi
     sleep 1
   done
-  red "TIMEOUT"
-  red "  → $url never became reachable within ${TIMEOUT_SECONDS}s"
-  red "  → Is 'docker compose --profile hitl up' running in another terminal?"
+
+  printf 'Timed out waiting for %s: %s\n' "$label" "$url" >&2
   exit 1
 }
 
-banner
-
-dim "Target control plane : $BASE_URL"
-dim "Target agent node    : $NODE_ID"
-dim "Reasoner             : $REASONER"
-dim "PR number (input)    : $PR_NUMBER"
+echo "AgentField HITL end-to-end launcher"
+echo "This waits for the control plane and pr-review-bot agent, then triggers the PR review workflow."
 echo
 
-# Step 1: wait for the control plane to come up.
-wait_for "control plane"    "$BASE_URL/api/v1/health"
+wait_for_url "control plane" "${CONTROL_PLANE_URL}/health"
+wait_for_url "agent node ${NODE_ID}" "${CONTROL_PLANE_URL}/api/v1/nodes/${NODE_ID}"
 
-# Step 2: wait for the agent node to register.
-# (Falls back to plain probe on the execute endpoint if the node lookup 404s.)
-wait_for "agent $NODE_ID"   "$BASE_URL/api/v1/nodes/$NODE_ID" || \
-  wait_for "agent $NODE_ID (exec probe)" "$BASE_URL/api/v1/execute/$NODE_ID.$REASONER"
-
-# Step 3: trigger the reasoner.
-cyan "→ launching workflow ..."
-response=$(curl -s -X POST \
-  -H "Content-Type: application/json" \
-  -d "{\"input\": {\"pr_number\": $PR_NUMBER}}" \
-  "$BASE_URL/api/v1/execute/$NODE_ID.$REASONER")
-
-echo "$response" | (python3 -m json.tool 2>/dev/null || cat)
+echo "Triggering workflow with:"
+echo "curl -s -X POST ${CONTROL_PLANE_URL}/api/v1/execute/${TARGET} -H \"Content-Type: application/json\" -d '${REQUEST_BODY}'"
 echo
 
-# Try to extract the execution_id (best effort — tolerate missing python).
-execution_id=""
-if command -v python3 >/dev/null 2>&1; then
-  execution_id=$(python3 -c '
-import json, sys
-try:
-    data = json.loads(sys.stdin.read())
-    print(data.get("execution_id") or data.get("run_id") or "")
-except Exception:
-    pass
-' <<<"$response" || true)
+response="$(curl -s -X POST "${CONTROL_PLANE_URL}/api/v1/execute/${TARGET}" -H "Content-Type: application/json" -d "${REQUEST_BODY}")"
+execution_id="$(printf '%s' "$response" | extract_execution_id)"
+
+if [[ -z "$execution_id" ]]; then
+  echo "Failed to extract execution_id from response:" >&2
+  printf '%s\n' "$response" >&2
+  exit 1
 fi
 
-green "✓ workflow launched"
-if [[ -n "$execution_id" ]]; then
-  dim "  execution_id=$execution_id"
-fi
-echo
-cyan "Next:"
-echo "  → Open $BASE_URL/hitl in your browser"
-echo "  → You should see one inbox item: \"Review PR #$PR_NUMBER\""
-echo "  → Click it, pick a decision button (Approve / Request changes / Reject)"
-echo "  → The agent will resume and print the decision in its logs:"
-dim  "      docker compose logs -f hitl-example-agent"
-echo
+printf '✓ Workflow launched. execution_id=%s\n\n' "$execution_id"
+echo "→ Open ${CONTROL_PLANE_URL}/hitl in your browser to respond to the form."
+echo "→ Or watch the agent logs: docker compose logs -f hitl-example-agent"
