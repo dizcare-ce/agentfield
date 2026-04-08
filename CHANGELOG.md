@@ -6,6 +6,533 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.12] - 2026-04-08
+
+
+### Other
+
+- Chore/UI audit phase1 quick wins (#350)
+
+* feat(web): notification center with bell popover and persistent log
+
+Replaces the toast-only notification system with a dual-mode center:
+
+- Persistent in-session log backing the new NotificationBell (sidebar
+  header, next to ModeToggle). Shows an unread count Badge and opens a
+  shadcn Popover with the full notification history, mark-read,
+  mark-all-read, and clear-all controls.
+- Transient bottom-right toasts continue to fire for live feedback and
+  auto-dismiss on their existing schedule; dismissing a toast no longer
+  removes it from the log.
+- <NotificationProvider> mounted globally in App.tsx so any page can
+  surface notifications without local wiring.
+- Cleaned up NotificationToastItem styling to use theme-consistent
+  tokens (left accent border per type, shadcn Card/Button) instead of
+  hardcoded tailwind color classes.
+- Existing useSuccess/Error/Info/WarningNotification hook signatures
+  preserved — no downstream caller changes required.
+
+* feat(web): unified status primitives, semantic notifications, consistent liveness
+
+Cross-cutting UX pass addressing multiple issues from rapid review:
+
+Backend
+- Expose RootExecutionStatus in WorkflowRunSummary so the UI can reflect
+  what the user actually controls (the root execution) instead of the
+  children-aggregated status, which lies in the presence of in-flight
+  stragglers after a pause or cancel.
+- Add paused_count to the run summary SQL aggregation and root_status
+  column so both ListWorkflowRuns and getRunAggregation populate it.
+- Normalise root status via types.NormalizeExecutionStatus on the way
+  out so downstream consumers see canonical values.
+
+Unified status primitives (web)
+- Extend StatusTheme in utils/status.ts with `icon: LucideIcon` and
+  `motion: "none" | "live"`. Single source of truth for glyph and motion
+  per canonical status.
+- Rebuild components/ui/status-pill.tsx into three shared primitives —
+  StatusDot, StatusIcon, StatusPill — each deriving colour/glyph/motion
+  from getStatusTheme(). Running statuses get a pinging halo on dots
+  and a slow (2.5s) spin on icons.
+- Replace inline StatusDot implementations in RunsPage and RunTrace
+  with the shared primitive. Badge "running" variant auto-spins its
+  icon via the same theme.
+
+Runs table liveness
+- RunsPage kebab + StatusDot + DurationCell + bulk bar eligibility all
+  key on `root_execution_status ?? status`. Paused/cancelled rows stop
+  ticking immediately even when aggregate stays running.
+- Adaptive tick intervals: 1s under 1m, 5s under 5m, 30s under 1h,
+  frozen past 1h. Duration format drops seconds after 5 min. Motion
+  is proportional to information; no more 19m runs counting seconds.
+
+Run detail page
+- Lifecycle cluster (Pause/Resume/Cancel) uses root execution status
+  from the DAG timeline instead of the aggregated workflow status.
+- Status badge at the top reflects the root status.
+- "Cancellation registered" info strip also recognises paused-with-
+  running-children and adjusts copy.
+- RunTrace receives rootStatus; child rows whose own status is still
+  running but whose root is terminal render desaturated with motion
+  suppressed — honest depiction of abandoned stragglers.
+
+Dashboard
+- partitionDashboardRuns active/terminal split now uses
+  root_execution_status so a timed-out run with stale children no
+  longer appears in "Active runs".
+- All RunStatusBadge call sites pass the effective status.
+
+Notification center — compact tree, semantic icons
+- Add NotificationEventKind (pause/resume/cancel/error/complete/start/
+  info) driving a dedicated icon + accent map. Pause uses PauseCircle
+  amber, Resume PlayCircle emerald, Cancel Ban muted, Error
+  AlertTriangle destructive. No more universal green checkmark.
+- Sonner toasts now pass a custom icon element so the glyph matches
+  the bell popover; richColors removed for a quiet neutral card with
+  only a thin type-tinted left border.
+- Bell popover redesigned as a collapsed-by-default run tree: each run
+  group shows one header line + one latest-event summary (~44px);
+  expand via chevron to see the full timeline with a connector line
+  on the left. Event rows are single-line with hover tooltip for the
+  full message, hover-reveal dismiss ×, and compact timestamps
+  ("now", "2m", "3h").
+- useRunNotification accepts an eventKind parameter; RunsPage and
+  RunDetailPage handlers pass explicit kinds.
+- Replace Radix ScrollArea inside the popover with a plain overflow
+  div — Radix was eating wheel events.
+- Fix "View run" navigation: Link uses `to={`/runs/${runId}`}`
+  directly (no href string manipulation) so basename=/ui prepends
+  properly. Sonner toast action builds the URL from VITE_BASE_PATH.
+
+Top bar + layout
+- Move NotificationBell from the sidebar header to the main content
+  top bar, next to the ⌘K hint. Sidebar header is back to just logo
+  + ModeToggle.
+- Constrain SidebarProvider to h-svh overflow-hidden so the inner
+  content div is the scroll container — top header stays pinned at
+  the viewport top without needing a sticky hack.
+- NotificationProvider reflects unreadCount in the browser tab title
+  as "(N) …" so notifications surface in the Chrome tab when the
+  window is unfocused.
+
+Dependencies
+- Add sonner ^2.0.7 for standard shadcn toasts.
+
+* fix(a11y): remove useFocusManagement, restore WCAG 2.4.7 focus indicator
+
+useFocusManagement ran on every route change and explicitly blurred the
+currently focused element "to prevent blue outline" — which is precisely
+the WCAG 2.4.7 Focus Visible indicator. It also moved focus to
+document.body (non-focusable) on initial load and popstate, killing
+route-change announcements for screen readers.
+
+Deleting the hook and its call site in App.tsx restores:
+- Keyboard focus continuity across navigation.
+- Screen reader route-change announcements via Radix/link focus.
+- AlertDialog focus restoration (it was being yanked away 100ms after
+  dialog close).
+
+No replacement scroll behavior added — browser default scroll restoration
+on SPA navigation is fine.
+
+Refs: UI audit C1 (CRITICAL).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* feat(a11y): add skip-to-main-content link to app shell
+
+Adds a WCAG 2.4.1 "Bypass Blocks" skip link as the first child of
+SidebarInset. The anchor is visually hidden until focused (Tab from
+the URL bar), then appears in the top-left corner and jumps focus to
+#main-content when activated.
+
+Previously a keyboard user had to Tab through ~14 sidebar + header
+items on every navigation before reaching page content. This fix
+makes that a single Tab + Enter.
+
+Used an inline <a> rather than importing SkipLink from
+AccessibilityEnhancements.tsx because that file is dead code
+(unreachable from App.tsx) and will be deleted in a later pass.
+
+Refs: UI audit C2 (CRITICAL).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(ui): honest CommandPalette copy and unify run terminology
+
+Two changes in CommandPalette.tsx:
+
+1. Placeholder was "Search pages, runs, agents..." but the component
+   only navigates to 10 hardcoded items — it has no search over runs
+   or agents. Changed to "Jump to page..." to match reality. A real
+   async search over runs/agents/reasoners is deferred to a later pass.
+
+2. Action label drift: "Show failed runs" and "Show running executions"
+   coexisted in the same file, both navigating to /runs?status=*. The
+   product has committed to "runs" as the canonical noun (/executions
+   redirects to /runs in App.tsx). Changed "Show running executions"
+   to "Show active runs".
+
+Refs: UI audit C3 (CRITICAL).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* fix(ui): remove dead breadcrumb entries for legacy routes
+
+The routeNames map in AppLayout.tsx kept entries for /nodes,
+/reasoners, /executions, and /workflows — all of which are legacy
+paths that App.tsx redirects to canonical routes (/agents, /runs).
+Because routeNames still contained them and longestSectionPath()
+picks the longest matching prefix, visiting /executions/xyz (e.g.
+from an old bookmark) would briefly render "Executions > Xyz" in
+the breadcrumb for ~100ms before the Navigate redirect fired.
+
+Stale vocabulary flashing into the UI on every legacy link is a
+wayfinding bug. Delete the four dead keys; the redirects in App.tsx
+still handle the URLs.
+
+Refs: UI audit H3 (HIGH).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+* refactor(ui): delete orphan EnhancedDashboardPage and /dashboard/legacy route
+
+* feat(nav): promote Playground to sidebar position 2
+
+Developer persona is priority 1 — Playground should sit directly under
+Dashboard, above operator-centric items like Runs and Agent nodes.
+Addresses audit finding H1.
+
+* fix(a11y): drop fake link semantics from RunsPage rows
+
+Rows are interactive containers, not links — they have no href and navigate
+via onClick. Removing role="link" prevents screen readers from announcing
+them as links. tabIndex=0 is preserved so keyboard users can still focus
+rows and activate via Enter/Space. Addresses audit finding M8.
+
+* fix(a11y): bump RunLifecycleMenu kebab hit target to size-9
+
+size-7 (28px) was below the 36×36 minimum. size-9 brings it to 36×36,
+matching other icon buttons in the app. Placeholder span is updated to
+match so column alignment is preserved. Addresses audit finding M11.
+
+* feat(tokens): add base transitionDuration token (200ms)
+
+Animation durations currently drift between 150ms / 200ms / 300ms across
+components. Exposing a 'base' token lets callers write duration-base
+instead of picking a number from the air. Addresses audit finding M14.
+
+* perf(fonts): drop unused Inter weight 300
+
+Weight 300 is not referenced anywhere — this drops one font file from the
+critical path. Full self-hosting via @fontsource/inter is tracked
+separately. Addresses part of audit finding M19.
+
+* fix(ui): remove ErrorBoundary auto-reset timer
+
+The 30s auto-reset masked real bugs (error appears, disappears, user
+can't reproduce) and created flaky retry loops in tests. The manual
+"Try again" button still works. Addresses audit finding H13.
+
+* fix(ui): replace native confirm() with AlertDialog in Settings
+
+Three webhook/DLQ actions (remove webhook, redrive DLQ, clear DLQ) were
+gated by native window.confirm() — unstyled, undismissable in tests, and
+inconsistent with the rest of the app. They now use shadcn AlertDialog
+with module-level copy constants (REMOVE_WEBHOOK_COPY, REDRIVE_DLQ_COPY,
+CLEAR_DLQ_COPY) so the strings are colocated and easy to edit.
+
+Dialogs close in the handler's finally block so success and failure
+paths both clean up correctly. The existing deleting/redriving/clearingDlq
+pending flags disable the Cancel/Action buttons while work is in flight.
+
+Addresses audit finding H7.
+
+* refactor(ui): delete dead StatusBadge + collapse Badge parallel maps
+
+Two related cleanups from the re-audit of audit finding H10:
+
+1. Delete components/status/StatusBadge.tsx entirely. The file exported
+   four components (StatusBadge, AgentStateBadge, HealthStatusBadge,
+   LifecycleStatusBadge) and two helpers (getHealthScoreColor,
+   getHealthScoreBadgeVariant). Zero production consumers — only the
+   file's own test imported any of them. A name collision with the
+   'real' StatusBadge in components/ui/badge.tsx (different API entirely)
+   hid the fact that this file was dead for some time. ~325 LOC of source
+   plus ~200 LOC of tests removed.
+
+2. Collapse statusIcons / toneByVariant / variantToCanonical in
+   components/ui/badge.tsx into a single STATUS_VARIANT_META record at
+   module scope. The three per-render maps are now one lookup, and the
+   map is hoisted out of the Badge function body (one less allocation
+   per render). Rendered output is unchanged for every status variant.
+
+* refactor(a11y): delete ceremonial AccessibilityEnhancements
+
+components/AccessibilityEnhancements.tsx (376 lines, 10 exports) was
+mostly dead and entirely ceremonial. Six exports had zero consumers.
+The four imported by NodeDetailPage.tsx were all no-ops:
+
+- MCPAccessibilityProvider is NOT a context provider — it's a <div>
+  wrapping three SkipLinks, two of which pointed to anchors
+  (#mcp-servers, #mcp-tools) that don't exist anywhere in the codebase.
+  The third (#main-content) duplicates the global skip link added in
+  commit 0ec3d3fc.
+- ErrorAnnouncer rendered an assertive sr-only live region alongside
+  a Radix <Alert> that already carries role='alert' by default.
+- StatusAnnouncer announced a hard-coded 'Loading node details' string
+  once. Replaced with the idiomatic aria-busy='true' treatment.
+- useAccessibility's return value was destructured as _announceStatus
+  (intentionally unused per project convention).
+
+NodeDetailPage.tsx now drops the import block, unwraps the three
+<MCPAccessibilityProvider> wraps, deletes the announcer elements, and
+relies on the global skip link from AppLayout plus Radix Alert's
+built-in role. Net deletion: ~380 lines, zero a11y regression.
+
+* refactor(ui): unify lifecycle status theming via getLifecycleTheme
+
+Agent lifecycle status (ready/starting/running/degraded/stopped/offline/
+error/unknown) had three competing representations: AgentsPage's local
+bg-green-400 switch statements, StatusBadge.LIFECYCLE_CONFIG (now gone
+with the dead StatusBadge file), and node-status.ts's lossy mapping into
+execution CanonicalStatus (degraded→pending, offline→failed — silently
+wrong).
+
+Introduces utils/lifecycle-status.ts as the single source of truth:
+
+- LifecycleTheme interface shaped as a superset of StatusTheme fields
+  (indicatorClass, textClass, iconClass, pillClass, borderClass, bgClass,
+  dotClass, icon, badgeVariant, motion, label) plus lifecycle-specific
+  'online: boolean' and 'status: LifecycleStatus'. Field-name
+  compatibility with StatusTheme means node-status.ts consumers need
+  zero edits.
+- LIFECYCLE_THEME record pulling all colors from statusTone in lib/theme
+  (no raw Tailwind palette). Semantic token map: ready/running → success,
+  starting → info+pulse, degraded → warning+pulse, stopped → neutral
+  (intentional fix — a deliberately stopped node is not an error),
+  error/offline → error, unknown → neutral.
+- normalizeLifecycleStatus handles trim/lowercase + aliases (up→ready,
+  down→offline, unhealthy→degraded).
+- getLifecycleTheme / getLifecycleLabel / isLifecycleOnline public API.
+
+Adds LifecycleDot / LifecycleIcon / LifecyclePill primitives to
+components/ui/status-pill.tsx, parallel to StatusDot/Icon/Pill. Implements
+motion === 'pulse' for starting/degraded (motion-safe:animate-pulse) and
+motion === 'live' halo ping for running.
+
+Rewrites utils/node-status.ts getNodeStatusPresentation to delegate
+directly to getLifecycleTheme. Drops the lossy canonical mapping.
+summarizeNodeStatuses now buckets via theme.online and LifecycleStatus
+directly. Return shape { kind, label, theme, shouldPulse, online } —
+consumers (NodeCard, NodesVirtualList, NodesStatusSummary, NodeCard,
+NodeDetailPage, EnhancedNodesHeader, EnhancedNodeDetailHeader) need no
+changes because field names match StatusTheme.
+
+Refactors pages/AgentsPage.tsx: deletes getStatusDotColor,
+getStatusTextColor, and the local isAgentLifecycleOnline helper.
+Replaces inline dot+label markup with <LifecycleDot status={...} />.
+Both filter call sites switch to isLifecycleOnline from
+@/utils/lifecycle-status.
+
+Intentional behavior changes (flagged for QA):
+- 'stopped' lifecycle is now neutral (muted), not red — stopped is not
+  an error state.
+- 'running' is consistently success-green across the app; previously
+  some surfaces rendered it blue (info) via LIFECYCLE_CONFIG.
+
+Adds utils/lifecycle-status.test.ts covering normalization (every enum,
+null/undefined/empty, trim/lowercase, aliases, unknown fallback), theme
+lookup, and isLifecycleOnline buckets.
+
+* perf(fonts): self-host Inter via @fontsource/inter
+
+Drops the runtime Google Fonts dependency entirely. Previously every
+page load hit fonts.googleapis.com + fonts.gstatic.com to fetch Inter
+weights 400/500/600/700 — blocking render on third-party DNS + TLS
+and leaking a request to Google on every session.
+
+@fontsource/inter bundles the same weights with the app and Vite serves
+them from the same origin. The weight-specific CSS imports in main.tsx
+let Vite tree-shake unused weights. Addresses audit finding M19.
+
+* feat(nav): split sidebar into Build / Govern groups
+
+Sidebar navigation now renders two labeled groups:
+
+Build:
+- Dashboard
+- Playground
+- Runs
+- Agent nodes
+
+Govern:
+- Access management
+- Provenance  (renamed from 'Audit')
+- Settings
+
+Auditor/governance features are now visible in the nav as first-class
+entries instead of being buried in Settings or shown as a single 'Audit'
+catch-all. The distribution-by-design replaces the previous
+distribution-by-accident (DID/VC tucked in Settings, provenance export
+hidden in a run kebab, etc.).
+
+'Audit' → 'Provenance' — more honest about what the page does.
+
+Addresses Round 2 audit finding A#4.
+
+* refactor(ui): tighten Table primitive to Linear/Datadog density
+
+Shadcn's default TableHead/TableCell ship with h-12 p-4 (Stripe-roomy,
+~52px row). The product target is Linear/Datadog tight (~30px row, ~35
+rows visible at 1440x900). RunsPage was hand-overriding every cell with
+'px-3 py-1.5' to achieve this — ~30 redundant overrides scattered
+through the file.
+
+Fix the primitive once:
+- TableHead: h-9 px-3
+- TableCell: px-3 py-1.5
+
+Drop the redundant overrides in RunsPage. Other consumers
+(PlaygroundPage, VerifyProvenancePage, ReasonersSkillsTable,
+ExecutionHistoryList, AgentNodesTable) will inherit the tighter density
+automatically, which is what we want. NewDashboardPage and ComparisonPage
+already use explicit per-cell spacing and are unaffected.
+
+Addresses Round 2 audit finding B#1.
+
+* refactor(hooks): make useRuns and useAgents opt-in pollers
+
+The live-data motion budget contract says: only the builder dashboard
+ticks live; all other pages are query-on-demand. But both useRuns and
+useAgents defaulted to auto-polling, which meant /runs and /agents
+silently refreshed every few seconds — contradicting the contract and
+adding motion cost everywhere.
+
+Both hooks now default to refetchInterval: false. Callers that want
+polling pass an explicit interval. NewDashboardPage.tsx passes
+{ refetchInterval: 10_000 } to useAgents (it already passed 8_000 to
+useRuns). RunsPage and AgentsPage now inherit the no-poll default and
+will get explicit Refresh buttons in a follow-up.
+
+Addresses Round 2 audit finding C#3.
+
+* refactor(ui): delete dead searchService, label CommandPalette honestly
+
+services/searchService.ts was orphan dead code: three searchX methods
+that returned [] literally, imported by zero live files, with one branch
+pointing to a deleted /nodes/:id route. Delete it.
+
+CommandPalette.tsx is a navigation jumper, not a search — Round 1
+already fixed the placeholder copy. Add a one-line comment at the top
+of the component clarifying this for future readers.
+
+Addresses Round 2 audit finding A#3.
+
+* fix(ui): unify page-title weight and drop duplicate NotificationProvider
+
+AccessManagementPage and NewSettingsPage used 'text-2xl font-bold' for
+their page titles, drifting from the 'text-2xl font-semibold
+tracking-tight' pattern that 7 of 10 live pages already converge on.
+Unify.
+
+AccessManagementPage also wrapped its content in its own
+NotificationProvider, creating a second Sonner toast root under the
+app-level provider. Drop the wrapper — the app-root provider is
+sufficient. Addresses the 'duplicate NotificationProvider' finding
+from Round 2 Lens C.
+
+Addresses Round 2 findings B#5 and C#2.
+
+* fix(a11y): wire Playground input label, autofocus, and Cmd+Enter
+
+The Playground textarea had no accessible label, did not autofocus on
+mount, and had no keyboard shortcut to execute.
+
+- Add <label htmlFor='playground-input'> bound to the textarea id.
+- autoFocus the textarea on page mount so builders can start typing
+  immediately after navigation.
+- Wire Cmd/Ctrl+Enter onKeyDown to handleExecute (gated on
+  !executing && selectedId so it matches the button's disabled state).
+- Add aria-describedby / aria-invalid on the textarea and an id on the
+  inline error paragraph so screen readers announce the error correctly.
+
+Playground is the builder persona's primary canvas. These should have
+shipped on day one.
+
+Addresses Round 2 audit finding C#5.
+
+* refactor(ui): delete dead Workflow/Execution/Node/Reasoner cluster (46 files)
+
+Round 1 identified ~120 dead files; Round 2 re-traced the static-import
+closure and found the 'Workflow + Execution + Node + Reasoner' universe
+is a self-referential dead island. All its routes redirect via
+<Navigate> in App.tsx; none are reachable from the live page tree.
+
+Deleted (46 files):
+
+Pages (unreachable — routes redirect):
+- WorkflowsPage / WorkflowDetailPage / EnhancedWorkflowDetailPage
+- ExecutionsPage / ExecutionDetailPage / EnhancedExecutionDetailPage
+- RedesignedExecutionDetailPage
+- NodesPage / NodeDetailPage
+- AllReasonersPage / ReasonerDetailPage
+- ObservabilityWebhookSettingsPage
+
+Components (zero live importers):
+- NodeCard + its test, NodesVirtualList, NodesStatusSummary, NodesList
+- AgentNodesTable, ReasonersList, ReasonersSkillsTable, SkillsList
+- WorkflowsTable, CompactWorkflowsTable, CompactWorkflowSummary
+- EnhancedExecutionsTable, CompactExecutionsTable
+- ServerlessRegistrationModal, DensityToggle
+- ExecutionCard, ExecutionStatsCard, ExecutionViewTabs
+- Navigation.tsx, Navigation/SidebarNew, Navigation/TopNavigation
+- HealthBadge, LoadingSkeleton
+
+components/workflow/Enhanced* cluster + its barrel index.ts
+(WorkflowTimeline.tsx and TimelineNodeCard.tsx preserved — live).
+
+Note: NodeDetailPage was modified in commit ef9aecf5 (Phase 2 a11y
+cleanup), but that commit was against a file whose route has been
+redirected for a while. Deleting it now closes that loop.
+
+tsc --noEmit clean after deletion. No live file had a dead import.
+
+Addresses Round 2 audit finding D#5.
+
+* refactor(ui): detoxify notification + ErrorState + STATUS_HEX
+
+Three related cleanups removing raw Tailwind palette classes and
+hardcoded hex literals that bypass the semantic-token system:
+
+1. components/ui/notification.tsx
+   Variant definitions previously shipped raw red/amber/blue/emerald/sky
+   classes with explicit dark: branches inside their CVA table, leaking
+   into every consumer (every toast, alert, banner across the app).
+   Now routed through statusTone.{error,warning,info,success,neutral}
+   from lib/theme.ts. Each semantic token already handles its own
+   dark-mode variant via CSS vars, so the dark: overrides disappear.
+
+2. components/ui/ErrorState.tsx
+   Same pattern — raw red-500 / red-200 / red-900 replaced with
+   statusTone.error.{bg,fg,border,accent}. Icon color routes through
+   statusTone.error.accent instead of text-red-500.
+
+3. utils/status.ts STATUS_HEX
+   Previously a 20-entry Record<CanonicalStatus, {base, light}> with
+   hardcoded hex values (#22c55e, #ef4444, etc.) and no dark-mode
+   variant. Replaced with a runtime helper that reads the --status-*
+   CSS custom properties from document.documentElement at call time,
+   returning hsl() strings that correctly track the active theme.
+   Also exposes getStatusGlowColor() for the color-mix transparent
+   variant that formerly used STATUS_HEX[s].light.
+
+Addresses Round 2 audit findings B#2 and B#3.
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (e81b948)
+
 ## [0.1.65-rc.11] - 2026-04-08
 
 
