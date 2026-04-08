@@ -27,7 +27,7 @@ def h() -> dict:
 
 
 def ok(resp: requests.Response, label: str) -> dict:
-    if resp.status_code in (200, 201, 409):
+    if resp.status_code in (200, 201, 202, 409):
         data = resp.json() if resp.content else {}
         print(f"  [OK]  {label}  ({resp.status_code})")
         return data
@@ -78,10 +78,10 @@ def register_agents():
 def trigger_workflows():
     print("\n=== Triggering test workflows ===")
 
-    # workflow-short: fast_work on agent-alpha
+    # workflow-short: fast_work on agent-alpha (async submit, completes quickly)
     print("\n  [workflow-short] → agent-alpha.fast_work")
     resp = requests.post(
-        f"{BASE}/api/v1/execute/agent-alpha.fast_work",
+        f"{BASE}/api/v1/execute/async/agent-alpha.fast_work",
         json={"steps": 3},
         headers=h(),
         timeout=10,
@@ -90,7 +90,7 @@ def trigger_workflows():
     wf_short = short.get("workflow_id") or short.get("execution_id", "N/A")
     print(f"    workflow_id: {wf_short}")
 
-    # workflow-long: slow_work on agent-alpha (async, don't wait)
+    # workflow-long: slow_work on agent-alpha (async, runs for 70 s)
     print("\n  [workflow-long] → agent-alpha.slow_work (70 s, submitted async)")
     resp = requests.post(
         f"{BASE}/api/v1/execute/async/agent-alpha.slow_work",
@@ -103,36 +103,19 @@ def trigger_workflows():
     print(f"    workflow_id: {wf_long}")
     print(f"    This workflow is RUNNING. Watch at: {BASE}/ui/workflows")
 
-    # workflow-fail step 1: agent-alpha.step_one
-    print("\n  [workflow-fail] step 1 → agent-alpha.step_one")
+    # workflow-fail: step_fail on agent-gamma (deterministically errors)
+    # Use a separate agent so agent-alpha's thread pool is not a factor.
+    print("\n  [workflow-fail] → agent-gamma.step_fail  (expect error)")
     resp = requests.post(
-        f"{BASE}/api/v1/execute/agent-alpha.step_one",
-        json={"payload": "workflow-fail-start"},
+        f"{BASE}/api/v1/execute/async/agent-gamma.step_fail",
+        json={"payload": "trigger-from-seed"},
         headers=h(),
         timeout=10,
     )
-    s1 = ok(resp, "workflow-fail step-1")
-    wf_fail_s1 = s1.get("workflow_id") or s1.get("execution_id", "N/A")
-    print(f"    workflow_id: {wf_fail_s1}")
-
-    # workflow-fail step 2: agent-gamma.step_fail  (will error)
-    print("\n  [workflow-fail] step 2 → agent-gamma.step_fail  (expect error)")
-    resp = requests.post(
-        f"{BASE}/api/v1/execute/agent-gamma.step_fail",
-        json={"payload": "trigger-from-seed"},
-        headers=h(),
-        timeout=15,
-    )
-    wf_fail_s2_id = "N/A"
-    if resp.status_code in (200, 201):
-        data = resp.json()
-        wf_fail_s2_id = data.get("workflow_id") or data.get("execution_id", "N/A")
-        status = data.get("status", "unknown")
-        print(f"    workflow_id: {wf_fail_s2_id}  status={status}")
-        if status not in ("failed", "error"):
-            print("    WARNING: expected a failed status but got:", status)
-    else:
-        print(f"    [ERR] HTTP {resp.status_code} — {resp.text[:200]}")
+    wf_fail = ok(resp, "workflow-fail submit")
+    wf_fail_s2_id = wf_fail.get("workflow_id") or wf_fail.get("execution_id", "N/A")
+    wf_fail_s1 = wf_fail_s2_id  # single execution for summary
+    print(f"    workflow_id: {wf_fail_s2_id}  (will land as FAILED in the UI)")
 
     return {
         "wf_short": wf_short,

@@ -40,8 +40,8 @@ echo ""
 echo "[2/3] Starting test agents..."
 bash "$DIR/scripts/start_agents.sh" bg
 
-echo "  Waiting 3 s for agents to register..."
-sleep 3
+echo "  Waiting 5 s for agents to register..."
+sleep 5
 
 # ── 3. Seed workflows ─────────────────────────────────────────────────────────
 echo ""

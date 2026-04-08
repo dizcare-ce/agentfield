@@ -1,6 +1,8 @@
 Manual Test Cases — PR #330: UI Revamp + Live Updates + Observability
 Test Data & Setup Required
 
+Excel Template
+
 Environment:
 - Control plane running locally: http://localhost:8080
 - At least 2 registered agents (one healthy, one offline/errored)
@@ -115,7 +117,7 @@ Priority: Medium
 TC-007
 Feature Area: UI
 Title: Settings page renders and saves a configuration change
-Preconditions: User logged in with admin role
+Preconditions: User logged in
 Test Steps:
 
 Navigate to /ui/settings
@@ -1606,4 +1608,72 @@ EMBEDDED WEB UI BUILD
 [ ] `go run ./cmd/af dev` serves UI correctly
 [ ] UI works when served from embedded binary (not just Vite dev server)
 Total test cases: 50
+
+---
+
+SECTION 8 — Observations & Suggestions
+
+OBS-001
+Type: Observation / Documentation Gap
+Feature Area: Documentation / LLM Health
+
+Title: LLM health badge shows "Unknown" with no discoverable path to configure it
+
+Description:
+The health strip in the top-right of the UI displays an "LLM Unknown" badge whenever
+LLM health monitoring is not configured. There is no tooltip, inline help text, or link
+that explains what this badge means or how to resolve it. A first-time user has no way to
+discover that the feature requires explicit configuration.
+
+Where the configuration IS documented:
+
+- `examples/e2e_resilience_tests/README.md` — Configuration reference table (buried in test suite)
+- `CHANGELOG.md` — Single-line feature mention only
+
+Where it is NOT documented (gaps):
+
+- `docs/DEVELOPMENT.md` — no mention
+- `docs/ARCHITECTURE.md` — no mention
+- `control-plane/README.md` — no mention
+- `CLAUDE.md` — no mention
+- `.env.example` — env vars not listed
+
+Suggested Fix:
+
+Add an "LLM Health Monitoring" section to `docs/DEVELOPMENT.md` (or `control-plane/README.md`) explaining:
+
+1. What the badge means (health check polling against a configured LLM proxy endpoint)
+2. How to enable and configure it via env vars or config YAML:
+
+```sh
+# Via environment variables (single endpoint)
+AGENTFIELD_LLM_HEALTH_ENABLED=true
+AGENTFIELD_LLM_HEALTH_ENDPOINT=http://localhost:4000/health
+AGENTFIELD_LLM_HEALTH_ENDPOINT_NAME=litellm
+AGENTFIELD_LLM_HEALTH_CHECK_INTERVAL=15s
+AGENTFIELD_LLM_HEALTH_FAILURE_THRESHOLD=3
+AGENTFIELD_LLM_HEALTH_RECOVERY_TIMEOUT=30s
+```
+
+```yaml
+# Or via config/agentfield.yaml (supports multiple endpoints)
+llm_health:
+  enabled: true
+  check_interval: 15s
+  check_timeout: 5s
+  failure_threshold: 3
+  recovery_timeout: 30s
+  endpoints:
+    - name: "litellm"
+      url: "http://localhost:4000/health"
+      method: GET
+```
+
+- What URL to use — it only needs to return a non-5xx HTTP response to be considered healthy.
+- Reference to the circuit breaker states: closed (healthy), open (degraded), half-open (recovering).
+
+Optionally: add a tooltip or "?" icon on the LLM badge in the UI that links to documentation.
+
+Priority: Medium
+Severity: Usability gap — not a defect, but causes confusion for new operators
 Distribution: UI/UX (10) · Live Updates (9) · Logs/Observability (8) · API (7) · Edge Cases (6) · Security (6) · Performance (4)
