@@ -67,6 +67,28 @@ services:
     depends_on:
       - control-plane
 
+  hitl-example-agent:
+    profiles: ["hitl"]
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.hitl-example
+    environment:
+      AGENTFIELD_URL: http://control-plane:8080
+      AGENTFIELD_SERVER: http://control-plane:8080
+      AGENT_NODE_ID: pr-review-bot
+      PORT: "8001"
+      AGENT_CALLBACK_URL: http://hitl-example-agent:8001
+      # Uncomment (or pass via `OPENAI_API_KEY=... docker compose ...`) to
+      # enable the real AI risk summary. With no key set, the example falls
+      # back to a hardcoded summary so the demo works out of the box.
+      # OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    ports:
+      - "8003:8001"
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_started
+
 volumes:
   pgdata:
   agentfield-data:
