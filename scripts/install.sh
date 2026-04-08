@@ -16,6 +16,13 @@ SKIP_PATH_CONFIG="${SKIP_PATH_CONFIG:-0}"
 # Can be set via --staging flag or STAGING=1 environment variable
 STAGING="${STAGING:-0}"
 
+# Skill install mode (interactive | all | all-targets | none)
+# Defaults to "interactive" — runs `af skill install` with the picker after
+# the binary lands so first-time users get the skill into Claude Code / Codex
+# / etc. without a second step. Override with --no-skill / --all-skills /
+# --all-skill-targets, or via SKILL_MODE env var.
+SKILL_MODE="${SKILL_MODE:-interactive}"
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,24 +49,44 @@ parse_args() {
         VERBOSE=1
         shift
         ;;
+      --no-skill)
+        SKILL_MODE="none"
+        shift
+        ;;
+      --all-skills)
+        SKILL_MODE="all"
+        shift
+        ;;
+      --all-skill-targets)
+        SKILL_MODE="all-targets"
+        shift
+        ;;
       --help|-h)
         echo "AgentField CLI Installer"
         echo ""
         echo "Usage:"
         echo "  curl -fsSL https://agentfield.ai/install.sh | bash"
         echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --staging"
+        echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --all-skills"
         echo ""
         echo "Options:"
-        echo "  --staging    Install latest prerelease/staging version"
-        echo "  --verbose    Enable verbose output"
-        echo "  --help       Show this help message"
+        echo "  --staging              Install latest prerelease/staging version"
+        echo "  --verbose              Enable verbose output"
+        echo "  --no-skill             Skip the agentfield-multi-reasoner-builder"
+        echo "                         skill install step"
+        echo "  --all-skills           Install the skill into every detected"
+        echo "                         coding agent (no interactive prompt)"
+        echo "  --all-skill-targets    Install the skill into every registered"
+        echo "                         coding agent target, even if not detected"
+        echo "  --help                 Show this help message"
         echo ""
         echo "Environment variables:"
-        echo "  VERSION              Specific version to install (e.g., v0.1.19)"
-        echo "  STAGING=1            Same as --staging flag"
-        echo "  VERBOSE=1            Same as --verbose flag"
-        echo "  SKIP_PATH_CONFIG=1   Skip PATH configuration"
+        echo "  VERSION                 Specific version to install (e.g., v0.1.19)"
+        echo "  STAGING=1               Same as --staging flag"
+        echo "  VERBOSE=1               Same as --verbose flag"
+        echo "  SKIP_PATH_CONFIG=1      Skip PATH configuration"
         echo "  AGENTFIELD_INSTALL_DIR  Custom install directory"
+        echo "  SKILL_MODE              interactive (default) | all | all-targets | none"
         exit 0
         ;;
       *)
@@ -482,6 +509,44 @@ verify_installation() {
   fi
 }
 
+# Install the agentfield-multi-reasoner-builder skill into coding-agent
+# integrations (Claude Code, Codex, Gemini, OpenCode, Aider, Windsurf, Cursor).
+# Delegated to the freshly-installed `af` binary so the install logic stays
+# in one place. Honors $SKILL_MODE: interactive | all | all-targets | none.
+install_skill() {
+  local install_dir="$1"
+  local af_bin="$install_dir/agentfield"
+
+  if [[ ! -x "$af_bin" ]]; then
+    print_warning "af binary not executable, skipping skill install"
+    return 0
+  fi
+
+  case "$SKILL_MODE" in
+    none|skip)
+      printf "\n"
+      print_info "Skipping skill install (SKILL_MODE=none)"
+      printf "       ${DIM}Run later: ${CYAN}af skill install${NC}\n" 2>/dev/null || \
+      printf "       Run later: af skill install\n"
+      return 0
+      ;;
+    all)
+      printf "\n"
+      print_info "Installing skill into all detected coding agents..."
+      "$af_bin" skill install --all || print_warning "Skill install reported errors"
+      ;;
+    all-targets)
+      printf "\n"
+      print_info "Installing skill into all registered coding agents (even undetected)..."
+      "$af_bin" skill install --all-targets || print_warning "Skill install reported errors"
+      ;;
+    interactive|*)
+      printf "\n"
+      "$af_bin" skill install || print_warning "Skill install reported errors"
+      ;;
+  esac
+}
+
 # Print success message
 print_success_message() {
   printf "\n"
@@ -621,6 +686,11 @@ main() {
 
   # Verify installation
   verify_installation "$INSTALL_DIR"
+
+  # Install the agentfield-multi-reasoner-builder skill into coding agents.
+  # Default mode is interactive — runs `af skill install` with the picker.
+  # Override via --no-skill / --all-skills / --all-skill-targets or SKILL_MODE.
+  install_skill "$INSTALL_DIR"
 
   # Print success message
   print_success_message
