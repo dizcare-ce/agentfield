@@ -93,94 +93,24 @@ import { SortableHeaderCell } from "@/components/ui/CompactTable";
 import { getExecutionDetails } from "@/services/executionsApi";
 import {
   JsonHighlightedPre,
-  formatTruncatedFormattedJson,
 } from "@/components/ui/json-syntax-highlight";
+import {
+  formatAbsoluteStarted,
+  formatDuration,
+  formatPreviewJson,
+  formatRelativeStarted,
+  getPaginationPages,
+  hasMeaningfulPayload,
+  shortRunIdDisplay,
+} from "@/pages/runsPageUtils";
 
 // ─── module-level singletons ──────────────────────────────────────────────────
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-/** Compact run id for tables: full id if short, else ellipsis + last `tail` chars. */
-function shortRunIdDisplay(runId: string, tail = 4): string {
-  const t = Math.max(2, tail);
-  if (runId.length <= t + 2) return runId;
-  return `…${runId.slice(-t)}`;
-}
-
-function formatAbsoluteStarted(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-/**
- * Human-readable time since `startedMs` relative to `nowMs`.
- * Motion is proportional to information: second-level only under 60s,
- * minute-level up to 1h, hour-level above that. This keeps running rows
- * from becoming a noisy clock at scale.
- */
-function formatRelativeStarted(
-  startedMs: number,
-  nowMs: number,
-  liveGranular: boolean,
-): string {
-  const diff = Math.max(0, nowMs - startedMs);
-  const s = Math.floor(diff / 1000);
-
-  if (liveGranular) {
-    if (s < 8) return "just now";
-    if (s < 60) return `${s}s ago`;
-    if (s < 3600) {
-      // Minute granularity past the first minute — drop seconds to calm
-      // the motion. "5m ago" reads as live because it's running; the
-      // precise seconds aren't information a user needs.
-      const m = Math.floor(s / 60);
-      return `${m}m ago`;
-    }
-    if (s < 86400) {
-      const h = Math.floor(s / 3600);
-      const m = Math.floor((s % 3600) / 60);
-      return m > 0 ? `${h}h ${m}m ago` : `${h}h ago`;
-    }
-  } else if (s < 10) {
-    return "just now";
-  }
-
-  if (s < 60) return rtf.format(-s, "second");
-  const min = Math.floor(s / 60);
-  if (min < 60) return rtf.format(-min, "minute");
-  const hrs = Math.floor(s / 3600);
-  if (hrs < 24) return rtf.format(-hrs, "hour");
-  const days = Math.floor(s / 86400);
-  if (days < 7) return rtf.format(-days, "day");
-  const weeks = Math.floor(days / 7);
-  if (weeks < 8) return rtf.format(-weeks, "week");
-  const months = Math.floor(days / 30);
-  if (months < 12) return rtf.format(-months, "month");
-  const years = Math.floor(days / 365);
-  return rtf.format(-Math.max(1, years), "year");
-}
-
-/**
- * Returns the tick interval (ms) appropriate for a given run age, or null
- * if the cell should not tick at all. Motion is proportional to
- * information: fast for the first minute, slow as the run ages, frozen
- * past an hour.
- */
 function liveTickIntervalMs(ageMs: number): number | null {
-  if (ageMs < 60_000) return 1000; // <1m → 1s tick, show seconds
-  if (ageMs < 5 * 60_000) return 5_000; // 1–5m → 5s tick
-  if (ageMs < 60 * 60_000) return 30_000; // 5m–1h → 30s tick
-  return null; // >=1h → frozen, no motion
+  if (ageMs < 60_000) return 1000;
+  if (ageMs < 5 * 60_000) return 5_000;
+  if (ageMs < 60 * 60_000) return 30_000;
+  return null;
 }
 
 function StartedAtCell({ run }: { run: WorkflowSummary }) {
@@ -262,36 +192,6 @@ function StartedAtCell({ run }: { run: WorkflowSummary }) {
   );
 }
 
-function formatDuration(ms: number | undefined, terminal?: boolean): string {
-  if (!terminal && ms == null) return "—";
-  if (ms == null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  const secs = ms / 1000;
-  if (secs < 60) return `${secs.toFixed(1)}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 5) {
-    // Under 5 minutes we still want second-level precision for a live
-    // running run — the user is watching something short and the seconds
-    // matter.
-    const rem = Math.round(secs % 60);
-    return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
-  }
-  if (mins < 60) {
-    // Past 5 minutes drop seconds — the tick interval widens to 30s so
-    // sub-minute updates are already invisible, and "12m 47s" reads as
-    // over-precise when the bar is changing slowly.
-    return `${mins}m`;
-  }
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) {
-    const remMins = mins % 60;
-    return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
-  }
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
-}
-
 /**
  * Live-updating duration cell. For terminal runs we show the recorded
  * duration_ms straight from the API. For in-flight runs (running, paused,
@@ -371,20 +271,6 @@ function DurationCell({ run }: { run: WorkflowSummary }) {
 // See components/ui/status-pill.tsx for the primitive.
 
 // ─── RunPreview ────────────────────────────────────────────────────────────────
-
-const PREVIEW_JSON_MAX = 10_000;
-
-function hasMeaningfulPayload(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value as object).length > 0;
-  return true;
-}
-
-function formatPreviewJson(value: unknown): string {
-  return formatTruncatedFormattedJson(value, PREVIEW_JSON_MAX);
-}
 
 function RunPreviewIoPanel({
   label,
@@ -535,27 +421,6 @@ const FILTER_STATUS_CANONICAL = [
 
 function StatusMenuDot({ canonical }: { canonical: CanonicalStatus }) {
   return <StatusDot status={canonical} label={false} />;
-}
-
-/** Page numbers to render (1-based), with ellipsis when there are gaps. */
-function getPaginationPages(
-  current: number,
-  total: number,
-): Array<number | "ellipsis"> {
-  if (total < 1) return [];
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-  const set = new Set([1, total, current, current - 1, current + 1]);
-  const nums = [...set].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
-  const out: Array<number | "ellipsis"> = [];
-  let prev = 0;
-  for (const p of nums) {
-    if (p - prev > 1) out.push("ellipsis");
-    out.push(p);
-    prev = p;
-  }
-  return out;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;

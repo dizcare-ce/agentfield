@@ -110,6 +110,7 @@ In rare cases (critical hotfixes, CI infrastructure issues), an admin may approv
 2. Fix failures promptly
 3. Don't push new commits while CI is running (wait for results)
 4. Keep your branch up to date if `main` changes
+5. Review the coverage summary artifact when changes materially affect test-sensitive surfaces
 
 ### When CI Fails
 1. Read the error message carefully
@@ -117,6 +118,14 @@ In rare cases (critical hotfixes, CI infrastructure issues), an admin may approv
 3. Fix the issue
 4. Test locally before pushing
 5. Push the fix and wait for CI to re-run
+
+### Coverage Summary
+
+The repository also publishes a non-blocking coverage summary workflow:
+
+- It uploads per-surface coverage artifacts rather than a single blended monorepo number.
+- It is intended to support reporting and badge generation, not to replace functional tests.
+- The local equivalent is `./scripts/coverage-summary.sh`.
 
 ## Understanding the "All Required Checks Passed" Job
 
