@@ -95,7 +95,7 @@ export function RunLifecycleMenu({
   // Render an inert placeholder with the same footprint so the column
   // stays aligned across rows even when no action is available.
   if (!hasAnyAction && !isPending) {
-    return <span className="inline-block size-7" aria-hidden />;
+    return <span className="inline-block size-9" aria-hidden />;
   }
 
   return (
@@ -106,7 +106,7 @@ export function RunLifecycleMenu({
             variant="ghost"
             size="icon"
             className={cn(
-              "size-7 shrink-0 text-muted-foreground/70 transition-colors",
+              "size-9 shrink-0 text-muted-foreground/70 transition-colors",
               "group-hover/run-row:text-foreground",
               "hover:bg-muted hover:text-foreground",
               "data-[state=open]:bg-muted data-[state=open]:text-foreground",

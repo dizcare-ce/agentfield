@@ -36,13 +36,14 @@ export function useRuns(filters: RunsFilters = {}) {
   } = filters;
 
   const refetchInterval = useMemo(() => {
-    if (explicitRefetch !== undefined) {
-      if (typeof explicitRefetch === "number") {
-        return execConnected ? explicitRefetch : Math.min(explicitRefetch, 5_000);
-      }
-      return explicitRefetch;
+    // Opt-in polling: callers must explicitly pass refetchInterval to auto-refresh.
+    // The dashboard passes an interval; list pages (/runs, /agents) get an explicit
+    // "Refresh" button instead. This preserves the live-data motion budget contract.
+    if (explicitRefetch === undefined) return false;
+    if (typeof explicitRefetch === "number") {
+      return execConnected ? explicitRefetch : Math.min(explicitRefetch, 5_000);
     }
-    return execConnected ? false : 6_000;
+    return explicitRefetch;
   }, [explicitRefetch, execConnected]);
 
   return useQuery<WorkflowsResponse>({

@@ -157,7 +157,6 @@ export interface StatusTheme {
   borderClass: string;
   bgClass: string;
   hexColor: string;
-  iconHex: string;
   glowColor: string;
   /** Icon component for this status — used by StatusPill, Badge, and anywhere
    * else that renders a glyph representation. */
@@ -167,19 +166,6 @@ export interface StatusTheme {
    * today but keeping the enum leaves room for "blocked" spinner, etc. */
   motion: "none" | "live";
 }
-
-const STATUS_HEX: Record<CanonicalStatus, { base: string; light: string }> = {
-  pending: { base: '#f59e0b', light: '#fbbf24' },
-  queued: { base: '#f59e0b', light: '#fbbf24' },
-  waiting: { base: '#d97706', light: '#f59e0b' },
-  running: { base: '#2563eb', light: '#60a5fa' },
-  paused: { base: '#d97706', light: '#fbbf24' },
-  succeeded: { base: '#16a34a', light: '#22c55e' },
-  failed: { base: '#ef4444', light: '#f87171' },
-  cancelled: { base: '#6b7280', light: '#9ca3af' },
-  timeout: { base: '#8b5cf6', light: '#a78bfa' },
-  unknown: { base: '#737373', light: '#9ca3af' },
-};
 
 const STATUS_TONE_MAP: Record<CanonicalStatus, ThemeStatusTone> = {
   pending: 'warning',
@@ -206,6 +192,49 @@ const BADGE_VARIANT: Record<CanonicalStatus, StatusTheme['badgeVariant']> = {
   timeout: 'outline',
   unknown: 'outline',
 };
+
+const STATUS_CSS_VAR: Record<ThemeStatusTone, string> = {
+  success: "--status-success",
+  warning: "--status-warning",
+  error: "--status-error",
+  info: "--status-info",
+  neutral: "--muted-foreground",
+};
+
+const CANONICAL_TO_CSS_VAR: Record<CanonicalStatus, string> = {
+  pending: STATUS_CSS_VAR[STATUS_TONE_MAP.pending],
+  queued: STATUS_CSS_VAR[STATUS_TONE_MAP.queued],
+  waiting: STATUS_CSS_VAR[STATUS_TONE_MAP.waiting],
+  running: STATUS_CSS_VAR[STATUS_TONE_MAP.running],
+  paused: STATUS_CSS_VAR[STATUS_TONE_MAP.paused],
+  succeeded: STATUS_CSS_VAR[STATUS_TONE_MAP.succeeded],
+  failed: STATUS_CSS_VAR[STATUS_TONE_MAP.failed],
+  cancelled: STATUS_CSS_VAR[STATUS_TONE_MAP.cancelled],
+  timeout: STATUS_CSS_VAR[STATUS_TONE_MAP.timeout],
+  unknown: STATUS_CSS_VAR[STATUS_TONE_MAP.unknown],
+};
+
+function readCssThemeColor(varName: string): string {
+  if (typeof document === "undefined") {
+    return "";
+  }
+
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(varName)
+    .trim();
+
+  return raw ? `hsl(${raw})` : "";
+}
+
+/** Returns an hsl() string for the current theme. SSR-safe (returns empty string). */
+export function getStatusHexColor(status: CanonicalStatus): string {
+  return readCssThemeColor(CANONICAL_TO_CSS_VAR[status]);
+}
+
+export function getStatusGlowColor(status: CanonicalStatus): string {
+  const color = getStatusHexColor(status);
+  return color ? `color-mix(in srgb, ${color} 40%, transparent)` : "";
+}
 
 /** Icon glyph per canonical status. Single source of truth consumed by
  * StatusPill, StatusDot, Badge, the DAG, and anything else that wants to
@@ -242,7 +271,7 @@ const STATUS_MOTION: Record<CanonicalStatus, StatusTheme["motion"]> = {
 function createStatusTheme(status: CanonicalStatus): StatusTheme {
   const toneKey = STATUS_TONE_MAP[status];
   const tone = statusTone[toneKey];
-  const { base, light } = STATUS_HEX[status];
+  const hexColor = getStatusHexColor(status);
 
   return {
     status,
@@ -254,30 +283,14 @@ function createStatusTheme(status: CanonicalStatus): StatusTheme {
     pillClass: [tone.bg, tone.fg, tone.border].join(' '),
     borderClass: tone.border,
     bgClass: tone.bg,
-    hexColor: base,
-    iconHex: light,
-    glowColor: `color-mix(in srgb, ${base} 40%, transparent)`,
+    hexColor,
+    glowColor: getStatusGlowColor(status),
     icon: STATUS_ICON[status] ?? Circle,
     motion: STATUS_MOTION[status] ?? "none",
   };
 }
 
-const STATUS_THEME: Record<CanonicalStatus, StatusTheme> = {
-  pending: createStatusTheme('pending'),
-  queued: createStatusTheme('queued'),
-  waiting: createStatusTheme('waiting'),
-  running: createStatusTheme('running'),
-  paused: createStatusTheme('paused'),
-  succeeded: createStatusTheme('succeeded'),
-  failed: createStatusTheme('failed'),
-  cancelled: createStatusTheme('cancelled'),
-  timeout: createStatusTheme('timeout'),
-  unknown: createStatusTheme('unknown'),
-};
-
-const DEFAULT_THEME = STATUS_THEME.unknown;
-
 export function getStatusTheme(status?: string | null): StatusTheme {
   const normalized = normalizeExecutionStatus(status);
-  return STATUS_THEME[normalized] ?? DEFAULT_THEME;
+  return createStatusTheme(normalized);
 }

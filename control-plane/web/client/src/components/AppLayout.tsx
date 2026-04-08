@@ -24,13 +24,9 @@ const routeNames: Record<string, string> = {
   "/runs": "Runs",
   "/agents": "Agent nodes",
   "/playground": "Playground",
-  "/verify": "Audit",
+  "/verify": "Provenance",
   "/access": "Access management",
   "/settings": "Settings",
-  "/nodes": "Nodes",
-  "/reasoners": "Reasoners",
-  "/executions": "Executions",
-  "/workflows": "Workflows",
 };
 
 /** Match the longest configured section prefix so `/dashboard/legacy` maps to `/dashboard`. */
@@ -106,16 +102,6 @@ function resolveHeaderCrumbs(
     };
   }
 
-  if (section === "/dashboard" && parts[0] === "legacy") {
-    return {
-      mode: "trail",
-      crumbs: [
-        { label: sectionTitle, to: section },
-        { label: "Classic dashboard" },
-      ],
-    };
-  }
-
   const last = parts[parts.length - 1] ?? rest;
   const display =
     last.length > 24 ? shortResourceId(last, 10) : last.replace(/-/g, " ");
@@ -153,6 +139,12 @@ function AppLayoutShell() {
     >
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
         <header className="sticky top-0 z-30 flex h-16 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-border/60 bg-background/85 px-4 backdrop-blur transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <SidebarTrigger className="-ml-1 shrink-0" />
           <Separator orientation="vertical" className="mr-2 h-4 shrink-0" />
@@ -211,7 +203,10 @@ function AppLayoutShell() {
           </div>
         </header>
         <CommandPalette />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+        <div
+          id="main-content"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"
+        >
           <Outlet />
         </div>
       </SidebarInset>

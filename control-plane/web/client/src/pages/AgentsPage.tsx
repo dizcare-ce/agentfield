@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { EndpointKindIconBox } from "@/components/ui/endpoint-kind-icon-box";
 import { EntityTag } from "@/components/ui/entity-tag";
+import { LifecycleDot } from "@/components/ui/status-pill";
+import { isLifecycleOnline } from "@/utils/lifecycle-status";
 import { NodeProcessLogsPanel } from "@/components/nodes";
 import {
   AgentNodeIcon,
@@ -23,7 +25,7 @@ import {
   SkillIcon,
   Terminal,
 } from "@/components/ui/icon-bridge";
-import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition, LifecycleStatus } from "@/types/agentfield";
+import type { AgentNodeSummary, ReasonerDefinition, SkillDefinition } from "@/types/agentfield";
 import type { AgentTagSummary } from "@/services/tagApprovalApi";
 import { useQuery } from "@tanstack/react-query";
 
@@ -31,35 +33,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const formatRelativeTime = formatCompactRelativeTime;
 
-function getStatusDotColor(lifecycleStatus: LifecycleStatus | undefined): string {
-  switch (lifecycleStatus) {
-    case "ready":
-    case "running":
-      return "bg-green-400";
-    case "starting":
-      return "bg-yellow-400";
-    case "stopped":
-    case "error":
-    case "offline":
-      return "bg-red-400";
-    case "degraded":
-      return "bg-orange-400";
-    default:
-      return "bg-muted-foreground";
-  }
-}
-
 type AgentListStatusFilter = "all" | "online" | "offline";
-
-/** Treats ready/running/starting/degraded as reachable; offline/stopped/error/unknown as not. */
-function isAgentLifecycleOnline(status: LifecycleStatus): boolean {
-  return (
-    status === "ready" ||
-    status === "running" ||
-    status === "starting" ||
-    status === "degraded"
-  );
-}
 
 function matchesAgentNodeSearch(node: AgentNodeSummary, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -76,26 +50,8 @@ function matchesAgentStatusFilter(
   filter: AgentListStatusFilter
 ): boolean {
   if (filter === "all") return true;
-  const online = isAgentLifecycleOnline(node.lifecycle_status);
+  const online = isLifecycleOnline(node.lifecycle_status);
   return filter === "online" ? online : !online;
-}
-
-function getStatusTextColor(lifecycleStatus: LifecycleStatus | undefined): string {
-  switch (lifecycleStatus) {
-    case "ready":
-    case "running":
-      return "text-green-500";
-    case "starting":
-      return "text-yellow-500";
-    case "stopped":
-    case "error":
-    case "offline":
-      return "text-red-500";
-    case "degraded":
-      return "text-orange-500";
-    default:
-      return "text-muted-foreground";
-  }
 }
 
 // ─── NodeReasonerList ────────────────────────────────────────────────────────
@@ -431,9 +387,6 @@ function AgentRow({ node, tagSummary }: AgentRowProps) {
     setOpen(true);
   };
 
-  const dotColor = getStatusDotColor(node.lifecycle_status);
-  const statusTextColor = getStatusTextColor(node.lifecycle_status);
-  const statusLabel = node.lifecycle_status ?? "unknown";
   const totalItems = node.reasoner_count + node.skill_count;
 
   const handleRestart = async (e: React.MouseEvent) => {
@@ -474,11 +427,8 @@ function AgentRow({ node, tagSummary }: AgentRowProps) {
         </span>
 
         {/* Status dot + label */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className={cn("inline-block size-1.5 rounded-full flex-shrink-0", dotColor)} />
-          <span className={cn("text-xs flex-shrink-0", statusTextColor)}>
-            {statusLabel}
-          </span>
+        <div className="flex items-center flex-shrink-0">
+          <LifecycleDot status={node.lifecycle_status} size="sm" />
         </div>
 
         {/* Reasoner / skill counts */}
@@ -622,7 +572,7 @@ export function AgentsPage() {
 
   const { totalAgents, onlineAgents, offlineAgents } = useMemo(() => {
     const list = agentsFromApi ?? [];
-    const online = list.filter((n) => isAgentLifecycleOnline(n.lifecycle_status)).length;
+    const online = list.filter((n) => isLifecycleOnline(n.lifecycle_status)).length;
     return {
       totalAgents: list.length,
       onlineAgents: online,
