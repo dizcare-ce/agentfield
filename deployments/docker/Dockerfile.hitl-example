@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir /tmp/python-sdk && \
     rm -rf /tmp/python-sdk
 
-# Copy the HITL PR-review example agent.
+# Copy the demo agent source.
 COPY examples/python_agent_nodes/hitl_form /app
 
 EXPOSE 8001

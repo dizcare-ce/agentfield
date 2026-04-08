@@ -225,13 +225,13 @@ async def review_pr(pr_number: int) -> dict:
     comments = result.raw_response.get("comments", "") if result.raw_response else ""
     block_merge = result.raw_response.get("block_merge", False) if result.raw_response else False
 
-    print(f"\n=== PR Review Result ===")
+    print("\n=== PR Review Result ===")
     print(f"  PR:          #{pr['pr_number']} — {pr['title']}")
     print(f"  Decision:    {decision}")
     print(f"  Comments:    {comments or '(none)'}")
     print(f"  Block merge: {block_merge}")
     print(f"  Approved:    {result.approved}")
-    print(f"========================\n")
+    print("========================\n")
 
     return {
         "pr_number": pr["pr_number"],
