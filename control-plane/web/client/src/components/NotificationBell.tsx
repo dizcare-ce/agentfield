@@ -298,6 +298,28 @@ interface NotificationRowProps {
   indent?: boolean;
 }
 
+function getHitlRespondTarget(notification: Notification): string | null {
+  if (notification.eventKind !== "pause") return null;
+
+  const candidate = notification as Notification & {
+    data?: Record<string, unknown>;
+  };
+  const requestId =
+    typeof candidate.data?.request_id === "string"
+      ? candidate.data.request_id
+      : typeof candidate.data?.approval_request_id === "string"
+        ? candidate.data.approval_request_id
+        : null;
+
+  if (candidate.data?.form_schema_present === true && requestId) {
+    return `/hitl/${requestId}`;
+  }
+
+  return typeof notification.href === "string" && notification.href.startsWith("/hitl/")
+    ? notification.href
+    : null;
+}
+
 function NotificationRow({
   notification,
   now,
@@ -308,6 +330,7 @@ function NotificationRow({
   const { Icon, iconClass } = getNotificationGlyph(notification);
   const relative = formatCompactRelative(notification.createdAt, now);
   const absolute = formatAbsoluteTime(notification.createdAt);
+  const respondTarget = getHitlRespondTarget(notification);
 
   const content = (
     <div
@@ -338,6 +361,19 @@ function NotificationRow({
       >
         {relative}
       </span>
+      {respondTarget ? (
+        <Button asChild size="sm" variant="outline" className="h-6 px-2 text-[11px]">
+          <Link
+            to={respondTarget}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMarkRead();
+            }}
+          >
+            Respond →
+          </Link>
+        </Button>
+      ) : null}
       <button
         type="button"
         onClick={(e) => {
