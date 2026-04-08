@@ -16,12 +16,22 @@ SKIP_PATH_CONFIG="${SKIP_PATH_CONFIG:-0}"
 # Can be set via --staging flag or STAGING=1 environment variable
 STAGING="${STAGING:-0}"
 
-# Skill install mode (interactive | all | all-targets | none)
-# Defaults to "interactive" — runs `af skill install` with the picker after
-# the binary lands so first-time users get the skill into Claude Code / Codex
-# / etc. without a second step. Override with --no-skill / --all-skills /
-# --all-skill-targets, or via SKILL_MODE env var.
-SKILL_MODE="${SKILL_MODE:-interactive}"
+# Skill install mode (all | all-targets | interactive | none)
+#
+# Defaults to "all" — installs the agentfield-multi-reasoner-builder skill
+# into every coding agent the binary detects on the user's machine, without
+# any prompts. This is the right default for `curl … | bash` because there
+# is no TTY for an interactive picker to read from, and the whole point of
+# the one-line install is to just work.
+#
+# Override with:
+#   --no-skill            → SKILL_MODE=none           (skip the skill install)
+#   --interactive-skill   → SKILL_MODE=interactive    (run the picker)
+#   --all-skill-targets   → SKILL_MODE=all-targets    (install into every
+#                                                      registered target,
+#                                                      even ones we did not detect)
+#   SKILL_MODE=<mode>     → env var override
+SKILL_MODE="${SKILL_MODE:-all}"
 
 # Color codes
 RED='\033[0;31m'
@@ -54,6 +64,8 @@ parse_args() {
         shift
         ;;
       --all-skills)
+        # Backwards-compat alias — "all" is now the default, but the flag
+        # stays so existing scripts and READMEs keep working.
         SKILL_MODE="all"
         shift
         ;;
@@ -61,23 +73,31 @@ parse_args() {
         SKILL_MODE="all-targets"
         shift
         ;;
+      --interactive-skill)
+        SKILL_MODE="interactive"
+        shift
+        ;;
       --help|-h)
         echo "AgentField CLI Installer"
         echo ""
         echo "Usage:"
-        echo "  curl -fsSL https://agentfield.ai/install.sh | bash"
-        echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --staging"
-        echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --all-skills"
+        echo "  curl -fsSL https://agentfield.ai/install.sh | bash                  # binary + skill into all detected agents (no prompts)"
+        echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --no-skill # binary only, skip the skill install"
+        echo "  curl -fsSL https://agentfield.ai/install.sh | bash -s -- --staging  # latest prerelease"
         echo ""
         echo "Options:"
         echo "  --staging              Install latest prerelease/staging version"
         echo "  --verbose              Enable verbose output"
         echo "  --no-skill             Skip the agentfield-multi-reasoner-builder"
-        echo "                         skill install step"
-        echo "  --all-skills           Install the skill into every detected"
-        echo "                         coding agent (no interactive prompt)"
+        echo "                         skill install step (binary only)"
+        echo "  --all-skills           Install the skill into every detected coding"
+        echo "                         agent (default behaviour — flag kept for"
+        echo "                         backwards compatibility with older docs)"
         echo "  --all-skill-targets    Install the skill into every registered"
         echo "                         coding agent target, even if not detected"
+        echo "  --interactive-skill    Run the interactive skill picker (only useful"
+        echo "                         when you run install.sh from a real terminal,"
+        echo "                         not from 'curl … | bash')"
         echo "  --help                 Show this help message"
         echo ""
         echo "Environment variables:"
@@ -86,7 +106,7 @@ parse_args() {
         echo "  VERBOSE=1               Same as --verbose flag"
         echo "  SKIP_PATH_CONFIG=1      Skip PATH configuration"
         echo "  AGENTFIELD_INSTALL_DIR  Custom install directory"
-        echo "  SKILL_MODE              interactive (default) | all | all-targets | none"
+        echo "  SKILL_MODE              all (default) | all-targets | interactive | none"
         exit 0
         ;;
       *)
@@ -512,7 +532,7 @@ verify_installation() {
 # Install the agentfield-multi-reasoner-builder skill into coding-agent
 # integrations (Claude Code, Codex, Gemini, OpenCode, Aider, Windsurf, Cursor).
 # Delegated to the freshly-installed `af` binary so the install logic stays
-# in one place. Honors $SKILL_MODE: interactive | all | all-targets | none.
+# in one place. Honors $SKILL_MODE: all (default) | all-targets | interactive | none.
 install_skill() {
   local install_dir="$1"
   local af_bin="$install_dir/agentfield"
@@ -688,8 +708,9 @@ main() {
   verify_installation "$INSTALL_DIR"
 
   # Install the agentfield-multi-reasoner-builder skill into coding agents.
-  # Default mode is interactive — runs `af skill install` with the picker.
-  # Override via --no-skill / --all-skills / --all-skill-targets or SKILL_MODE.
+  # Default mode is `all` — installs into every detected coding agent without
+  # any prompts (the right behaviour for `curl … | bash`). Override via
+  # --no-skill / --all-skill-targets / --interactive-skill or SKILL_MODE.
   install_skill "$INSTALL_DIR"
 
   # Print success message
