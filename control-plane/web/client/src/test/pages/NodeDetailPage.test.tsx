@@ -284,7 +284,6 @@ describe("NodeDetailPage", () => {
       lifecycle_status: "ready",
       health_status: "ready",
       last_seen: "2026-04-08T00:00:00Z",
-      mcp_status: { running_servers: 1, total_servers: 1, service_status: "ready" },
     });
     pageState.startAgent.mockResolvedValue({ ok: true });
     pageState.stopAgent.mockResolvedValue({ ok: true });
@@ -390,16 +389,6 @@ function buildNode(): AgentNodeDetailsForUIWithPackage {
     registered_at: "2026-04-07T00:00:00Z",
     deployment_type: "serverless",
     invocation_url: "https://invoke.example.com",
-    mcp_summary: {
-      service_status: "ready",
-      running_servers: 1,
-      total_servers: 1,
-      total_tools: 2,
-      overall_health: 100,
-      has_issues: false,
-      capabilities_available: true,
-    },
-    mcp_servers: [{ alias: "server-a", status: "running", tool_count: 2 }],
     reasoners: [{ id: "reasoner.one", name: "Reasoner One" }],
     skills: [{ id: "skill.one", name: "Skill One" }],
     package_info: { package_id: "pkg-agent-alpha" },
