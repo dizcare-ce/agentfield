@@ -136,6 +136,7 @@ result: dict = await app.call(
 ```
 
 **Always returns a `dict`** — even if the target reasoner returns a Pydantic model. Convert manually:
+
 ```python
 result_dict = await app.call(f"{app.node_id}.score", text=passage)
 result = ScoreResult(**result_dict)
@@ -144,6 +145,56 @@ result = ScoreResult(**result_dict)
 **Critical:** always reference reasoners as `f"{app.node_id}.reasoner_name"` so renaming the node via `AGENT_NODE_ID` env doesn't break the system. Hardcoding the node ID is a bug waiting to happen.
 
 **Workflow tracking:** every `app.call` is recorded in the control plane's workflow DAG. Direct HTTP between reasoners bypasses this and is forbidden.
+
+### Cross-boundary data does NOT auto-reconstitute — the most dangerous silent contract in the whole SDK
+
+`app.call` crosses a serialization boundary. Even when the calling side and the receiving side both live in the same Python process, the payload is serialized to JSON and deserialized on the way back in. **This means every structured object crossing the boundary loses its runtime type identity.**
+
+Concretely:
+
+- If you build a Pydantic model on the caller side and pass it as a keyword argument to `app.call(...)`, the receiver gets a **plain dict** (or a list of plain dicts, or a dict of plain dicts), regardless of how the receiver's parameter is type-hinted.
+- Type hints on the receiver document and validate the *shape* of the payload. They do **not** reconstruct the Pydantic instance for you. A parameter declared as `param: MyModel` will arrive as `dict`, not as `MyModel`. A parameter declared as `param: list[MyModel]` will arrive as `list[dict]`, not as `list[MyModel]`.
+- Any downstream code that does `param.field_name`, `param.some_method()`, or `for item in param: item.other_field` will fail at runtime with `'dict' object has no attribute '...'`. Static checks (`py_compile`, type-checkers running on unannotated inputs, even most linters) will NOT catch it. Only running the live call path will.
+
+**Two ways to deal with this. Pick one. Never skip both.**
+
+**(a) Re-construct the model on the receiving side.** If the receiver genuinely needs the Pydantic instance — for example, to call a method or to pass it to a helper that type-checks — reconstruct it explicitly at the top of the function body:
+
+```python
+@router.reasoner()
+async def downstream_reasoner(payload: dict, model: str | None = None) -> FinalResult:
+    typed = UpstreamResult(**payload)             # explicit reconstruction
+    # ... use `typed` normally from here ...
+```
+
+For list payloads: `typed_items = [UpstreamResult(**item) for item in payload]`.
+
+**(b) Preferred for LLM-to-LLM handoffs — render to prose BEFORE the call.** When the downstream reasoner is going to feed the payload into an `app.ai()` prompt anyway, the data-flow rule already says the boundary should be a natural-language string. This ALSO dodges the serialization trap entirely. Build a prose renderer in `helpers.py`, call it on the caller side, pass a string:
+
+```python
+# Caller side — render structured results into prose before crossing the boundary
+drafts = [UpstreamResult(**d) for d in await asyncio.gather(*upstream_calls)]
+drafts_prose = render_bundle(drafts)   # plain Python helper, returns a str
+
+# Receiver gets a string, not a list of dicts. No reconstruction needed,
+# and the LLM inside the receiver reads better prose than serialized JSON.
+verdict = await app.call(
+    f"{app.node_id}.synthesizer",
+    drafts_prose=drafts_prose,
+    model=model,
+)
+```
+
+**The general rule (applies to any framework that crosses a serialization boundary, not just this one):** a type hint is a *shape contract* on the wire, not a *type contract* in memory. Anything structured that crosses the wire arrives as the serialization format's native primitive (`dict`, `list`, `str`, `int`, `bool`, `None`). Runtime type information is lost. Plan for it.
+
+**Red flags that mean you hit this trap:**
+
+- `AttributeError: 'dict' object has no attribute 'X'`
+- `TypeError: argument of type 'dict' is not iterable` (when the receiver expected `list[dict]`)
+- `TypeError: argument after ** must be a mapping, not NoneType`
+- Pydantic ValidationError complaining about missing required fields inside a list payload
+
+Every one of these is the same bug: a structured payload crossed a reasoner boundary and the receiver tried to use it as if it still had its original Python type.
 
 ## The decision tree (real, not aspirational)
 
@@ -307,7 +358,20 @@ if __name__ == "__main__":
 ```
 
 **Router facts (verified against `router.py`):**
-- `AgentRouter` proxies *every* agent attribute via `__getattr__` — so `router.ai()`, `router.call()`, `router.memory`, `router.harness()` all work identically to `app.ai()` etc.
+
+The router proxies a **fixed, enumerated set of callable attributes** from the attached agent. It is NOT a universal transparent proxy. Treat the router's surface as a closed list, not an open one.
+
+| Attribute | Proxied? | How to use |
+|---|---|---|
+| `router.ai(...)` | ✅ | Same contract as `app.ai(...)` |
+| `router.call(...)` | ✅ | Same contract as `app.call(...)` |
+| `router.memory` | ✅ | Same contract as `app.memory` |
+| `router.harness(...)` | ✅ | Same contract as `app.harness(...)` |
+| `router.node_id` | ❌ | Does not proxy. Read the node id from env inside the router file: `NODE_ID = os.getenv("AGENT_NODE_ID", "<slug>")`, then call with `f"{NODE_ID}.target"` |
+| Other data attributes on `app` | ❌ | Never assume they proxy. If you need them, read from env or pass them in explicitly |
+
+**The general rule (applies to every framework, not just this one):** when a reference describes a surface contract with words like "every" or "all" or "transparently forwards", mentally replace that with "a specific documented subset". Verify the exact attribute you plan to use before you write code against it. Overstated contracts are the single most common source of subtle runtime breakage in framework-heavy code.
+
 - Tags merge: `AgentRouter(tags=["finance"])` + `@router.reasoner(tags=["scoring"])` → reasoner has BOTH tags.
 - `prefix` auto-namespaces IDs as `{prefix_segments}_{func_name}`.
 - The canonical pattern is one router per domain file; one `Agent(...)` + multiple `include_router(...)` calls in `main.py`.
@@ -409,14 +473,48 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8001")), auto_port=False)
 ```
 
-## Memory scopes (one paragraph)
+## Memory, vectors, and events — what's at your disposal
+
+The SDK ships a persistent memory layer. Use it whenever a reasoner would otherwise re-compute, re-fetch, or lose something a later reasoner needs. Four scopes share a single API surface.
+
+| Scope | Lifetime | Typical use |
+|---|---|---|
+| `global` | Cross everything | Knowledge bases, shared embeddings, constants outliving any run |
+| `agent` | This node, all sessions | Cached lookups, warm data, node-wide state |
+| `session` | One conversation / thread | Multi-turn chat state, per-user scratch |
+| `run` | Single workflow execution | Intermediate results shared between reasoners in one run |
+
+**Key-value API (same for every scope):**
 
 ```python
-await app.memory.set(key, value, scope="global"|"agent"|"session"|"run")
-await app.memory.get(key, default=None, scope=...)
+await app.memory.set(key, value, scope="run")
+value = await app.memory.get(key, default=None, scope="run")
+await app.memory.exists(key, scope="run")
+await app.memory.delete(key, scope="run")
+keys = await app.memory.list_keys(scope="agent")
 ```
 
-**global** = cross-everything; **agent** = this node, all sessions; **session** = one conversation; **run** = single workflow execution. Use `session` for chat-like workflows, `run` for per-execution scratch state, `agent` for cached embeddings, `global` for shared knowledge.
+**Vector memory — look up by meaning instead of by key.** Use when reasoners need retrieval over accumulated content (semantic cache, pattern library, "have I seen this before?"):
+
+```python
+await app.memory.set_vector(key, embedding, metadata={...}, scope="agent")
+hits = await app.memory.search_vectors(
+    query_embedding,
+    top_k=5,
+    scope="agent",
+    filters={"domain": "..."},
+)
+```
+
+**Event memory — consult the control plane's execution history.** Every reasoner execution is recorded as an event. Reasoners can query recent events for "has something similar already run?" checks, deduplication, and cross-run learning. The surface lives under `app.memory.events.*`; see `sdk/python/agentfield/memory_events.py` for the exact shape. Useful when a reasoner's work should build on what prior runs already discovered.
+
+**When NOT to use memory:**
+
+- If a value is trivially re-computable, recompute. Memory is for expensive or cross-boundary state.
+- If two reasoners can pass a value directly via `app.call` kwargs, that is simpler.
+- If state only lives inside one reasoner body, use a local variable.
+
+**Rule of thumb:** memory is for state that crosses call boundaries OR must survive the current execution. Everything else is a local variable or a pass-through kwarg. When in doubt, start without memory and add it only when a concrete need (cost, latency, cross-run continuity) shows up.
 
 ## The `confident` flag pattern (mandatory for every `.ai()` gate)
 

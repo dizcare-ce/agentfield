@@ -41,14 +41,12 @@ async def review(document: str) -> dict:
 ```
 input ──> hunters ──> candidate findings ──> provers ──> verified findings
                                            ↑
-                                           adversary tries to disprove each one
+                                           structurally separated verification frame
 ```
 
-**When:** Any problem where false positives are catastrophic — security, legal, compliance, medical, financial.
+**When:** When applying principle 2 (guided autonomy) reveals that the *discovery* frame and the *verification* frame must be structurally separate, because a single cognitive frame confuses finding answers with justifying them. Discovery reasoners are biased toward sensitivity — they should find everything plausible. Verification reasoners are biased toward specificity — they should refuse anything unproven. Keeping these frames in one head produces reasoners that rationalize their own initial guesses instead of stress-testing them.
 
-**Reference:** `examples/sec-af/` — vulnerability hunters → exploit provers; `examples/contract-af/` — clause analysts → adversary reviewer.
-
-**Why it works:** Hunters are biased toward sensitivity (find everything). Provers are biased toward specificity (refuse anything unproven). The tension between them is the intelligence — neither alone produces a good answer.
+**Why it works:** The tension between discovery and verification is where the intelligence lives. Neither frame alone produces a good answer. The pattern is most valuable when your problem requires verifiable confidence in a final decision and the cost of a confident-but-wrong output is meaningful.
 
 ```python
 @app.reasoner()
@@ -210,11 +208,13 @@ inner (coding)   ──> per-task agent   ──> code
 
 ---
 
-## 8. Reasoner Composition Cascade (READ THIS — it's the master pattern)
+## 8. Reasoner Composition Cascade (the structural backbone — layer the other patterns on top)
 
-**This is the pattern that distinguishes a real AgentField system from a fancy `asyncio.gather` wrapper.** Every other pattern in this file should be interpreted through this lens.
+**This is not a specific shape — it is the discipline of decomposing every reasoner into narrower sub-reasoners until the DAG has depth ≥ 3 and every reasoner reads like a composable software API.** Every other pattern in this file is a specific topology you layer on top of this discipline.
 
-**Shape — depth, not breadth:**
+The cascade can manifest as a linear chain, a star with depth, a tree, a dynamic router, or anything else. What makes it a "cascade" is that the orchestrator is NOT the only thing calling `app.call` — every dimension reasoner is itself a small orchestrator that calls 2–4 sub-reasoners. Depth 3+ at every branch.
+
+**Example shape — adversarial committee (only when false positives are expensive, see pattern 2):**
 
 ```
 entry_reasoner
@@ -237,16 +237,49 @@ entry_reasoner
 ├── analysis_dimension_C_reasoner ───────┤
 │   └── (3 sub-calls, similar shape)
 │
-└── adversarial_synthesizer ─────────────┘
-    ├── steel_man_alternative (.ai)  ← called once per dimension
-    ├── disagreement_detector (.ai)
-    └── final_decision_reasoner (.ai)
+└── adversarial_synthesizer ─────────────┘  ← OPTIONAL: only earns its cost
+    ├── steel_man_alternative (.ai)           when false positives are
+    ├── disagreement_detector (.ai)           expensive (medical / legal /
+    └── final_decision_reasoner (.ai)         financial / security / regulated)
         └── safety_override (deterministic skill)
 ```
 
-**Each layer fans out via `asyncio.gather`. Each reasoner has a single cognitive responsibility.** The orchestrator at the top is NOT the only thing that calls `app.call` — every dimension reasoner is itself a small orchestrator that calls 2–4 sub-reasoners.
+**Example shape — linear refinement cascade (content, extraction, generation — no adversary needed):**
 
-**Used in:** This is the pattern the medical-triage and loan-underwriter examples should follow when they're deep enough. Most large AgentField systems compose this pattern as the backbone, with the other 8 patterns layered on top (HUNT→PROVE between layers, streaming for partial results, etc.).
+```
+summarize_meeting (entry)
+└── audio_transcriber
+    └── speaker_diarizer
+        └── turn_segmenter
+            ├── action_item_extractor   ─┐  ← parallel
+            └── decision_extractor       ┘
+                └── summary_composer
+                    └── follow_up_drafter
+```
+
+Same cascade discipline, totally different shape. Depth 6, linear with one parallelism wave. Perfect for content pipelines. No adversarial anything — just careful decomposition.
+
+**Example shape — dynamic router cascade (classification, routing, workflow):**
+
+```
+handle_support_ticket (entry)
+├── intake_classifier ──┐
+│   ├── language_detector
+│   ├── intent_extractor
+│   └── urgency_grader
+│
+└── (conditional branches based on intake — only one fires per request)
+    ├── refund_handler       → order_lookup → eligibility_checker → refund_executor (skill)
+    ├── diagnosis_cascade    → symptom_classifier → known_issue_matcher → workaround_composer
+    ├── escalation_composer  → priority_scorer → owner_resolver
+    └── knowledge_base_search → semantic_query → answer_drafter
+```
+
+Same cascade discipline, third totally different shape. Depth 3–4 depending on branch. No parallelism across branches (mutually exclusive). No adversarial anything. Perfect for customer support, incident triage, intent-based routing.
+
+**Each layer fans out via `asyncio.gather` (where parallelism is meaningful). Each reasoner has a single cognitive responsibility.** The orchestrator at the top is NOT the only thing that calls `app.call` — every dimension reasoner is itself a small orchestrator that calls 2–4 sub-reasoners.
+
+**Used in:** Every serious AgentField system. The shape varies by problem — there is no canonical "correct" topology, only canonical decomposition discipline. The loan-underwriter and medical-triage examples happen to use the adversarial committee shape because their problems genuinely need an adversary. A web research agent would use the linear/fan-out shape and NOT include an adversary.
 
 **Why it's the master pattern:**
 
@@ -298,23 +331,48 @@ event source (DB change stream / webhook) ──> enrichment pipeline ──> ou
 
 ---
 
-## How to pick a pattern (or compose your own)
+## How to think about these patterns
 
-**Always start with pattern 8 (Reasoner Composition Cascade) as the backbone.** It's not optional. Every other pattern is layered on top.
+**These patterns are not a menu.** They are **names for emergent consequences of the five principles** in `SKILL.md` ("The unit of intelligence is the reasoner"). You do not pick a pattern and then build the system — you apply the principles to your specific problem, the topology emerges, and THEN you use these pattern names as vocabulary to describe what you built.
 
-Then ask:
+If you find yourself reaching for a pattern before you have walked the five principles, stop. Go back to the principles and let the shape fall out of the problem. The shape of the DAG is **always** derived from:
 
-1. **What triggers the work?** Event stream → pattern 9 (reactive enrichment). Direct API call → patterns 1–7 layered onto 8.
-2. **Is the input large/navigable?** Yes → consider meta-prompting (pattern 4) inside one of your dimension reasoners.
-3. **Multiple independent analysis dimensions?** Yes → parallel hunters (pattern 1) becomes the second-layer fan-out inside the cascade.
-4. **False positives expensive?** Yes → add HUNT→PROVE (pattern 2) as a second-stage reasoner per dimension or one global adversarial reasoner.
-5. **Downstream can start before upstream finishes?** Yes → streaming (pattern 3).
-6. **Coverage matters and you can't predict shape upfront?** Pattern 6.
-7. **Multi-round adaptive execution?** Pattern 5 or 7.
-8. **The investigation path depends on discoveries?** Pattern 4 (meta-prompting), always.
+1. How your problem decomposes into atomic reasoning units (principle 1).
+2. Where each unit's scope ends and the next begins, with the orchestrator as context broker (principles 2 + 4).
+3. Where the graph's structure needs to change based on intermediate state (principle 3).
+4. Which units depend on which others, and therefore which can run concurrently (principle 5).
 
-Most strong systems compose **pattern 8 (cascade) as the backbone + 2–3 of the others as layers**. Example: contract-af = composition cascade (8) + parallel hunters (1) at the second layer + HUNT→PROVE (2) at the third layer + streaming (3) between layers + meta-prompting (4) inside the deepest reasoners + nested loops (5).
+The patterns below are **what those answers look like when they are drawn on paper**. Every problem produces its own specific shape — the same principles produce different topologies for different problems, and that is the point.
+
+### When specific patterns tend to emerge
+
+Apply the five principles honestly. The pattern you end up with will usually match one or a composition of the below. Use these as vocabulary, not as templates.
+
+- **Parallel Hunters + Signal Cascade (pattern 1)** emerges when principle 1 (decomposition) identifies multiple independent analysis dimensions and principle 5 (async parallelism) runs them concurrently. The "hunters" are the independent specialists; the "signal cascade" is how their outputs feed downstream consumers.
+- **HUNT→PROVE Adversarial Tension (pattern 2)** emerges when principle 2 (guided autonomy) forces you to separate the *discovery* frame from the *verification* frame, because getting them wrong in the same head produces biased reasoning. One cognitive frame finds candidate answers; a structurally different cognitive frame tries to falsify them. Consider this pattern when you need verifiable confidence and a single frame would confuse discovery with justification.
+- **Streaming Pipeline (pattern 3)** emerges when principle 5 (async parallelism) identifies that downstream reasoners can start working on partial upstream results without waiting for the whole batch. The asyncio.Queue is the connective tissue.
+- **Meta-Prompting (pattern 4)** emerges when principle 3 (dynamic orchestration) pushes the "which sub-reasoner to invoke and with what prompt" decision into the LLM itself, because the investigation path depends on what a prior reasoner discovered. This is the purest expression of the meta-level: a reasoner whose output IS the structure of the next subsystem.
+- **Three Nested Control Loops (pattern 5)** emerges when principle 3 (dynamic orchestration) needs to happen at multiple scopes simultaneously — per-reasoner self-adaptation, cross-reasoner deep-dives, and pipeline-wide coverage iteration.
+- **Fan-Out → Filter → Gap-Find → Recurse (pattern 6)** emerges when principle 1 (decomposition) meets principle 3 (dynamic orchestration) in an open-ended problem: you do not know the shape of the answer upfront, so the graph grows iteratively until a coverage gate is satisfied.
+- **Factory Control Loops (pattern 7)** emerges when principle 3 (dynamic orchestration) spans long-running multi-phase execution — the plan itself must adapt as earlier phases reveal information about later ones.
+- **Reasoner Composition Cascade (pattern 8)** is not a specific shape at all. It is the structural discipline of applying principle 1 (decomposition) recursively until every leaf is atomic and principle 5 (async parallelism) can fire at every layer. Every other pattern in this file is layered on top of this discipline.
+- **Reactive Document Enrichment (pattern 9)** emerges when the trigger is not a direct API call but an event stream — any of the other patterns can live inside the enrichment chain, but the entry point changes from a reasoner invocation to a subscription.
+
+### How to decide which emerge for your problem
+
+Walk the five principles in order. Ask the questions from `SKILL.md`. The answers will naturally draw the graph for you:
+
+- Where decomposition produces many independent sub-tasks at a given layer → some form of fan-out (patterns 1, 6).
+- Where the verification frame needs to be structurally separated from the discovery frame → HUNT→PROVE (pattern 2).
+- Where downstream work can begin on partial upstream output → streaming (pattern 3).
+- Where the investigation path itself depends on intermediate state → meta-prompting (pattern 4).
+- Where adaptation needs to happen at multiple scopes simultaneously → nested loops (pattern 5).
+- Where the answer's shape is unknown upfront and a coverage gate drives iteration → fan-out / gap-find (pattern 6).
+- Where long-running multi-phase execution must replan as it learns → factory loops (pattern 7).
+- Where the trigger is an event stream rather than an API call → reactive enrichment (pattern 9).
+
+**If none of these emerge for your problem, the problem may not need a multi-reasoner system at all — it may just be a sequence of deterministic steps dressed up as an agent.** If that is true, say so honestly. The value of AgentField is in problems where the architecture itself encodes intelligence.
 
 ## When NONE of these fit
 
-Then the use case probably doesn't justify AgentField at all — it's a one-shot LLM call wearing a costume. Tell the user honestly.
+If after walking the five principles no pattern emerges and the problem can be solved by a deterministic pipeline with one or two LLM calls, **tell the user honestly**. The goal is composite intelligence — if the problem does not demand composition, we should not force it.

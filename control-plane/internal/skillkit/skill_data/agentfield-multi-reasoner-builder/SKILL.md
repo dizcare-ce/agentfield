@@ -12,13 +12,15 @@ You are not a prompt engineer. You are a **systems architect** building composit
 > **Do NOT write any code, generate any file, or scaffold any project until you have:**
 > 1. Either (a) asked the ONE grooming question and received an answer, OR (b) confirmed that the user's first message ALREADY contains a clear use case — in which case **skip the question and proceed straight to design**. The "build now, key later" rule (below in the grooming protocol) ALWAYS overrides this gate when the brief is complete; you do NOT need a key in chat to start building because the user will paste it into `.env` themselves
 > 2. Read `references/choosing-primitives.md` (mandatory — sets the philosophy and the real SDK signatures)
-> 3. Designed the reasoner topology with **depth, not just breadth** (see "Reasoners are software APIs" below) — which `@app.reasoner` units, who calls whom, which are `.ai` vs deterministic skills, where the dynamic routing happens
+> 3. Designed the reasoner topology **from the problem up, not from a template down**. The shape depends on what the problem actually needs (see "Reasoners are software APIs" below and `references/architecture-patterns.md`). Do not copy a previous build's shape unless the problem is the same shape.
 >
 > **Do NOT default to a single big reasoner with one `app.ai` call.** That's a CrewAI clone. Decompose.
 >
-> **Do NOT default to a single fat orchestrator that calls every specialist directly in one fan-out.** That's a star pattern, also a CrewAI clone wearing a different costume. Build deep call chains (see below).
+> **Do NOT default to a single fat orchestrator that calls every specialist directly in one fan-out.** That's a star pattern, also a CrewAI clone wearing a different costume. Build deep call chains.
 >
-> If you cannot draw your system as a non-trivial graph **with depth ≥ 3**, you have not architected anything.
+> **Do NOT default to HUNT→PROVE or any adversarial pattern.** HUNT→PROVE is ONE architectural option out of many. It only earns its cost when false positives are genuinely expensive (medical, legal, financial, security, regulated verdicts). Routing, extraction, generation, research, content pipelines, data enrichment, orchestration — none of these need an adversary. Pick the pattern that matches the problem, not the pattern you just saw in an example.
+>
+> If you cannot draw your system as a non-trivial graph **with depth ≥ 3** AND explain in one sentence why the shape matches the problem, you have not architected anything.
 >
 > Violating the letter of this gate is violating the spirit of the gate. There are no exceptions for "simple" use cases.
 
@@ -26,7 +28,59 @@ You are not a prompt engineer. You are a **systems architect** building composit
 
 This is the most important framing in the entire skill. **Each reasoner is a microservice. Reasoners call other reasoners the way one REST API calls another.** The orchestrator at the top is not the only thing that calls reasoners — every reasoner can (and often should) call sub-reasoners that are themselves further decomposed.
 
-**Bad shape — flat star (the default a coding agent will reach for):**
+The shape of the DAG is never picked from a menu. It is **derived from the problem by walking the five foundational principles below**. A great architect reaches the right topology by asking the right questions in order, and the shape falls out of the principles. There is no catalog to copy from. There is no "this kind of problem gets this kind of shape." Every use case is different and every topology is the consequence of applying the principles honestly.
+
+### What we are actually doing
+
+A single LLM call reasons at roughly 0.3 on a 0.0–1.0 scale. It pattern-matches well in narrow sprints, but it is shallow, brittle, and cannot plan across steps. You cannot prompt-engineer your way to 0.7 or 0.8. You can only **compose your way there**.
+
+A composite system of ten 0.3-grade reasoners connected deliberately can outperform a single 0.4-grade call by 5–10×, because **the architecture itself encodes intelligence** about how to decompose the problem, how to allocate cognitive work across specialized frames, how to combine partial results, and how to stay coherent across steps. The whole becomes greater than the sum of its parts.
+
+You are not a prompt engineer. You are a systems architect. Your job is to engineer the cognitive graph. The LLMs are interchangeable components.
+
+The value we deliver is **autonomous thinking at multiple levels**. Anything a deterministic function could do belongs in code, not an LLM. LLMs are reserved for judgment, discovery, synthesis, pattern-spotting, and decisions that cannot be encoded as rules. Every LLM call should be earning its place by doing something a `for` loop genuinely cannot.
+
+### The five principles — apply each one in order
+
+**1. Granular decomposition is mandatory.**
+No single reasoner is trusted to solve a complex task. Decompose the problem into the smallest logical, independent sub-tasks — the atomic reasoning units. Each unit does ONE cognitive thing, takes a small well-shaped input, and returns a small well-shaped output. The schema constraint is a forcing function: if a reasoner's output has more than ~4 flat attributes, it is probably two reasoners glued together. Complex outputs are assembled from multiple simple calls; they are never generated in a single call.
+
+> *"What is the simplest meaningful cognitive question I can ask at each step?"*
+
+**2. Guided autonomy, not free autonomy.**
+Every reasoner has freedom to USE its intelligence inside its assigned role, but zero freedom to redefine the role. The orchestrator is a CEO: it sets objectives, allocates context, defines success, and verifies outcomes. It does not micromanage steps. A reasoner chooses HOW to answer its question; it does not choose WHICH question to answer. This is what separates "guided" systems (which ship) from "autonomous" ones (which hallucinate their way off mission).
+
+> *"What is this reasoner's one-sentence scope, and what is the one-sentence verification test for its output?"*
+
+**3. Dynamic orchestration — the graph adapts to intermediate state.**
+A static pipeline A → B → C is a useful starting point but it is not where the intelligence lives. Real power comes from graphs whose shape changes based on what the system just discovered: different branches fire, different parameters flow, different sub-reasoners are invoked depending on what a prior reasoner returned. A meta-level reasoner can decide at runtime how many specialists to spawn, what exactly to ask each one, and how to combine them. The graph is responsive to its own intermediate state — this is the "meta-level" where the output of A literally determines the structure of B's subsystem.
+
+> *"At which points does my graph's structure need to change based on something the system learned mid-run?"*
+
+**4. Contextual fidelity — the orchestrator is a context broker.**
+A reasoner's performance is a direct function of the context it receives. Too little and it guesses. Too much and it drowns. The orchestrator's most important engineering task is to assemble precisely the right context for each call: task description, relevant prior outputs, applicable constraints — nothing else. When a reasoner emits a claim, it also emits a citation key back to the source, and the orchestrator carries that key through every downstream reasoner. The final output is not just correct; it is verifiable.
+
+> *"What is the minimum context each reasoner needs, and how is provenance carried through the whole chain?"*
+
+**5. Asynchronous parallelism — decompose to parallelize.**
+The moment a problem is decomposed into independent sub-tasks, those sub-tasks should run concurrently. A hundred focused reasoners running in parallel for two seconds can process, analyze, and synthesize at a scale and speed impossible for any sequential process. Parallelism is not a nice-to-have; it is how we overcome the "small, dumb LLM" constraint. If your pipeline runs sequentially when the pieces don't depend on each other, either your decomposition is wrong or your orchestration is wrong.
+
+> *"Which reasoners genuinely depend on which others, and can everything that doesn't `asyncio.gather` together?"*
+
+### What the principles produce
+
+When you apply all five to your specific problem, **the topology emerges on its own**. You never pick from a menu of named shapes.
+
+- **Decomposition produces depth.** Each reasoner has sub-reasoners, which have sub-reasoners. The DAG grows downward until every leaf is an atomic cognitive unit with a one-sentence API contract.
+- **Dynamic orchestration produces branching.** Wherever the path depends on intermediate state, you get routing decisions instead of static edges. Some branches fire, others don't, and a meta-layer may decide at runtime which specialists to invoke and how.
+- **Contextual fidelity produces clean data flow.** Claims carry provenance. Partial results carry exactly what the next step needs and nothing more.
+- **Asynchronous parallelism produces fan-out at every layer.** Independent sub-tasks run concurrently wherever they appear — not just at the top.
+- **Guided autonomy produces specialization.** Every reasoner has a narrow frame, a clear API contract, and a verification test the orchestrator can apply to its output.
+
+**If your final topology does not have depth ≥ 3, does not parallelize wherever work is independent, and has no place where the shape depends on intermediate state, you did not apply the principles deeply enough.** Go back and ask the five questions again.
+
+### Bad shape — flat star (the default a coding agent will reach for)
+
 ```
 entry_orchestrator
 ├── specialist_1   ──┐
@@ -39,68 +93,56 @@ entry_orchestrator
    synthesizer
 ```
 
-This is depth = 2 (entry → specialist → done). It's basically `asyncio.gather([llm_call_1, llm_call_2, ...])` with extra ceremony. Easy to write, but it doesn't earn the AgentField label.
+Depth = 2. Every sub-task is a sibling of every other sub-task. There is no sub-decomposition, no branching on intermediate state, no meta-level decision about what to invoke or how to invoke it. This is the shape the principles reject by default. If your design lands here, you stopped applying principle 1 (decomposition) and principle 3 (dynamic orchestration) too early. It is `asyncio.gather([llm_call_1, llm_call_2, ...])` with extra ceremony. Go back and ask the five questions again.
 
-**Good shape — composition cascade (depth ≥ 3, parallelism at multiple levels):**
-```
-triage_case (entry)
-├── case_classifier ─────────────┐
-│   └── chief_complaint_parser   │
-│       └── medical_term_normalizer
-│
-├── ami_assessor                 │  ← all parallel
-│   ├── cardiac_risk_calculator (deterministic skill)
-│   ├── ami_pattern_matcher (.ai)
-│   │   └── ecg_finding_classifier (.ai called by ami_pattern_matcher when needed)
-│   └── biomarker_predictor (.ai)
-│
-├── pe_assessor                  │
-│   ├── wells_score_calculator (deterministic skill)
-│   ├── dyspnea_grader (.ai)
-│   └── dvt_history_checker (.ai)
-│
-├── stroke_assessor              │
-│   ├── fast_screen (.ai)
-│   └── nihss_estimator (.ai called only if fast_screen positive)
-│
-└── adversarial_synthesizer ─────┘
-    ├── steel_man_alternative_dx (.ai called once per primary assessment)
-    └── confidence_reconciler (.ai)
-        └── deterministic_safety_overrides (plain Python)
-```
+### Non-negotiable invariants (apply regardless of what shape the principles produce)
 
-This system has depth 4, runs **at least three parallelism waves**, and each "specialist" is itself composed of 2–4 sub-reasoners that may call each other. **Each reasoner has a single cognitive responsibility you could write a one-line API contract for.** Reasoners that always co-execute become one reasoner; reasoners that have distinct judgment surfaces stay separate.
+- **Every reasoner has a one-sentence API contract** you could write on a sticky note. If you can't, it is doing too much.
+- **Every reasoner produces a flat output** of 2–4 attributes. Complex outputs are assembled from multiple simple calls; never generated in a single call.
+- **Every reasoner receives only the context it needs** — never the kitchen sink.
+- **Claims carry citation keys.** Provenance flows through the whole graph.
+- **Independent work runs in parallel.** Sequential pipelines of independent steps are always wrong.
+- **Deterministic work lives in `@app.skill()` or plain helpers** — never use an LLM for anything a `for` loop could do. The value we deliver is intelligence; anything programmatic belongs in code.
+- **Depth ≥ 3 layers** from entry to leaf. Two layers means you stopped decomposing too early.
+- **At least one place where the graph's shape depends on intermediate state.** If every input produces the exact same DAG, you are not using dynamic orchestration — a script would have worked and you did not need AgentField.
+- **Reasoners do not redefine their own roles.** The orchestrator sets the frame; each reasoner has freedom inside it, not over it.
 
-**Why this matters:**
-1. **Each reasoner is replaceable.** Want to swap `wells_score_calculator` for a more accurate one? Change one file. The flat-star pattern would have that logic buried inside a 200-line `pe_assessor` reasoner.
-2. **Each reasoner is testable in isolation.** You can `curl /api/v1/execute/medical-triage.wells_score_calculator` directly with a synthetic input. The flat-star pattern only exposes the entry reasoner.
-3. **Each reasoner is reusable.** `medical_term_normalizer` can be called from `chief_complaint_parser` AND from `comorbidity_amplifier` AND from a future `discharge_summary_generator`. The flat-star pattern duplicates logic across specialists.
-4. **Each reasoner is observable.** The control plane workflow DAG shows the full call tree, not just a single `gather`. The verifiable credential chain has structure.
-5. **Parallelism happens at multiple levels.** The flat-star fan-outs N specialists once. The deep DAG fans out N specialists × M sub-calls each, with the orchestration `asyncio.gather`-ing at each layer. Total wall-clock time goes down even though total calls go up.
+### Reference patterns live in `architecture-patterns.md`
 
-**Concrete rules:**
-- If a reasoner has more than ~30 lines of body code, it's probably 2 reasoners
-- If two reasoners always call each other in sequence, they should be one reasoner (or one reasoner with a deterministic helper)
-- If your entry reasoner is the ONLY thing that calls `app.call`, the architecture is too flat — push the calls down into the specialists
-- If your topology can be drawn as a literal star, throw it out and design for depth
-- A reasoner should have a clear API contract you could write in one sentence: *"Given X, return Y. Calls Z, W."*
+When you have walked the five principles and want to sanity-check your topology against known-good compositions (parallel hunters, HUNT→PROVE, streaming, meta-prompting, control loops, fan-out→filter→gap-find, reactive enrichment, etc.), read `references/architecture-patterns.md`. Treat those patterns as **names for emergent consequences of the principles**, not as a menu to pick from. They are useful vocabulary for describing what you built, not templates to copy into a new problem.
 
-**The unit of intelligence is the reasoner. Treat them like software APIs and the system writes itself.**
+**The unit of intelligence is the reasoner. Apply the five principles to your problem. The shape will emerge.**
 
 ## The non-negotiable promise
 
-Every invocation of this skill must end with the user able to run **two commands** and get a working multi-reasoner system:
+Every invocation of this skill must end with the user able to run a small set of commands and see a real reasoned answer come back.
 
 ```bash
+# 1. Bring the stack up
 docker compose up --build
-curl -X POST http://localhost:8080/api/v1/execute/<node>.<entry_reasoner> \
+
+# 2. Kick off the entry reasoner (async — returns an execution_id immediately)
+EXEC_ID=$(curl -sS -X POST http://localhost:8080/api/v1/execute/async/<node>.<entry_reasoner> \
   -H 'Content-Type: application/json' \
-  -d '{"input": {"...": "..."}}'
+  -d '{"input": {"...": "..."}}' | jq -r '.execution_id')
+
+# 3. Poll until done and print the result
+while :; do
+  R=$(curl -sS http://localhost:8080/api/v1/executions/$EXEC_ID)
+  S=$(echo "$R" | jq -r '.status')
+  case "$S" in
+    succeeded) echo "$R" | jq '.result'; break ;;
+    failed)    echo "$R" | jq '.'; break ;;
+    *)         sleep 2 ;;
+  esac
+done
 ```
 
-If you cannot deliver that, you have failed. No theoretical architectures. No "here's how you would do it." A running stack and a curl that returns a real reasoned answer.
+If you cannot deliver that, you have failed. No theoretical architectures. No "here's how you would do it." A running stack and a real reasoned answer.
 
-**Note the curl body shape: `{"input": {...kwargs...}}`** — the control plane wraps reasoner kwargs in an `input` field. Verified against `control-plane/internal/handlers/execute.go:1000`. Many coding agents get this wrong.
+**Why async by default:** the control plane enforces a hard **90-second timeout** on the sync endpoint `POST /api/v1/execute/<target>`. Any deep composition (parallel specialists, meta-level spawning, multi-layer fan-out) can easily exceed that. The async endpoint `POST /api/v1/execute/async/<target>` returns an `execution_id` immediately and the caller polls `GET /api/v1/executions/<id>` — no time budget, no ceiling, no hanging curl. **Always use async in the canonical smoke test.** Use the sync endpoint only when you can genuinely guarantee the entire pipeline finishes in under 90 seconds.
+
+**Note the request body shape: `{"input": {...kwargs...}}`** — the control plane wraps reasoner kwargs in an `input` field. Verified against `control-plane/internal/handlers/execute.go`. Many coding agents get this wrong.
 
 ## Workflow (universal — works for any coding agent)
 
@@ -160,7 +202,7 @@ The four infrastructure files are zero-change for the agent: Dockerfile installs
 | File | Load when |
 |---|---|
 | `choosing-primitives.md` | **Every invocation** — before any code |
-| `architecture-patterns.md` | Designing inter-reasoner flow / picking HUNT→PROVE, parallel hunters, fan-out, streaming, meta-prompting |
+| `architecture-patterns.md` | Designing inter-reasoner flow / picking the right shape — sequential cascade, parallel fan-out, dynamic routing, streaming, meta-prompting, HUNT→PROVE (only when false positives are expensive), etc. |
 | `scaffold-recipe.md` | Actually writing files / docker-compose / Dockerfile |
 | `verification.md` | Writing the smoke test ladder or declaring done |
 | `project-claude-template.md` | Generating the per-project CLAUDE.md (always) |
@@ -273,8 +315,38 @@ The public entry reasoner is decorated with `tags=["entry"]` so it surfaces in t
 | `app.harness(provider="claude-code")` in a default scaffold | Default container has no `claude` CLI. Use `app.ai(tools=[...])` or a chunked-loop reasoner. See "Harness availability gate" |
 | `input_schema=` or `output_schema=` parameter on `@app.reasoner` | These don't exist. Schemas come from type hints |
 | `app.serve()` in `__main__` | `app.run()` — auto-detects CLI vs server mode |
+| Passing a Pydantic instance (or a list/dict of them) across `app.call` and expecting the receiver to get the instance | **Cross-boundary data never auto-reconstitutes.** The receiver gets plain `dict` / `list[dict]` regardless of type hints. Either reconstruct explicitly on the receiving side (`Model(**payload)`) OR render to prose in the caller and pass a string. See `choosing-primitives.md` → "Cross-boundary data does NOT auto-reconstitute" |
+| Trusting prose descriptions of framework contracts with words like "every", "all", "transparently forwards" | **Surface contracts are always narrower than the words describing them.** Verify the exact attribute or method you plan to use against the enumerated list in `choosing-primitives.md`. If it's not on the list, treat it as unsupported |
+| Treating static validation (`py_compile`, `docker compose config`, type checks) as sufficient proof the build works | Static checks catch syntax and shape, not contract drift. A build is not done until the canonical async curl has been fired against the live stack and returned `status: "succeeded"` with a real reasoned `result`. See "Mandatory live smoke test before handoff" |
 
 When the user explicitly demands a rejected pattern, name the rejection, explain *why* in one sentence, propose the AgentField alternative, and only build it their way after they've confirmed they understand the tradeoff. Add a `# NOTE: User requested X over canonical Y` comment.
+
+## Mandatory live smoke test before handoff
+
+Static validation — `python3 -m py_compile`, `docker compose config`, visual invariants, type checks — is **necessary but not sufficient**. None of those checks exercise the live call graph. None of them catch contract drift between reasoners. None of them reveal runtime errors like a cross-boundary type mismatch, a missing proxied attribute, a wrong env var name, or an unreachable sub-reasoner.
+
+**A build is not done until the canonical async curl from section 7 of the Output Contract has been fired against the live stack and returned `status: "succeeded"` with a real reasoned `result` payload.** No exceptions.
+
+The required sequence before you tell the user "it's ready":
+
+1. `docker compose up --build -d` — bring the stack up.
+2. Poll `/api/v1/discovery/capabilities` (see section 6) until the agent is registered and every reasoner you defined is listed.
+3. Fire the canonical async curl from the README with realistic input.
+4. Poll `/api/v1/executions/<id>` until `status` transitions to either `succeeded` or `failed`.
+5. If `status == "succeeded"`: read the `result` field and confirm it is a real structured response from your entry reasoner — not an empty object, not a fallback, not a half-finished dict.
+6. If `status == "failed"`: read the `error` field AND tail the agent container logs (`docker compose logs <slug> --tail=100`) to find the actual stack trace. Fix the bug. Go back to step 1.
+
+**Do not hand off a build that has only passed static checks.** Static validation means "the files are syntactically valid and the compose graph is shaped correctly". It does not mean "the reasoners can actually call each other, the type contracts line up at runtime, the prompts fit in the context window, and the final synthesis produces something coherent." Only the live execution proves those things.
+
+**Common runtime failures that ONLY show up in the live smoke test:**
+
+- `AttributeError: '<object>' has no attribute '<X>'` — typically a cross-boundary data reconstitution bug (a structured payload arrived as a dict, code tried to access it as a model). See `choosing-primitives.md` → "Cross-boundary data does NOT auto-reconstitute".
+- `AttributeError: '<framework object>' has no attribute '<X>'` — a framework surface contract was narrower than assumed. The attribute does not proxy. See `choosing-primitives.md` → router surface table.
+- `TypeError: argument after ** must be a mapping, not <T>` — a downstream reasoner tried to `**payload` a value that wasn't a dict. Almost always the same cross-boundary issue.
+- A reasoner returned an empty or half-filled schema — usually means an upstream `.ai()` call had a `confident=False` result and the fallback path returned a safe-default instance, but the orchestrator didn't notice and passed the default downstream as if it were real data.
+- The pipeline timed out — either the model is too slow, the fan-out is too wide for the sync endpoint, or a sub-reasoner is stuck waiting on something. Switch the smoke test to async if you haven't already.
+
+**The general rule (applies to any multi-component system, not just this one):** the only test that proves a distributed system works is the test that exercises the distribution. Running the canonical path against the live system is not optional; it is the single most important validation step, and the one most likely to catch subtle cross-component contract bugs. Never hand off without it.
 
 ## Rationalization counters & red flags
 
@@ -335,23 +407,32 @@ After the stack is up, open these URLs in your browser:
 
 ### 6. ✅ Verify the build (in another terminal)
 
+Use `/api/v1/discovery/capabilities` as the **primary, durable registration check**. The `/api/v1/nodes` endpoint has filter behaviour that varies across control-plane versions and deployments — a node that successfully registered can still return empty under some filter combinations. Discovery is the only introspection path whose semantics are stable across versions.
+
 ```bash
 # 1. Control plane up?
 curl -fsS http://localhost:8080/api/v1/health | jq '.status'
 
-# 2. Agent node registered? (use ?health_status=any — default filter can hide healthy nodes)
-curl -fsS 'http://localhost:8080/api/v1/nodes?health_status=any' | jq '.nodes[] | {id: .node_id, status: .status}'
-
-# 3. All reasoners discoverable?
+# 2. Agent registered and reasoners discoverable? (PRIMARY CHECK — always use this)
 #    Response shape: .capabilities[].reasoners[].id (NOT .reasoners[].name)
 curl -fsS http://localhost:8080/api/v1/discovery/capabilities \
-  | jq '.capabilities[] | select(.agent_id=="<slug>") | .reasoners | map({id, tags})'
+  | jq '.capabilities[] | select(.agent_id=="<slug>") | {
+      agent_id,
+      n_reasoners: (.reasoners | length),
+      entry: [.reasoners[] | select(.tags[]? == "entry") | .id],
+      all_reasoner_ids: [.reasoners[].id]
+    }'
 ```
 
-### 7. 🎯 Try it — sample curl
+If the JSON above returns your `agent_id` with `n_reasoners > 0` and an `entry` array containing at least one id, **registration succeeded**. That is the only thing that matters. If you also want to look at `/api/v1/nodes`, do it as a secondary diagnostic — never as the primary gate — and do not worry if it shows `health: "unknown"` or returns an empty list; those are cosmetic/filter artifacts, not registration failures.
+
+### 7. 🎯 Try it — sample async curl (canonical)
+
+**Use async.** Multi-reasoner compositions routinely exceed the 90-second timeout on the sync endpoint. The canonical smoke test kicks off the async endpoint and polls until the execution succeeds.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
+# 1. Kick off — returns an execution_id immediately
+EXEC_ID=$(curl -sS -X POST http://localhost:8080/api/v1/execute/async/<slug>.<entry_reasoner> \
   -H 'Content-Type: application/json' \
   -d '{
     "input": {
@@ -359,12 +440,26 @@ curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
       "<param2>": <realistic value>,
       "model": "openrouter/google/gemini-2.5-flash"
     }
-  }' | jq
+  }' | jq -r '.execution_id')
+echo "Execution: $EXEC_ID"
+
+# 2. Poll until done and print the result
+while :; do
+  R=$(curl -sS http://localhost:8080/api/v1/executions/$EXEC_ID)
+  S=$(echo "$R" | jq -r '.status')
+  case "$S" in
+    succeeded) echo "$R" | jq '.result'; break ;;
+    failed)    echo "$R" | jq '.'; break ;;
+    *)         sleep 2 ;;
+  esac
+done
 ```
 
-**The curl above must use realistic data the user can run as-is and see a real reasoned answer.** Do not use placeholder values like `"foo"` or `"test"`. Use concrete data that actually exercises every reasoner in the system. The optional `"model"` field overrides the AIConfig default per-request — show it in the example so users discover the per-request override.
+**The payload must use realistic data the user can run as-is and see a real reasoned answer.** Do not use placeholder values like `"foo"` or `"test"`. Use concrete values that actually exercise every reasoner in the system. The optional `"model"` field overrides the AIConfig default per-request — show it in the example so users discover the per-request override.
 
-If the user provided test data in the brief (e.g. a sample patient case, a sample contract, a sample loan application), use THAT data verbatim in this curl. The first execution they run should be the most demonstrative one.
+If the user provided test data in the brief (sample input, sample record, sample document), use THAT data verbatim in this curl. The first execution they run should be the most demonstrative one.
+
+**When it is safe to use the sync endpoint instead:** only if you can genuinely guarantee the entire pipeline — every layer of fan-out, every child `app.call`, every `.ai()` call, every retry — finishes in under ~60 seconds. If the system uses parallel specialists, meta-prompting, or slow models, use async. When in doubt, use async.
 
 ### 8. 🏆 Showpiece — verifiable workflow chain
 
@@ -377,7 +472,7 @@ This is the cryptographic verifiable credential chain — every reasoner that ra
 
 ### 9. Next iteration upgrade
 
-One concrete suggestion (e.g., "swap the intake `.ai()` for a chunked-loop reasoner if inputs grow past 2 pages", "add a second adversarial wave with a different prompt for the highest-stakes branches").
+One concrete suggestion tailored to the shape you actually built. Examples: *"swap the intake `.ai()` for a chunked-loop reasoner if inputs grow past 2 pages"*, *"add per-document caching via `app.memory` with scope=agent once volume justifies it"*, *"split `query_planner` into `query_decomposer` + `constraint_extractor` when queries get multi-clause"*, *"add an adversarial reviewer ONLY if the cost of a wrong verdict crosses a real-world threshold you can name"*, *"swap the sequential cascade for a streaming pipeline once you need sub-500ms first-token latency"*.
 
 ## TypeScript
 

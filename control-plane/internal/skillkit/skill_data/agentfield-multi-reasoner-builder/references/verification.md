@@ -57,14 +57,16 @@ When the user's brief implies a slow pipeline, default to `gemini-2.5-flash` and
 | Endpoint | What it tells you |
 |---|---|
 | `GET /api/v1/health` | Control plane up |
-| `GET /api/v1/nodes?health_status=any` | Which agent nodes have registered (the default filter is `active`, which can return empty even when agents are healthy — use `?health_status=any` to be safe) |
-| `GET /api/v1/nodes/:node_id` | Details of one node |
-| `GET /api/v1/discovery/capabilities` | All reasoners and skills. **Response shape:** `{capabilities: [{agent_id, reasoners: [{id, tags, ...}]}]}` — note `agent_id` not `node_id`, and reasoners live under `.capabilities[].reasoners[]` not `.reasoners[]`. The reasoner identifier field is `id` not `name` |
+| `GET /api/v1/discovery/capabilities` | **Primary registration check — always use this one.** All reasoners and skills across all nodes. Response shape: `{capabilities: [{agent_id, reasoners: [{id, tags, ...}]}]}` — note `agent_id` not `node_id`, reasoners live under `.capabilities[].reasoners[]`, and the reasoner identifier field is `id` not `name`. Stable across every control-plane version |
+| `GET /api/v1/nodes` | Secondary diagnostic. Lists registered nodes but its filter parameters (`?health_status=...`) have behaviour that varies between control-plane builds — a freshly registered, correctly working node may still return empty under some filter combinations, or report `health: "unknown"` due to heartbeat-shape mismatches between SDK and control-plane versions. **Never use this as a primary "did my agent register" gate.** If discovery/capabilities shows your agent, it is registered regardless of what `/nodes` says |
+| `GET /api/v1/nodes/:node_id` | Details of one node (same caveats as above) |
 | `GET /api/v1/agentic/discover?q=<keyword>` | Search the API catalog by keyword |
-| `POST /api/v1/execute/:target` | **Sync** execute. Body is `{"input": {...kwargs...}}`. **90-second hard timeout at the control plane.** |
-| `POST /api/v1/execute/async/:target` | Async execute, returns an `execution_id` immediately. Use this when the pipeline > 90s |
-| `GET /api/v1/executions/:id` | Status of an async execution |
+| `POST /api/v1/execute/:target` | **Sync** execute. Body is `{"input": {...kwargs...}}`. **90-second hard timeout at the control plane.** Avoid for multi-reasoner compositions |
+| `POST /api/v1/execute/async/:target` | **Async execute — canonical path for multi-reasoner compositions.** Returns an `execution_id` immediately. Poll `/api/v1/executions/:id` for the result. No time ceiling |
+| `GET /api/v1/executions/:id` | Status + result of an async execution. Status transitions: `running` → `succeeded` / `failed` |
 | `GET /api/v1/did/workflow/:workflow_id/vc-chain` | Verifiable credential chain for an executed workflow (the AgentField superpower no other framework has) |
+
+**Rule of thumb for framework introspection (applies to any system, not just this one):** prefer the endpoint whose semantics are stable across versions and deployments. "Does my reasoner exist?" is a durable question answered the same way on every build. "Is my node healthy according to filter parameters X, Y, and Z?" is a version-dependent question whose answer can change without the system actually being broken. Always use the durable question as the primary gate.
 
 ## Inspect the live workflow DAG
 
@@ -87,21 +89,41 @@ In the README, give the user EXACTLY these commands in this order. Do not abbrev
 ```bash
 # After docker compose up, in another terminal:
 
-# 1. Health
+# 1. Control plane up?
 curl -fsS http://localhost:8080/api/v1/health | jq '.status'
 
-# 2. Node registered? (use ?health_status=any — default filter can hide healthy nodes)
-curl -fsS 'http://localhost:8080/api/v1/nodes?health_status=any' | jq '.nodes[] | {id: .node_id, status: .status}'
-
-# 3. Reasoners discoverable? (note .capabilities[].reasoners[].id, NOT .reasoners[].name)
+# 2. Agent registered and reasoners discoverable? (PRIMARY CHECK — durable across versions)
+#    Response shape: .capabilities[].reasoners[].id (NOT .reasoners[].name)
 curl -fsS http://localhost:8080/api/v1/discovery/capabilities \
-  | jq '.capabilities[] | select(.agent_id=="<slug>") | .reasoners | map({id, tags})'
+  | jq '.capabilities[] | select(.agent_id=="<slug>") | {
+      agent_id,
+      n_reasoners: (.reasoners | length),
+      entry: [.reasoners[] | select(.tags[]? == "entry") | .id],
+      all_reasoner_ids: [.reasoners[].id]
+    }'
 
-# 4. THE BIG ONE — run the entry reasoner with real data
+# 3. THE BIG ONE — run the entry reasoner async (avoids the 90s sync timeout)
 #    Body shape: {"input": {...kwargs...}} — kwargs are NEVER raw at the top level
-curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
+EXEC_ID=$(curl -sS -X POST http://localhost:8080/api/v1/execute/async/<slug>.<entry_reasoner> \
   -H 'Content-Type: application/json' \
-  -d '{"input": {"<kwarg1>": "<value>", "model": "openrouter/google/gemini-2.5-flash"}}' | jq
+  -d '{
+    "input": {
+      "<kwarg1>": "<realistic value>",
+      "model": "openrouter/google/gemini-2.5-flash"
+    }
+  }' | jq -r '.execution_id')
+echo "Execution: $EXEC_ID"
+
+# 4. Poll until done and print the result
+while :; do
+  R=$(curl -sS http://localhost:8080/api/v1/executions/$EXEC_ID)
+  S=$(echo "$R" | jq -r '.status')
+  case "$S" in
+    succeeded) echo "$R" | jq '.result'; break ;;
+    failed)    echo "$R" | jq '.'; break ;;
+    *)         sleep 2 ;;
+  esac
+done
 
 # 5. (Optional showpiece) the full verifiable workflow chain
 LAST_EXEC=$(curl -s http://localhost:8080/api/v1/executions | jq -r '.[0].workflow_id')

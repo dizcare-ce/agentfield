@@ -213,6 +213,44 @@ __all__ = ["committee_router", "specialists_router"]
 
 For trivial builds, skip the package and inline everything. Use `@app.reasoner()` directly on `app`. Don't create a router with one reasoner in it.
 
+### Referencing the node id from inside a router file
+
+Router files need to make `app.call(f"{node_id}.target", ...)` calls, but **`router.node_id` does not exist** — the router only proxies a fixed set of callables (`ai`, `call`, `memory`, `harness`), not arbitrary data attributes. The canonical pattern inside every router file:
+
+```python
+import os
+from agentfield import AgentRouter
+
+NODE_ID = os.getenv("AGENT_NODE_ID", "<slug>")   # same default as main.py
+router = AgentRouter(prefix="", tags=["..."])
+
+@router.reasoner()
+async def some_reasoner(payload: dict, model: str | None = None) -> dict:
+    return await router.call(f"{NODE_ID}.child_reasoner", payload=payload, model=model)
+```
+
+Never write `f"{router.node_id}.child"`. It will raise `AttributeError` at runtime. See `choosing-primitives.md` → router surface table.
+
+### Reasoners compose like normal function calls — this is the superpower
+
+Every reasoner is callable from every other reasoner, at any depth, in any shape. `app.call(f"{NODE_ID}.target", ...)` works **exactly like calling a regular Python function or hitting a REST endpoint** — you can invoke it from anywhere in your code: inside another reasoner's body, inside a loop, inside a branch, inside a recursive descent, inside a conditional that depends on a prior call's output, inside a meta-reasoner that decides at runtime which sub-reasoner to call and with what arguments.
+
+This is the thing you cannot do with a hand-authored static DAG (LangGraph, hand-written asyncio pipelines, CrewAI's fixed topology). A static DAG forces the entire call graph to be declared upfront. AgentField lets the call graph **emerge at runtime** from the reasoners' own intermediate decisions — the orchestrator body is just Python, and `app.call` is just a function, so everything Python can do (branching, recursion, loops, dynamic dispatch, meta-programming, runtime prompt construction) is available to your architecture.
+
+Use this power. Build graphs with real depth:
+
+- A reasoner deep inside a branch can call another reasoner at the top of the tree.
+- A reasoner can call itself recursively (with a depth cap) to drill into nested structure.
+- A meta-reasoner can synthesize a brand new prompt and then invoke a child reasoner with that prompt as a kwarg — the child's behavior is determined at runtime by a sibling's output.
+- A reasoner can fan out a `asyncio.gather` over N sub-reasoners where N itself was decided by an earlier reasoner.
+- A reasoner can call a sub-reasoner, read its result, and conditionally decide whether to call a completely different sub-reasoner next — the shape of the next layer is not committed until the current layer finishes.
+
+The only rule is that every `app.call` goes through the control plane (never direct HTTP), so the workflow DAG, the cryptographic provenance chain, and the observability layer see every edge. The resulting call graph is often impossible to draw upfront — that is the point. A static DAG would require you to enumerate every possible path; a composable reasoner system only walks the paths that actually apply to the current input.
+
+**What this means for your design:** do not constrain yourself to the shapes you can draw on a whiteboard. Decompose, make each reasoner a narrowly-scoped callable, then let orchestrator bodies invoke each other freely — deeply, conditionally, recursively, dynamically. The more the call graph depends on intermediate state, the more AgentField earns its place over simpler frameworks.
+
+**Important gotcha — cross-boundary serialization.** Because every `app.call` crosses a serialization boundary, structured payloads lose their runtime type identity in transit. Pydantic models become plain dicts on the receiving side regardless of type hints. Either reconstruct explicitly on the receiver (`Model(**payload)`), or render to a string on the caller before the call. Both are fine; pick whichever fits the boundary. See `choosing-primitives.md` → "Cross-boundary data does NOT auto-reconstitute" for the full treatment.
+
 ## File 3: `Dockerfile`
 
 **Use `af init --docker` to generate this. The command produces the universal shape below — do not customize.**
@@ -485,17 +523,76 @@ Then **run this visual-invariant checklist** against the generated files. Every 
 - [ ] No `app.harness(provider="...")` unless the Dockerfile installs the CLI AND main.py has a startup `shutil.which()` check
 - [ ] No `input_schema=` / `output_schema=` parameters on `@app.reasoner()`
 - [ ] README curl uses body shape `{"input": {...kwargs...}}` (NOT raw kwargs at top level)
+- [ ] README canonical smoke test uses `POST /api/v1/execute/async/...` + polling `GET /api/v1/executions/:id` (NOT sync — multi-reasoner pipelines exceed the 90s sync timeout)
+- [ ] README registration check uses `GET /api/v1/discovery/capabilities` as the primary gate (NOT `/api/v1/nodes` with filter params — its behaviour varies across control-plane builds)
 - [ ] `Agent(agentfield_server=os.getenv("AGENTFIELD_SERVER", ...))` — exact parameter name
 - [ ] `AGENT_CALLBACK_URL` set in compose to the in-network DNS name (`http://<service>:8001`)
-- [ ] Control plane has a healthcheck and the agent service uses `condition: service_healthy`
 - [ ] `auto_port=False` in `app.run()` so the port is deterministic
 - [ ] CLAUDE.md exists with no `<placeholder>` tokens left in it
 - [ ] `.env.example` lists `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
-- [ ] If reasoners are split across files: routers use `prefix=""` (or document the namespacing in the curl path)
+- [ ] If reasoners are split across files: routers read `NODE_ID = os.getenv("AGENT_NODE_ID", "<slug>")` and use `f"{NODE_ID}.target"` — NOT `f"{router.node_id}.target"` (that attribute does not exist)
+- [ ] No Pydantic instances or lists of Pydantic instances passed across `app.call(...)` boundaries. Either (a) reconstruct on the receiving side with `Model(**payload)`, or (b) render to prose in the caller and pass a string. See the "Fan-in handoff" section above
 - [ ] LLM-to-LLM context is passed as natural-language strings, not raw JSON dicts
 - [ ] Returning `dict` from an orchestrator reasoner is fine — Pydantic model returns are also fine — both work because schemas come from type hints
 
 If any box fails, **fix before handing off**. A "scaffold that almost works" is worth zero.
+
+### Mandatory live smoke test (before telling the user the build is ready)
+
+**Static validation is necessary but not sufficient.** `py_compile` and `docker compose config` check syntax and shape — they do NOT exercise the live call graph, do NOT catch cross-boundary type mismatches, do NOT reveal runtime contract drift between reasoners. A build is not done until the canonical async curl has been fired against the live stack and returned `status: "succeeded"` with a real reasoned `result`.
+
+Required sequence before handoff:
+
+```bash
+# 1. Bring the stack up
+docker compose up --build -d
+
+# 2. Wait for registration, using the durable primary check
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  READY=$(curl -fsS http://localhost:8080/api/v1/discovery/capabilities 2>/dev/null \
+    | jq -r '.capabilities[] | select(.agent_id=="<slug>") | .agent_id')
+  [ -n "$READY" ] && break
+  sleep 2
+done
+[ -z "$READY" ] && { echo "Agent never registered"; docker compose logs <slug> --tail=50; exit 1; }
+
+# 3. Fire the canonical async curl from the README with realistic input
+EXEC_ID=$(curl -sS -X POST http://localhost:8080/api/v1/execute/async/<slug>.<entry_reasoner> \
+  -H 'Content-Type: application/json' \
+  -d @./sample_payload.json | jq -r '.execution_id')
+
+# 4. Poll until done
+while :; do
+  R=$(curl -sS http://localhost:8080/api/v1/executions/$EXEC_ID)
+  S=$(echo "$R" | jq -r '.status')
+  case "$S" in
+    succeeded)
+      echo "$R" | jq '.result'
+      echo "✅ LIVE SMOKE TEST PASSED"
+      break
+      ;;
+    failed)
+      echo "❌ LIVE SMOKE TEST FAILED"
+      echo "$R" | jq '.'
+      docker compose logs <slug> --tail=100
+      exit 1
+      ;;
+    *)
+      sleep 2
+      ;;
+  esac
+done
+
+# 5. Tear down
+docker compose down
+```
+
+**If the live smoke test fails, DO NOT hand off.** Read the error field and the agent container logs, find the actual stack trace, fix the bug, start over from step 1. The two most common runtime failures that only surface here:
+
+- `AttributeError: '<object>' has no attribute '<X>'` — typically a cross-boundary data reconstitution bug (you passed a Pydantic model across `app.call` and the receiver tried to use it as one). Apply the fan-in handoff pattern above.
+- `AttributeError: 'AgentRouter' has no attribute '<X>'` — you tried to use a router attribute that isn't in the proxied set. Check the router surface table in `choosing-primitives.md` and switch to env-based access or direct agent access.
+
+**The general rule:** the only test that proves a distributed system works is the test that exercises the distribution. Run the canonical path against the live system before telling the user it's ready. Never hand off on static checks alone.
 
 ### Return-type note
 
