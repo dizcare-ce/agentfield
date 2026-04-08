@@ -136,6 +136,38 @@ docker run -p 8080:8080 agentfield/control-plane:latest
 
 [See the full production-ready feature set →](https://agentfield.ai/docs/learn/features?utm_source=github-readme&utm_campaign=github-readme&utm_id=github-readme-full-features)
 
+### Human-in-the-loop forms
+
+AgentField ships a built-in HITL portal at `/hitl`. Agents build structured forms using the `agentfield.hitl` SDK helpers — markdown context blocks, decision button groups, conditional fields — and pause execution with a single call. Reviewers open `/hitl` in any browser, fill in the form, and the agent resumes with their response. No external approval service, no webhook plumbing, no second system.
+
+The portal is a clean, responder-focused UI: inbox with live updates, tag and priority filters, readonly view after submission, and expiry handling. It co-exists with the existing external approval flow, so you can adopt it incrementally.
+
+```python
+from agentfield import hitl
+
+schema = hitl.Form(
+    title="Review PR #1138 — refactor auth middleware",
+    description="## Summary\n\nReplaces `session.Store` with `session.StoreEncrypted`.\n\n```diff\n- stored, err := session.Store(ctx, token)\n+ encrypted, err := session.StoreEncrypted(ctx, token)\n```",
+    tags=["pr-review"],
+    fields=[
+        hitl.ButtonGroup("decision", options=[
+            hitl.Option("approve",         "Approve"),
+            hitl.Option("request_changes", "Request changes", variant="secondary"),
+            hitl.Option("reject",          "Reject",          variant="destructive"),
+        ], required=True),
+        hitl.Textarea("comments", label="Comments",
+                      hidden_when={"field": "decision", "equals": "approve"},
+                      required=True),
+        hitl.Checkbox("block_merge", label="Block merge until resolved"),
+    ],
+).to_dict()
+
+result = await app.pause(form_schema=schema, tags=["pr-review"], expires_in_hours=24)
+decision = result.raw_response.get("decision")
+```
+
+See the [full HITL forms reference](docs/hitl.md) and the [PR review example](examples/python_agent_nodes/hitl_form/main.py).
+
 <div align="center">
 <img src="assets/features-strip.png" alt="90+ Production Features" width="100%" />
 </div>
@@ -200,6 +232,7 @@ docker run -p 8080:8080 agentfield/control-plane:latest
 |---|---|
 | Durable pause/resume | `await app.pause(reason="...")` |
 | Approval workflows with UI | `approval_request_url` for reviewers |
+| **Native HITL forms** | `app.pause(form_schema=hitl.Form(...).to_dict())` — built-in portal at `/hitl` |
 | Configurable timeouts | `expires_in_hours=24` + auto-escalation |
 | Crash-safe state | Survives agent restarts |
 
