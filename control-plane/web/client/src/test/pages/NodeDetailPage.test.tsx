@@ -6,7 +6,6 @@ import { NodeDetailPage } from "@/pages/NodeDetailPage";
 import type {
   AgentNodeDetailsForUIWithPackage,
   AgentStatus,
-  MCPHealthResponseModeAware,
 } from "@/types/agentfield";
 
 const pageState = vi.hoisted(() => ({
@@ -20,8 +19,6 @@ const pageState = vi.hoisted(() => ({
   getNodeDetailsWithPackageInfo: vi.fn<
     (nodeId: string, mode: string) => Promise<AgentNodeDetailsForUIWithPackage>
   >(),
-  getMCPHealthModeAware: vi.fn<(nodeId: string, mode: string) => Promise<MCPHealthResponseModeAware>>(),
-  getMCPServerMetrics: vi.fn<(nodeId: string) => Promise<unknown>>(),
   getNodeStatus: vi.fn<(nodeId: string) => Promise<AgentStatus>>(),
   startAgent: vi.fn<(nodeId: string) => Promise<unknown>>(),
   stopAgent: vi.fn<(nodeId: string) => Promise<unknown>>(),
@@ -63,9 +60,6 @@ vi.mock("@/hooks/useSSE", () => ({
 vi.mock("@/services/api", () => ({
   getNodeDetailsWithPackageInfo: (nodeId: string, mode: string) =>
     pageState.getNodeDetailsWithPackageInfo(nodeId, mode),
-  getMCPHealthModeAware: (nodeId: string, mode: string) =>
-    pageState.getMCPHealthModeAware(nodeId, mode),
-  getMCPServerMetrics: (nodeId: string) => pageState.getMCPServerMetrics(nodeId),
   getNodeStatus: (nodeId: string) => pageState.getNodeStatus(nodeId),
 }));
 
@@ -127,13 +121,6 @@ vi.mock("@/components/forms/EnvironmentVariableForm", () => ({
       Trigger configuration change
     </button>
   ),
-}));
-
-vi.mock("@/components/mcp", () => ({
-  MCPServerControls: () => <div>MCP Server Controls</div>,
-  MCPServerList: () => <div>MCP Server List</div>,
-  MCPToolExplorer: ({ serverAlias }: { serverAlias: string }) => <div>Tool Explorer {serverAlias}</div>,
-  MCPToolTester: ({ serverAlias }: { serverAlias: string }) => <div>Tool Tester {serverAlias}</div>,
 }));
 
 vi.mock("@/components/ReasonersSkillsTable", () => ({
@@ -286,28 +273,12 @@ describe("NodeDetailPage", () => {
     pageState.showError.mockReset();
     pageState.showInfo.mockReset();
     pageState.getNodeDetailsWithPackageInfo.mockReset();
-    pageState.getMCPHealthModeAware.mockReset();
-    pageState.getMCPServerMetrics.mockReset();
     pageState.getNodeStatus.mockReset();
     pageState.startAgent.mockReset();
     pageState.stopAgent.mockReset();
     pageState.reconcileAgent.mockReset();
 
     pageState.getNodeDetailsWithPackageInfo.mockResolvedValue(buildNode());
-    pageState.getMCPHealthModeAware.mockResolvedValue({
-      status: "ok",
-      mcp_servers: [{ alias: "server-a", status: "running", tool_count: 2 }],
-      mcp_summary: {
-        service_status: "ready",
-        running_servers: 1,
-        total_servers: 1,
-        total_tools: 2,
-        overall_health: 100,
-        has_issues: false,
-        capabilities_available: true,
-      },
-    });
-    pageState.getMCPServerMetrics.mockResolvedValue({});
     pageState.getNodeStatus.mockResolvedValue({
       status: "ok",
       lifecycle_status: "ready",
@@ -351,6 +322,7 @@ describe("NodeDetailPage", () => {
     render(<NodeDetailPage />);
 
     expect(await screen.findByRole("heading", { name: "agent-alpha" })).toBeInTheDocument();
+    const initialFetches = pageState.getNodeDetailsWithPackageInfo.mock.calls.length;
     expect(screen.getByText("Reasoners 1 Skills 1")).toBeInTheDocument();
     expect(screen.getByText("https://alpha.example.com")).toBeInTheDocument();
     expect(screen.getByText(/Verified/)).toBeInTheDocument();
@@ -366,17 +338,15 @@ describe("NodeDetailPage", () => {
     await waitFor(() => expect(pageState.reconcileAgent).toHaveBeenCalledWith("agent-alpha"));
 
     fireEvent.click(screen.getAllByRole("button", { name: /Refresh status/i })[0]);
-    await waitFor(() => expect(pageState.getNodeDetailsWithPackageInfo.mock.calls.length).toBeGreaterThanOrEqual(5));
+    await waitFor(() => expect(pageState.getNodeDetailsWithPackageInfo.mock.calls.length).toBeGreaterThan(initialFetches));
 
-    fireEvent.click(screen.getByRole("button", { name: /MCP Servers/i }));
-    expect(screen.getByText("MCP Server List")).toBeInTheDocument();
-    expect(pageState.navigate).toHaveBeenCalledWith("/nodes/agent-alpha#mcp-servers", { replace: true });
-
-    fireEvent.click(screen.getByRole("button", { name: /Tools/i }));
-    expect(screen.getByText("Tool Explorer server-a")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Configuration/i }));
+    expect(await screen.findByText("Trigger configuration change")).toBeInTheDocument();
+    expect(pageState.navigate).toHaveBeenCalledWith("/nodes/agent-alpha#configuration", { replace: true });
 
     fireEvent.click(screen.getByRole("button", { name: /Logs/i }));
     expect(screen.getByText("Logs for agent-alpha")).toBeInTheDocument();
+    expect(pageState.navigate).toHaveBeenCalledWith("/nodes/agent-alpha#logs", { replace: true });
   });
 
   it("shows the configuration tab flow and restart banner behavior", async () => {

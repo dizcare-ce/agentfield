@@ -8,7 +8,13 @@ import type { WorkflowSummary } from "@/types/workflows";
 const runsState = vi.hoisted(() => ({
   clipboardWriteText: vi.fn<(value: string) => Promise<void>>(),
   navigate: vi.fn<(value: string) => void>(),
-  mutateAsync: vi.fn<(executionId: string) => Promise<unknown>>(),
+  cancelMutateAsync: vi.fn<(executionId: string) => Promise<unknown>>(),
+  pauseMutateAsync: vi.fn<(executionId: string) => Promise<unknown>>(),
+  resumeMutateAsync: vi.fn<(executionId: string) => Promise<unknown>>(),
+  showSuccess: vi.fn<(message: string) => void>(),
+  showError: vi.fn<(message: string, details?: string) => void>(),
+  showWarning: vi.fn<(message: string) => void>(),
+  showRunNotification: vi.fn<(message: string) => void>(),
   search: "",
   isError: false,
   error: null as Error | null,
@@ -29,6 +35,13 @@ vi.mock("@tanstack/react-query", () => ({
       isLoading: false,
     };
   },
+}));
+
+vi.mock("@/components/ui/notification", () => ({
+  useSuccessNotification: () => runsState.showSuccess,
+  useErrorNotification: () => runsState.showError,
+  useWarningNotification: () => runsState.showWarning,
+  useRunNotification: () => runsState.showRunNotification,
 }));
 
 vi.mock("@/hooks/queries", async () => {
@@ -84,7 +97,15 @@ vi.mock("@/hooks/queries", async () => {
       };
     },
     useCancelExecution: () => ({
-      mutateAsync: runsState.mutateAsync,
+      mutateAsync: runsState.cancelMutateAsync,
+      isPending: false,
+    }),
+    usePauseExecution: () => ({
+      mutateAsync: runsState.pauseMutateAsync,
+      isPending: false,
+    }),
+    useResumeExecution: () => ({
+      mutateAsync: runsState.resumeMutateAsync,
       isPending: false,
     }),
   };
@@ -120,6 +141,7 @@ vi.mock("@/components/ui/button", () => ({
       {children}
     </button>
   ),
+  buttonVariants: () => "button",
 }));
 
 vi.mock("@/components/ui/badge", () => ({
@@ -271,9 +293,11 @@ vi.mock("@/components/ui/json-syntax-highlight", () => ({
   formatTruncatedFormattedJson: (value: unknown, _maxLength?: number) => JSON.stringify(value, null, 2),
 }));
 
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>();
   const Icon = ({ className }: { className?: string }) => <span className={className}>icon</span>;
   return {
+    ...actual,
     ArrowDown: Icon,
     ArrowLeftRight: Icon,
     ArrowUp: Icon,
@@ -316,7 +340,13 @@ describe("RunsPage", () => {
     runsState.isError = false;
     runsState.error = null;
     runsState.navigate.mockReset();
-    runsState.mutateAsync.mockReset();
+    runsState.cancelMutateAsync.mockReset();
+    runsState.pauseMutateAsync.mockReset();
+    runsState.resumeMutateAsync.mockReset();
+    runsState.showSuccess.mockReset();
+    runsState.showError.mockReset();
+    runsState.showWarning.mockReset();
+    runsState.showRunNotification.mockReset();
     runsState.clipboardWriteText.mockReset();
     runsState.clipboardWriteText.mockResolvedValue();
     runsState.runs = [
@@ -368,10 +398,11 @@ describe("RunsPage", () => {
       "/runs/compare?a=run-1-long-id&b=run-2-long-id",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Cancel running/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Cancel 2 runs/i }));
     await waitFor(() => {
-      expect(runsState.mutateAsync).toHaveBeenCalledWith("exec-1");
-      expect(runsState.mutateAsync).toHaveBeenCalledWith("exec-2");
+      expect(runsState.cancelMutateAsync).toHaveBeenCalledWith("exec-1");
+      expect(runsState.cancelMutateAsync).toHaveBeenCalledWith("exec-2");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Copy run ID run-1-long-id/i }));

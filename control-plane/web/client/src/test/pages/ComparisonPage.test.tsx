@@ -147,9 +147,11 @@ vi.mock("@/utils/reasonerCompareExtract", () => ({
   formatOutputUsageHint: () => "tool output",
 }));
 
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>();
   const Icon = ({ className }: { className?: string }) => <span className={className}>icon</span>;
   return {
+    ...actual,
     AlertTriangle: Icon,
     ArrowLeft: Icon,
     ChevronDown: Icon,

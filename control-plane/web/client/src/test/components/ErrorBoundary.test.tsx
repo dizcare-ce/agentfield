@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ErrorBoundary,
-  MCPErrorBoundary,
   useErrorHandler,
   withErrorBoundary,
 } from "@/components/ErrorBoundary";
@@ -114,7 +113,7 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("Recovered child")).toBeInTheDocument();
   });
 
-  it("supports custom fallbacks, reset keys, HOCs, hooks, and MCP-specific fallback UI", () => {
+  it("supports custom fallbacks, reset keys, HOCs, and hooks", () => {
     let crash = true;
 
     function Crashy({ active }: { active: boolean }) {
@@ -151,14 +150,5 @@ describe("ErrorBoundary", () => {
 
     const { result } = renderHook(() => useErrorHandler());
     expect(() => result.current(new Error("Manual error"))).toThrow("Manual error");
-
-    render(
-      <MCPErrorBoundary nodeId="node-1" componentName="Trace panel">
-        <Crashy active={true} />
-      </MCPErrorBoundary>
-    );
-    expect(screen.getByText("MCP Component Error")).toBeInTheDocument();
-    expect(screen.getByText(/Trace panel/)).toBeInTheDocument();
-    expect(screen.getByText(/\(Node: node-1\)/)).toBeInTheDocument();
   });
 });
