@@ -10,13 +10,82 @@ You are not a prompt engineer. You are a **systems architect** building composit
 ## HARD GATE — READ BEFORE ANYTHING ELSE
 
 > **Do NOT write any code, generate any file, or scaffold any project until you have:**
-> 1. Asked the user the ONE grooming question (below) and received their answer
+> 1. Either (a) asked the ONE grooming question and received an answer, OR (b) confirmed that the user's first message ALREADY contains a clear use case — in which case **skip the question and proceed straight to design**. The "build now, key later" rule (below in the grooming protocol) ALWAYS overrides this gate when the brief is complete; you do NOT need a key in chat to start building because the user will paste it into `.env` themselves
 > 2. Read `references/choosing-primitives.md` (mandatory — sets the philosophy and the real SDK signatures)
-> 3. Designed the reasoner topology (which `@app.reasoner` units, who calls whom, which are `.ai` vs deterministic skills, where the dynamic routing happens)
+> 3. Designed the reasoner topology with **depth, not just breadth** (see "Reasoners are software APIs" below) — which `@app.reasoner` units, who calls whom, which are `.ai` vs deterministic skills, where the dynamic routing happens
 >
-> **Do NOT default to a single big reasoner with one `app.ai` call.** That's a CrewAI clone. Decompose. If you cannot draw your system as a non-trivial graph, you have not architected anything.
+> **Do NOT default to a single big reasoner with one `app.ai` call.** That's a CrewAI clone. Decompose.
+>
+> **Do NOT default to a single fat orchestrator that calls every specialist directly in one fan-out.** That's a star pattern, also a CrewAI clone wearing a different costume. Build deep call chains (see below).
+>
+> If you cannot draw your system as a non-trivial graph **with depth ≥ 3**, you have not architected anything.
 >
 > Violating the letter of this gate is violating the spirit of the gate. There are no exceptions for "simple" use cases.
+
+## The unit of intelligence is the reasoner — treat them as software APIs
+
+This is the most important framing in the entire skill. **Each reasoner is a microservice. Reasoners call other reasoners the way one REST API calls another.** The orchestrator at the top is not the only thing that calls reasoners — every reasoner can (and often should) call sub-reasoners that are themselves further decomposed.
+
+**Bad shape — flat star (the default a coding agent will reach for):**
+```
+entry_orchestrator
+├── specialist_1   ──┐
+├── specialist_2   ──┤
+├── specialist_3   ──┼── all called once, in parallel, by the orchestrator
+├── specialist_4   ──┤
+└── specialist_5   ──┘
+        │
+        v
+   synthesizer
+```
+
+This is depth = 2 (entry → specialist → done). It's basically `asyncio.gather([llm_call_1, llm_call_2, ...])` with extra ceremony. Easy to write, but it doesn't earn the AgentField label.
+
+**Good shape — composition cascade (depth ≥ 3, parallelism at multiple levels):**
+```
+triage_case (entry)
+├── case_classifier ─────────────┐
+│   └── chief_complaint_parser   │
+│       └── medical_term_normalizer
+│
+├── ami_assessor                 │  ← all parallel
+│   ├── cardiac_risk_calculator (deterministic skill)
+│   ├── ami_pattern_matcher (.ai)
+│   │   └── ecg_finding_classifier (.ai called by ami_pattern_matcher when needed)
+│   └── biomarker_predictor (.ai)
+│
+├── pe_assessor                  │
+│   ├── wells_score_calculator (deterministic skill)
+│   ├── dyspnea_grader (.ai)
+│   └── dvt_history_checker (.ai)
+│
+├── stroke_assessor              │
+│   ├── fast_screen (.ai)
+│   └── nihss_estimator (.ai called only if fast_screen positive)
+│
+└── adversarial_synthesizer ─────┘
+    ├── steel_man_alternative_dx (.ai called once per primary assessment)
+    └── confidence_reconciler (.ai)
+        └── deterministic_safety_overrides (plain Python)
+```
+
+This system has depth 4, runs **at least three parallelism waves**, and each "specialist" is itself composed of 2–4 sub-reasoners that may call each other. **Each reasoner has a single cognitive responsibility you could write a one-line API contract for.** Reasoners that always co-execute become one reasoner; reasoners that have distinct judgment surfaces stay separate.
+
+**Why this matters:**
+1. **Each reasoner is replaceable.** Want to swap `wells_score_calculator` for a more accurate one? Change one file. The flat-star pattern would have that logic buried inside a 200-line `pe_assessor` reasoner.
+2. **Each reasoner is testable in isolation.** You can `curl /api/v1/execute/medical-triage.wells_score_calculator` directly with a synthetic input. The flat-star pattern only exposes the entry reasoner.
+3. **Each reasoner is reusable.** `medical_term_normalizer` can be called from `chief_complaint_parser` AND from `comorbidity_amplifier` AND from a future `discharge_summary_generator`. The flat-star pattern duplicates logic across specialists.
+4. **Each reasoner is observable.** The control plane workflow DAG shows the full call tree, not just a single `gather`. The verifiable credential chain has structure.
+5. **Parallelism happens at multiple levels.** The flat-star fan-outs N specialists once. The deep DAG fans out N specialists × M sub-calls each, with the orchestration `asyncio.gather`-ing at each layer. Total wall-clock time goes down even though total calls go up.
+
+**Concrete rules:**
+- If a reasoner has more than ~30 lines of body code, it's probably 2 reasoners
+- If two reasoners always call each other in sequence, they should be one reasoner (or one reasoner with a deterministic helper)
+- If your entry reasoner is the ONLY thing that calls `app.call`, the architecture is too flat — push the calls down into the specialists
+- If your topology can be drawn as a literal star, throw it out and design for depth
+- A reasoner should have a clear API contract you could write in one sentence: *"Given X, return Y. Calls Z, W."*
+
+**The unit of intelligence is the reasoner. Treat them like software APIs and the system writes itself.**
 
 ## The non-negotiable promise
 
@@ -268,14 +337,15 @@ After the stack is up, open these URLs in your browser:
 
 ```bash
 # 1. Control plane up?
-curl -fsS http://localhost:8080/api/v1/health | jq
+curl -fsS http://localhost:8080/api/v1/health | jq '.status'
 
-# 2. Agent node registered?
-curl -fsS http://localhost:8080/api/v1/nodes | jq '.[] | {id: .node_id, status: .status}'
+# 2. Agent node registered? (use ?health_status=any — default filter can hide healthy nodes)
+curl -fsS 'http://localhost:8080/api/v1/nodes?health_status=any' | jq '.nodes[] | {id: .node_id, status: .status}'
 
 # 3. All reasoners discoverable?
+#    Response shape: .capabilities[].reasoners[].id (NOT .reasoners[].name)
 curl -fsS http://localhost:8080/api/v1/discovery/capabilities \
-  | jq '.reasoners[] | select(.node_id=="<slug>") | {name, tags}'
+  | jq '.capabilities[] | select(.agent_id=="<slug>") | .reasoners | map({id, tags})'
 ```
 
 ### 7. 🎯 Try it — sample curl
@@ -287,7 +357,7 @@ curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
     "input": {
       "<param1>": "<realistic value>",
       "<param2>": <realistic value>,
-      "model": "openrouter/anthropic/claude-3.5-sonnet"
+      "model": "openrouter/google/gemini-2.5-flash"
     }
   }' | jq
 ```

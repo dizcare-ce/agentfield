@@ -83,7 +83,7 @@ result = await app.ai(
     system: str | None,        # system prompt
     user: str | None,          # user prompt (alternative to positional)
     schema: type[BaseModel] | None,  # Pydantic class for structured output
-    model: str | None,         # PER-CALL model override (e.g. "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+    model: str | None,         # PER-CALL model override (e.g. "gpt-4o", "openrouter/google/gemini-2.5-flash")
     temperature: float | None,
     max_tokens: int | None,
     stream: bool | None,
@@ -291,7 +291,7 @@ from reasoners.risk import router as risk_router
 
 app = Agent(
     node_id=os.getenv("AGENT_NODE_ID", "financial-reviewer"),
-    ai_config=AIConfig(model=os.getenv("AI_MODEL", "openrouter/anthropic/claude-3.5-sonnet")),
+    ai_config=AIConfig(model=os.getenv("AI_MODEL", "openrouter/google/gemini-2.5-flash")),
     dev_mode=True,
 )
 

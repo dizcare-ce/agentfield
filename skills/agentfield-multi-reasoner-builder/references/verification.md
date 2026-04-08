@@ -23,7 +23,7 @@ curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
     "input": {
       "<kwarg1>": "<value>",
       "<kwarg2>": <value>,
-      "model": "openrouter/anthropic/claude-3.5-sonnet"
+      "model": "openrouter/google/gemini-2.5-flash"
     }
   }' | jq
 ```
@@ -41,17 +41,28 @@ If any step fails, **do not hand off**. Diagnose and fix.
 | Execute returns 500 with "model not found" | `AI_MODEL` env var doesn't match the provider key you set | Check `.env` — `OPENROUTER_API_KEY` requires `openrouter/...` model names, etc. |
 | Execute returns 200 but the output is empty/garbage | The reasoner ran but the architecture is wrong (e.g., `.ai()` got truncated input) | Look at logs to see what input each reasoner actually got |
 
+## Sync execute timeout (90s) — IMPORTANT
+
+`POST /api/v1/execute/<target>` is a **synchronous** endpoint with a hard **90-second timeout** at the control plane. If the entry reasoner's full pipeline (including all child `app.call`s, all `app.ai` calls, and any retries) takes longer than 90s, the control plane returns `HTTP 400 {"error":"execution timeout after 1m30s"}`.
+
+**Implications for the architecture you generate:**
+- **Pick fast models for the default.** `openrouter/google/gemini-2.5-flash` and `openrouter/openai/gpt-4o-mini` finish a 6–10 step parallel pipeline in 10–25 seconds. Slower models like `openrouter/anthropic/claude-3-5-sonnet-*`, `openrouter/minimax/minimax-m2.7`, or `openrouter/openai/o1` often blow the budget.
+- **Parallelize aggressively at multiple depths.** A pipeline of 10 sequential `app.ai` calls at 5s each = 50s (close to the limit). The same 10 calls organized as a deep DAG with 3 parallelism waves = 15s. Use `asyncio.gather` for every fan-out, and push fan-outs DOWN into sub-reasoners (see `architecture-patterns.md` "Reasoner Composition Cascade"), not just at the entry orchestrator.
+- **For workflows that genuinely need >90s** (large fan-outs, slow models, navigation-heavy harnesses): use `POST /api/v1/execute/async/<target>` instead. It returns immediately with an `execution_id`; poll `GET /api/v1/executions/<id>` for the result. Document this in the README so users know which endpoint to hit.
+
+When the user's brief implies a slow pipeline, default to `gemini-2.5-flash` and document the async endpoint as the upgrade path.
+
 ## Useful introspection endpoints
 
 | Endpoint | What it tells you |
 |---|---|
 | `GET /api/v1/health` | Control plane up |
-| `GET /api/v1/nodes` | Which agent nodes have registered |
+| `GET /api/v1/nodes?health_status=any` | Which agent nodes have registered (the default filter is `active`, which can return empty even when agents are healthy — use `?health_status=any` to be safe) |
 | `GET /api/v1/nodes/:node_id` | Details of one node |
-| `GET /api/v1/discovery/capabilities` | All reasoners and skills across all nodes |
-| `GET /api/v1/agentic/discover?q=<keyword>` | Search the API catalog by keyword (use to find an endpoint you forgot) |
-| `POST /api/v1/execute/:target` | Sync execute a reasoner. Body is the kwargs dict |
-| `POST /api/v1/execute/async/:target` | Async execute, returns an execution_id |
+| `GET /api/v1/discovery/capabilities` | All reasoners and skills. **Response shape:** `{capabilities: [{agent_id, reasoners: [{id, tags, ...}]}]}` — note `agent_id` not `node_id`, and reasoners live under `.capabilities[].reasoners[]` not `.reasoners[]`. The reasoner identifier field is `id` not `name` |
+| `GET /api/v1/agentic/discover?q=<keyword>` | Search the API catalog by keyword |
+| `POST /api/v1/execute/:target` | **Sync** execute. Body is `{"input": {...kwargs...}}`. **90-second hard timeout at the control plane.** |
+| `POST /api/v1/execute/async/:target` | Async execute, returns an `execution_id` immediately. Use this when the pipeline > 90s |
 | `GET /api/v1/executions/:id` | Status of an async execution |
 | `GET /api/v1/did/workflow/:workflow_id/vc-chain` | Verifiable credential chain for an executed workflow (the AgentField superpower no other framework has) |
 
@@ -77,19 +88,20 @@ In the README, give the user EXACTLY these commands in this order. Do not abbrev
 # After docker compose up, in another terminal:
 
 # 1. Health
-curl -fsS http://localhost:8080/api/v1/health
+curl -fsS http://localhost:8080/api/v1/health | jq '.status'
 
-# 2. Node registered?
-curl -fsS http://localhost:8080/api/v1/nodes | jq '.[].node_id'
+# 2. Node registered? (use ?health_status=any — default filter can hide healthy nodes)
+curl -fsS 'http://localhost:8080/api/v1/nodes?health_status=any' | jq '.nodes[] | {id: .node_id, status: .status}'
 
-# 3. Reasoners discoverable?
-curl -fsS http://localhost:8080/api/v1/discovery/capabilities | jq '.reasoners | map(select(.node_id=="<slug>")) | map(.name)'
+# 3. Reasoners discoverable? (note .capabilities[].reasoners[].id, NOT .reasoners[].name)
+curl -fsS http://localhost:8080/api/v1/discovery/capabilities \
+  | jq '.capabilities[] | select(.agent_id=="<slug>") | .reasoners | map({id, tags})'
 
 # 4. THE BIG ONE — run the entry reasoner with real data
 #    Body shape: {"input": {...kwargs...}} — kwargs are NEVER raw at the top level
 curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner> \
   -H 'Content-Type: application/json' \
-  -d '{"input": {"<kwarg1>": "<value>", "model": "openrouter/anthropic/claude-3.5-sonnet"}}' | jq
+  -d '{"input": {"<kwarg1>": "<value>", "model": "openrouter/google/gemini-2.5-flash"}}' | jq
 
 # 5. (Optional showpiece) the full verifiable workflow chain
 LAST_EXEC=$(curl -s http://localhost:8080/api/v1/executions | jq -r '.[0].workflow_id')

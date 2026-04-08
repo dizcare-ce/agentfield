@@ -90,7 +90,7 @@ When the user (or your own drift) pushes you toward one of these, name the rule,
 ### 10. Hardcoded model strings
 
 ❌ `ai_config=AIConfig(model="gpt-4o")`
-✅ `ai_config=AIConfig(model=os.getenv("AI_MODEL", "openrouter/anthropic/claude-3.5-sonnet"))` AND accept a `model` parameter on the entry reasoner that propagates via `app.call(..., model=model)`.
+✅ `ai_config=AIConfig(model=os.getenv("AI_MODEL", "openrouter/google/gemini-2.5-flash"))` AND accept a `model` parameter on the entry reasoner that propagates via `app.call(..., model=model)`.
 
 **Why:** Users need to swap models per-request to A/B test without rebuilding the container. Make the model dynamic at three layers: env default, container override, per-request override.
 

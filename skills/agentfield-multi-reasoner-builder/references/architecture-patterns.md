@@ -210,7 +210,80 @@ inner (coding)   ──> per-task agent   ──> code
 
 ---
 
-## 8. Reactive Document Enrichment
+## 8. Reasoner Composition Cascade (READ THIS — it's the master pattern)
+
+**This is the pattern that distinguishes a real AgentField system from a fancy `asyncio.gather` wrapper.** Every other pattern in this file should be interpreted through this lens.
+
+**Shape — depth, not breadth:**
+
+```
+entry_reasoner
+├── classifier_reasoner ─────────────────┐
+│   ├── input_normalizer (skill)         │
+│   └── intent_extractor (.ai)           │
+│       └── slot_filler (.ai called by intent_extractor when ambiguous)
+│
+├── analysis_dimension_A_reasoner ────── ┤  ← all parallel via asyncio.gather
+│   ├── deterministic_metric_calc (skill)
+│   ├── pattern_judge (.ai)
+│   │   └── citation_finder (.ai called by pattern_judge)
+│   └── confidence_scorer (.ai)
+│
+├── analysis_dimension_B_reasoner ────── │
+│   ├── different_metric_calc (skill)
+│   ├── different_pattern_judge (.ai)
+│   └── confidence_scorer (.ai REUSED — same reasoner)  ← reuse across branches!
+│
+├── analysis_dimension_C_reasoner ───────┤
+│   └── (3 sub-calls, similar shape)
+│
+└── adversarial_synthesizer ─────────────┘
+    ├── steel_man_alternative (.ai)  ← called once per dimension
+    ├── disagreement_detector (.ai)
+    └── final_decision_reasoner (.ai)
+        └── safety_override (deterministic skill)
+```
+
+**Each layer fans out via `asyncio.gather`. Each reasoner has a single cognitive responsibility.** The orchestrator at the top is NOT the only thing that calls `app.call` — every dimension reasoner is itself a small orchestrator that calls 2–4 sub-reasoners.
+
+**Used in:** This is the pattern the medical-triage and loan-underwriter examples should follow when they're deep enough. Most large AgentField systems compose this pattern as the backbone, with the other 8 patterns layered on top (HUNT→PROVE between layers, streaming for partial results, etc.).
+
+**Why it's the master pattern:**
+
+1. **Reasoners as software APIs.** Each reasoner has a one-line API contract: *"Given X, return Y. Calls Z, W."* Other reasoners call it the way one microservice calls another.
+2. **Composability over monolithic prompts.** A specialist reasoner like `pe_assessor` is NOT a 200-line `.ai()` prompt — it's an orchestrator that calls `wells_score_calculator`, `dyspnea_grader`, and `dvt_history_checker` and synthesizes their outputs. Each piece is testable, replaceable, reusable.
+3. **Reuse across branches.** `confidence_scorer` is called from THREE different dimension reasoners. The flat-star pattern would have to copy-paste the logic three times. The composition cascade calls it once per branch — same code, three different contexts.
+4. **Multi-layer parallelism.** `asyncio.gather` runs at the entry-reasoner layer (across dimensions A/B/C) AND inside each dimension reasoner (across its sub-calls). Total wall-clock time is dominated by the slowest path through the DAG, not by the sum.
+5. **Observability has structure.** The control plane workflow DAG shows the actual call tree. The verifiable credential chain has hierarchy. A future debugger can ask "which sub-call inside `pe_assessor` flagged the concern" — the flat-star pattern can only tell you "pe_assessor returned X."
+6. **Each reasoner is independently curl-able.** You can `POST /api/v1/execute/<slug>.wells_score_calculator` directly with synthetic input to debug or A/B test it. The flat-star only exposes the entry reasoner.
+
+**Decomposition rules:**
+
+- **30-line ceiling.** If a reasoner body is > 30 lines, it's probably 2 reasoners. Look for the seam — usually a "compute X then judge Y" boundary becomes "X is a `@app.skill`, Y is a `@app.reasoner` that calls X".
+- **Single-judgment rule.** A reasoner makes ONE judgment call. If your reasoner is making three judgments ("is this concerning, is this acute, what's the risk score"), split into three reasoners.
+- **Deterministic-vs-judgment split.** Anything that doesn't require LLM judgment (math, formula, regex, lookup, sort) is `@app.skill()` or a plain helper, not part of an `.ai()` reasoner body.
+- **Reuse signal.** If the same logic appears in 2+ reasoners, extract it as its own reasoner and call it from both.
+- **One-sentence API contract test.** Can you write a one-sentence contract for each reasoner ("Given a chief complaint string, return a list of red flag categories with confidence scores")? If not, the reasoner is doing too many things.
+
+**Anti-patterns that mean you fell back to a flat star:**
+
+- Your entry reasoner is the ONLY thing that calls `app.call`
+- Your specialists each have a single fat `.ai()` call with a 500-token prompt
+- Your DAG is depth 2 (`entry → specialists → done`)
+- You can draw the architecture as a literal asterisk
+- Two specialists have the same 50-line prompt with one line different — you should have had one parameterized sub-reasoner
+
+**Concrete medical-triage example:**
+
+A flat-star `red_flag_detector` reasoner with one big `.ai()` prompt → bad.
+
+A `red_flag_detector` reasoner that calls `cardiac_red_flag_checker`, `stroke_red_flag_checker`, `bleeding_red_flag_checker`, `psych_red_flag_checker` in parallel via `asyncio.gather`, each of which is itself a focused `.ai()` with its own narrow prompt and confidence flag → good. The deeper structure means a future agent can swap the cardiac checker for one with a more accurate prompt without touching anything else.
+
+**When you finish your design, count the depth.** If max depth from entry to leaf is < 3, redesign. A real composite-intelligence system has at least 3 layers of reasoner-calling-reasoner.
+
+---
+
+## 9. Reactive Document Enrichment
 
 **Shape:**
 ```
@@ -227,16 +300,20 @@ event source (DB change stream / webhook) ──> enrichment pipeline ──> ou
 
 ## How to pick a pattern (or compose your own)
 
-1. **What triggers the work?** Event stream → pattern 8. Direct API call → patterns 1–7.
-2. **Is the input large/navigable?** Yes → harness-first, consider meta-prompting (pattern 4).
-3. **Multiple independent analysis dimensions?** Yes → parallel hunters (pattern 1).
-4. **False positives expensive?** Yes → add HUNT→PROVE (pattern 2) on top of pattern 1.
+**Always start with pattern 8 (Reasoner Composition Cascade) as the backbone.** It's not optional. Every other pattern is layered on top.
+
+Then ask:
+
+1. **What triggers the work?** Event stream → pattern 9 (reactive enrichment). Direct API call → patterns 1–7 layered onto 8.
+2. **Is the input large/navigable?** Yes → consider meta-prompting (pattern 4) inside one of your dimension reasoners.
+3. **Multiple independent analysis dimensions?** Yes → parallel hunters (pattern 1) becomes the second-layer fan-out inside the cascade.
+4. **False positives expensive?** Yes → add HUNT→PROVE (pattern 2) as a second-stage reasoner per dimension or one global adversarial reasoner.
 5. **Downstream can start before upstream finishes?** Yes → streaming (pattern 3).
 6. **Coverage matters and you can't predict shape upfront?** Pattern 6.
 7. **Multi-round adaptive execution?** Pattern 5 or 7.
 8. **The investigation path depends on discoveries?** Pattern 4 (meta-prompting), always.
 
-Most strong systems compose 2–3 patterns. Example: contract-af = parallel hunters (1) + HUNT→PROVE (2) + streaming (3) + meta-prompting (4) + nested loops (5).
+Most strong systems compose **pattern 8 (cascade) as the backbone + 2–3 of the others as layers**. Example: contract-af = composition cascade (8) + parallel hunters (1) at the second layer + HUNT→PROVE (2) at the third layer + streaming (3) between layers + meta-prompting (4) inside the deepest reasoners + nested loops (5).
 
 ## When NONE of these fit
 

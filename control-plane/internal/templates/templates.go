@@ -25,7 +25,7 @@ type TemplateData struct {
 	ControlPlaneImage string // "agentfield/control-plane:latest"
 	ControlPlanePort  int    // 8080
 	AgentPort         int    // 8001
-	DefaultModel      string // "openrouter/anthropic/claude-3.5-sonnet"
+	DefaultModel      string // "openrouter/google/gemini-2.5-flash"
 }
 
 // GetTemplate retrieves a specific template by its path.

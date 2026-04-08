@@ -70,7 +70,7 @@ var providerEnvVars = []struct {
 	EnvVar string
 	Model  string // suggested default model when this provider is the chosen one
 }{
-	{Name: "openrouter", EnvVar: "OPENROUTER_API_KEY", Model: "openrouter/anthropic/claude-3.5-sonnet"},
+	{Name: "openrouter", EnvVar: "OPENROUTER_API_KEY", Model: "openrouter/google/gemini-2.5-flash"},
 	{Name: "anthropic", EnvVar: "ANTHROPIC_API_KEY", Model: "claude-3-5-sonnet-20241022"},
 	{Name: "openai", EnvVar: "OPENAI_API_KEY", Model: "gpt-4o"},
 	{Name: "google", EnvVar: "GOOGLE_API_KEY", Model: "gemini-1.5-pro"},
@@ -178,7 +178,7 @@ func buildDoctorReport(controlPlaneURL string) DoctorReport {
 	notes := []string{}
 	if chosenProvider == "" {
 		chosenProvider = "none"
-		chosenModel = "openrouter/anthropic/claude-3.5-sonnet"
+		chosenModel = "openrouter/google/gemini-2.5-flash"
 		notes = append(notes, "No provider API key detected. Set OPENROUTER_API_KEY (recommended) or OPENAI_API_KEY / ANTHROPIC_API_KEY before building.")
 	} else {
 		notes = append(notes, fmt.Sprintf("Provider key detected: %s. Default model: %s", chosenProvider, chosenModel))

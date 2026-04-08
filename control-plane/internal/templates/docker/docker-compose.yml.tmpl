@@ -8,11 +8,9 @@ services:
       - "${AGENTFIELD_HTTP_PORT:-{{.ControlPlanePort}}}:8080"
     volumes:
       - agentfield-data:/data
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
-      interval: 3s
-      timeout: 2s
-      retries: 20
+    # NOTE: agentfield/control-plane:latest is a distroless image — no sh, no wget, no curl.
+    # A CMD-based healthcheck cannot run inside the container. The agent SDK retries
+    # connection to the control plane on startup, so service_started is sufficient.
 
   {{.NodeID}}:
     build:
@@ -32,7 +30,7 @@ services:
       - "${AGENT_NODE_PORT:-{{.AgentPort}}}:{{.AgentPort}}"
     depends_on:
       control-plane:
-        condition: service_healthy
+        condition: service_started
     restart: on-failure
 
 volumes:

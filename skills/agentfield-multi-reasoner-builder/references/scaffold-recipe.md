@@ -69,7 +69,7 @@ app = Agent(
     node_id=os.getenv("AGENT_NODE_ID", "<slug>"),
     agentfield_server=os.getenv("AGENTFIELD_SERVER", "http://localhost:8080"),
     ai_config=AIConfig(
-        model=os.getenv("AI_MODEL", "openrouter/anthropic/claude-3.5-sonnet"),
+        model=os.getenv("AI_MODEL", "openrouter/google/gemini-2.5-flash"),
     ),
     dev_mode=True,
 )
@@ -274,7 +274,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-openrouter/anthropic/claude-3.5-sonnet}
+      AI_MODEL: ${AI_MODEL:-openrouter/google/gemini-2.5-flash}
       PORT: ${PORT:-8001}
     ports:
       - "${AGENT_NODE_PORT:-8001}:8001"
@@ -305,7 +305,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 # ANTHROPIC_API_KEY=sk-ant-...
 
 # Model — must match the provider above
-AI_MODEL=openrouter/anthropic/claude-3.5-sonnet
+AI_MODEL=openrouter/google/gemini-2.5-flash
 # AI_MODEL=gpt-4o
 # AI_MODEL=anthropic/claude-3-5-sonnet-20241022
 
@@ -388,7 +388,7 @@ curl -X POST http://localhost:8080/api/v1/execute/<slug>.<entry_reasoner_name> \
     "input": {
       "<param1>": "<value>",
       "<param2>": <value>,
-      "model": "openrouter/anthropic/claude-3.5-sonnet"
+      "model": "openrouter/google/gemini-2.5-flash"
     }
   }' | jq
 ```

@@ -47,7 +47,7 @@ External callers should hit `<slug>.<entry_reasoner_name>` first.
 
 ## Model selection
 
-- Default model: `<openrouter/anthropic/claude-3.5-sonnet>` via `AI_MODEL` env.
+- Default model: `<openrouter/google/gemini-2.5-flash>` via `AI_MODEL` env.
 - The entry reasoner accepts an OPTIONAL `model` parameter in the request body. When present, it propagates to all child reasoners via `app.call(..., model=model)`. This lets users A/B models per request without redeploying.
 - Provider keys: `OPENROUTER_API_KEY` (default), `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — any LiteLLM-compatible model works.
 
