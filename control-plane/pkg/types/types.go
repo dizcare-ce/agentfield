@@ -316,7 +316,7 @@ type AgentStatusUpdate struct {
 	State           *AgentState           `json:"state,omitempty"`
 	HealthScore     *int                  `json:"health_score,omitempty"`
 	LifecycleStatus *AgentLifecycleStatus `json:"lifecycle_status,omitempty"`
-	Source StatusSource `json:"source"`
+	Source          StatusSource          `json:"source"`
 	Reason          string                `json:"reason,omitempty"`
 	Version         string                `json:"version,omitempty"`
 }
@@ -675,6 +675,10 @@ type WorkflowExecution struct {
 	ApprovalRespondedAt *time.Time `json:"approval_responded_at,omitempty" db:"approval_responded_at"`
 	ApprovalCallbackURL *string    `json:"approval_callback_url,omitempty" db:"approval_callback_url"`
 	ApprovalExpiresAt   *time.Time `json:"approval_expires_at,omitempty" db:"approval_expires_at"`
+	ApprovalFormSchema  *string    `json:"approval_form_schema,omitempty" db:"approval_form_schema"`
+	ApprovalResponder   *string    `json:"approval_responder,omitempty" db:"approval_responder"`
+	ApprovalTags        *string    `json:"approval_tags,omitempty" db:"approval_tags"`
+	ApprovalPriority    *string    `json:"approval_priority,omitempty" db:"approval_priority"`
 
 	// Webhook observability (non-persisted)
 	WebhookRegistered bool                     `json:"webhook_registered,omitempty" db:"-"`
@@ -707,28 +711,28 @@ type WorkflowExecutionEvent struct {
 
 // ExecutionLogEntry captures structured execution-correlated logs emitted by SDK runtimes.
 type ExecutionLogEntry struct {
-	EventID             int64           `json:"event_id" db:"event_id"`
-	ExecutionID         string          `json:"execution_id" db:"execution_id"`
-	WorkflowID          string          `json:"workflow_id" db:"workflow_id"`
-	RunID               *string         `json:"run_id,omitempty" db:"run_id"`
-	RootWorkflowID      *string         `json:"root_workflow_id,omitempty" db:"root_workflow_id"`
-	ParentExecutionID   *string         `json:"parent_execution_id,omitempty" db:"parent_execution_id"`
-	Sequence            int64           `json:"seq" db:"sequence"`
-	AgentNodeID         string          `json:"agent_node_id" db:"agent_node_id"`
-	ReasonerID          *string         `json:"reasoner_id,omitempty" db:"reasoner_id"`
-	Level               string          `json:"level" db:"level"`
-	Source              string          `json:"source" db:"source"`
-	EventType           *string         `json:"event_type,omitempty" db:"event_type"`
-	Message             string          `json:"message" db:"message"`
-	Attributes          json.RawMessage `json:"attributes,omitempty" db:"attributes"`
-	SystemGenerated     bool            `json:"system_generated,omitempty" db:"system_generated"`
-	SDKLanguage         *string         `json:"sdk_language,omitempty" db:"sdk_language"`
-	Attempt             *int            `json:"attempt,omitempty" db:"attempt"`
-	SpanID              *string         `json:"span_id,omitempty" db:"span_id"`
-	StepID              *string         `json:"step_id,omitempty" db:"step_id"`
-	ErrorCategory       *string         `json:"error_category,omitempty" db:"error_category"`
-	EmittedAt           time.Time       `json:"ts" db:"emitted_at"`
-	RecordedAt          time.Time       `json:"recorded_at" db:"recorded_at"`
+	EventID           int64           `json:"event_id" db:"event_id"`
+	ExecutionID       string          `json:"execution_id" db:"execution_id"`
+	WorkflowID        string          `json:"workflow_id" db:"workflow_id"`
+	RunID             *string         `json:"run_id,omitempty" db:"run_id"`
+	RootWorkflowID    *string         `json:"root_workflow_id,omitempty" db:"root_workflow_id"`
+	ParentExecutionID *string         `json:"parent_execution_id,omitempty" db:"parent_execution_id"`
+	Sequence          int64           `json:"seq" db:"sequence"`
+	AgentNodeID       string          `json:"agent_node_id" db:"agent_node_id"`
+	ReasonerID        *string         `json:"reasoner_id,omitempty" db:"reasoner_id"`
+	Level             string          `json:"level" db:"level"`
+	Source            string          `json:"source" db:"source"`
+	EventType         *string         `json:"event_type,omitempty" db:"event_type"`
+	Message           string          `json:"message" db:"message"`
+	Attributes        json.RawMessage `json:"attributes,omitempty" db:"attributes"`
+	SystemGenerated   bool            `json:"system_generated,omitempty" db:"system_generated"`
+	SDKLanguage       *string         `json:"sdk_language,omitempty" db:"sdk_language"`
+	Attempt           *int            `json:"attempt,omitempty" db:"attempt"`
+	SpanID            *string         `json:"span_id,omitempty" db:"span_id"`
+	StepID            *string         `json:"step_id,omitempty" db:"step_id"`
+	ErrorCategory     *string         `json:"error_category,omitempty" db:"error_category"`
+	EmittedAt         time.Time       `json:"ts" db:"emitted_at"`
+	RecordedAt        time.Time       `json:"recorded_at" db:"recorded_at"`
 }
 
 // WorkflowRunEvent mirrors execution events at the workflow-run level.
@@ -890,6 +894,10 @@ type WorkflowExecutionFilters struct {
 	AgentNodeID       *string    `json:"agent_node_id,omitempty"`
 	Status            *string    `json:"status,omitempty"`
 	ApprovalRequestID *string    `json:"approval_request_id,omitempty"`
+	ApprovalStatusEq  *string    `json:"approval_status_eq,omitempty"`
+	HasFormSchema     *bool      `json:"has_form_schema,omitempty"`
+	Tags              []string   `json:"tags,omitempty"`
+	Priority          *string    `json:"priority,omitempty"`
 	StartTime         *time.Time `json:"start_time,omitempty"`
 	EndTime           *time.Time `json:"end_time,omitempty"`
 	Search            *string    `json:"search,omitempty"`
