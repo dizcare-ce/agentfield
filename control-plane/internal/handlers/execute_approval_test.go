@@ -310,6 +310,200 @@ func TestRequestApprovalHandler_DefaultExpiresInHours(t *testing.T) {
 	assert.Less(t, diff.Abs(), 5*time.Second, "expiry should be ~72 hours from now")
 }
 
+func TestRequestApprovalHandler_FormSchemaAndMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	agent := &types.AgentNode{ID: "agent-1"}
+	store := newTestExecutionStorage(agent)
+
+	now := time.Now().UTC()
+	require.NoError(t, store.CreateExecutionRecord(context.Background(), &types.Execution{
+		ExecutionID: "exec-form",
+		RunID:       "run-1",
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+		CreatedAt:   now,
+	}))
+	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
+		ExecutionID: "exec-form",
+		WorkflowID:  "wf-1",
+		RunID:       ptr("run-1"),
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+	}))
+
+	router := gin.New()
+	router.POST("/api/v1/agents/:node_id/executions/:execution_id/request-approval",
+		AgentScopedRequestApprovalHandler(store))
+
+	body, _ := json.Marshal(map[string]any{
+		"approval_request_id": "req-form",
+		"form_schema": map[string]any{
+			"title":  "Review",
+			"fields": []map[string]any{{"type": "text", "name": "summary", "required": true}},
+		},
+		"tags":     []string{"pr-review", "team:platform"},
+		"priority": "high",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/executions/exec-form/request-approval", bytes.NewReader(body))
+	req.Host = "portal.example.com"
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+	assert.Equal(t, "http://portal.example.com/hitl/req-form", result["approval_request_url"])
+
+	wfExec, err := store.GetWorkflowExecution(context.Background(), "exec-form")
+	require.NoError(t, err)
+	require.NotNil(t, wfExec.ApprovalFormSchema)
+	require.NotNil(t, wfExec.ApprovalTags)
+	require.NotNil(t, wfExec.ApprovalPriority)
+	assert.JSONEq(t, `{"title":"Review","fields":[{"name":"summary","required":true,"type":"text"}]}`, *wfExec.ApprovalFormSchema)
+	assert.JSONEq(t, `["pr-review","team:platform"]`, *wfExec.ApprovalTags)
+	assert.Equal(t, "high", *wfExec.ApprovalPriority)
+}
+
+func TestRequestApprovalHandler_InvalidFormSchemaJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	agent := &types.AgentNode{ID: "agent-1"}
+	store := newTestExecutionStorage(agent)
+	now := time.Now().UTC()
+	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
+		ExecutionID: "exec-invalid-json",
+		WorkflowID:  "wf-1",
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+	}))
+
+	router := gin.New()
+	router.POST("/api/v1/agents/:node_id/executions/:execution_id/request-approval",
+		AgentScopedRequestApprovalHandler(store))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/executions/exec-invalid-json/request-approval", bytes.NewBufferString(`{"approval_request_id":"req-invalid","form_schema":"nope"`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func TestRequestApprovalHandler_FormSchemaMissingFieldsArray(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	agent := &types.AgentNode{ID: "agent-1"}
+	store := newTestExecutionStorage(agent)
+	now := time.Now().UTC()
+	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
+		ExecutionID: "exec-invalid-schema",
+		WorkflowID:  "wf-1",
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+	}))
+
+	router := gin.New()
+	router.POST("/api/v1/agents/:node_id/executions/:execution_id/request-approval",
+		AgentScopedRequestApprovalHandler(store))
+
+	body, _ := json.Marshal(map[string]any{
+		"approval_request_id": "req-invalid-schema",
+		"form_schema": map[string]any{
+			"title": "Missing fields",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/executions/exec-invalid-schema/request-approval", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func TestRequestApprovalHandler_InvalidPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	agent := &types.AgentNode{ID: "agent-1"}
+	store := newTestExecutionStorage(agent)
+	now := time.Now().UTC()
+	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
+		ExecutionID: "exec-priority",
+		WorkflowID:  "wf-1",
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+	}))
+
+	router := gin.New()
+	router.POST("/api/v1/agents/:node_id/executions/:execution_id/request-approval",
+		AgentScopedRequestApprovalHandler(store))
+
+	body, _ := json.Marshal(map[string]any{
+		"approval_request_id": "req-priority",
+		"priority":            "p1",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/executions/exec-priority/request-approval", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func TestRequestApprovalHandler_DefaultPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	agent := &types.AgentNode{ID: "agent-1"}
+	store := newTestExecutionStorage(agent)
+	now := time.Now().UTC()
+	require.NoError(t, store.CreateExecutionRecord(context.Background(), &types.Execution{
+		ExecutionID: "exec-default-priority",
+		RunID:       "run-1",
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+		CreatedAt:   now,
+	}))
+	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
+		ExecutionID: "exec-default-priority",
+		WorkflowID:  "wf-1",
+		RunID:       ptr("run-1"),
+		AgentNodeID: "agent-1",
+		Status:      types.ExecutionStatusRunning,
+		StartedAt:   now,
+	}))
+
+	router := gin.New()
+	router.POST("/api/v1/agents/:node_id/executions/:execution_id/request-approval",
+		AgentScopedRequestApprovalHandler(store))
+
+	body, _ := json.Marshal(map[string]any{
+		"approval_request_id": "req-default-priority",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/executions/exec-default-priority/request-approval", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	wfExec, err := store.GetWorkflowExecution(context.Background(), "exec-default-priority")
+	require.NoError(t, err)
+	require.NotNil(t, wfExec.ApprovalPriority)
+	assert.Equal(t, "normal", *wfExec.ApprovalPriority)
+}
+
 // ---------------------------------------------------------------------------
 // GetApprovalStatusHandler
 // ---------------------------------------------------------------------------
@@ -326,16 +520,16 @@ func TestGetApprovalStatusHandler_Pending(t *testing.T) {
 	status := "pending"
 	expiresAt := now.Add(72 * time.Hour)
 	require.NoError(t, store.StoreWorkflowExecution(context.Background(), &types.WorkflowExecution{
-		ExecutionID:        "exec-pend",
-		WorkflowID:         "wf-1",
-		AgentNodeID:        "agent-1",
-		Status:             types.ExecutionStatusWaiting,
-		StartedAt:          now,
-		ApprovalRequestID:  &reqID,
-		ApprovalRequestURL: &reqURL,
-		ApprovalStatus:     &status,
+		ExecutionID:         "exec-pend",
+		WorkflowID:          "wf-1",
+		AgentNodeID:         "agent-1",
+		Status:              types.ExecutionStatusWaiting,
+		StartedAt:           now,
+		ApprovalRequestID:   &reqID,
+		ApprovalRequestURL:  &reqURL,
+		ApprovalStatus:      &status,
 		ApprovalRequestedAt: &now,
-		ApprovalExpiresAt:  &expiresAt,
+		ApprovalExpiresAt:   &expiresAt,
 	}))
 
 	router := gin.New()
