@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -17,6 +18,13 @@ type RequestApprovalRequest struct {
 	Payload        map[string]interface{} `json:"payload,omitempty"`
 	ProjectID      string                 `json:"project_id"`
 	ExpiresInHours int                    `json:"expires_in_hours,omitempty"`
+
+	// Native HITL portal fields (all optional).
+	// When FormSchema is set and ApprovalRequestURL is empty, the control
+	// plane auto-generates a URL at /hitl/<request_id>.
+	FormSchema json.RawMessage `json:"form_schema,omitempty"`
+	Tags       []string        `json:"tags,omitempty"`
+	Priority   string          `json:"priority,omitempty"`
 }
 
 // RequestApprovalResponse is returned after creating an approval request.
