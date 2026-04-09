@@ -463,11 +463,11 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 			}
 		}
 
-		if len(candidateList) > 0 && !skipAutoDiscovery {
-			logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
-			resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(candidateList, defaultPort)
+			if len(candidateList) > 0 && !skipAutoDiscovery {
+				logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
+				resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(candidateList, defaultPort)
 
-			if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
+				if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
 				logger.Logger.Info().Msgf("🔗 Auto-discovered callback URL for %s: %s (was %s)", newNode.ID, resolvedBaseURL, newNode.BaseURL)
 				newNode.BaseURL = resolvedBaseURL
 			}
@@ -1358,6 +1358,7 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 				Description  string                 `json:"description"`
 				InputSchema  map[string]interface{} `json:"input_schema"`
 				OutputSchema map[string]interface{} `json:"output_schema"`
+				Tags         []string               `json:"tags"`
 			} `json:"skills"`
 		}
 
@@ -1394,13 +1395,18 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 			}
 		}
 
-		// Convert discovered skills to AgentNode format
+		// Convert discovered skills to AgentNode format. Tags must be copied
+		// here so the re-registration preservation path below (which filters
+		// Skills[].Tags against existingNode.ApprovedTags) can actually do
+		// its job; without this, skills carried no tags in production and
+		// the preservation loop was silently a no-op for the Skills slice.
 		skills := make([]types.SkillDefinition, len(discoveryData.Skills))
 		for i, s := range discoveryData.Skills {
 			inputSchemaBytes, _ := json.Marshal(s.InputSchema)
 			skills[i] = types.SkillDefinition{
 				ID:          s.ID,
 				InputSchema: json.RawMessage(inputSchemaBytes),
+				Tags:        s.Tags,
 			}
 		}
 
