@@ -6,7 +6,7 @@ tmp_dir = "tmp"
 
 [build]
 # Build command - builds the control plane server
-cmd = "go build -tags 'sqlite_fts5' -o ./tmp/agentfield-server ./cmd/agentfield-server"
+cmd = "go build -tags 'sqlite_fts5' -ldflags \"-X main.version=0.1.65 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)\" -o ./tmp/agentfield-server ./cmd/agentfield-server"
 # Binary to run
 bin = "./tmp/agentfield-server"
 # Watch these file extensions
