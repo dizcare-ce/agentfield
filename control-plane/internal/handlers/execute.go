@@ -1544,9 +1544,9 @@ func selectVersionedAgent(versions []*types.AgentNode) (*types.AgentNode, string
 		}
 	}
 	if len(healthy) == 0 {
-		// Fallback: accept any non-offline node
+		// Fallback: accept any non-offline, non-pending-approval node
 		for _, v := range versions {
-			if v.LifecycleStatus != types.AgentStatusOffline {
+			if v.LifecycleStatus != types.AgentStatusOffline && v.LifecycleStatus != types.AgentStatusPendingApproval {
 				healthy = append(healthy, v)
 			}
 		}

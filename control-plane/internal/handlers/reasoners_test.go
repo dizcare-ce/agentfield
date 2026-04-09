@@ -162,6 +162,18 @@ func TestExecuteReasonerHandler_NodeLookupAndAvailabilityErrors(t *testing.T) {
 			wantCode:   http.StatusServiceUnavailable,
 			wantErrMsg: "is offline",
 		},
+		{
+			name: "pending approval node",
+			store: newReasonerHandlerStorage(&types.AgentNode{
+				ID:              "node-404",
+				BaseURL:         "http://agent.invalid",
+				Reasoners:       []types.ReasonerDefinition{{ID: "ping"}},
+				HealthStatus:    types.HealthStatusActive,
+				LifecycleStatus: types.AgentStatusPendingApproval,
+			}),
+			wantCode:   http.StatusServiceUnavailable,
+			wantErrMsg: "agent_pending_approval",
+		},
 	}
 
 	for _, tt := range tests {
