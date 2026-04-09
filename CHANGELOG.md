@@ -6,6 +6,162 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.65-rc.22] - 2026-04-09
+
+
+### CI
+
+- Ci: skip coverage in merge queue, report success immediately
+
+The merge queue creates new merge commits that require fresh check
+results. Rather than re-running the full coverage suite (which already
+passed on the PR), the coverage-summary job now short-circuits on
+merge_group events — skipping all test/aggregation steps and reporting
+success immediately to unblock the queue.
+
+Key design: uses if: always() on coverage-summary so it runs even when
+per-surface is skipped, avoiding a "skipped" status that would still
+block the required check.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (01ceff3)
+
+- Ci: add merge_group trigger to coverage workflow
+
+The coverage-summary check is required by the main branch ruleset, but
+the workflow only triggered on pull_request and push events. The merge
+queue creates new temporary merge commits that need fresh check results
+— without the merge_group trigger, the required check never runs and
+the queue stalls permanently.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (7ad6364)
+
+- Ci: fix required status check context in main ruleset (#378)
+
+The rule-set's required check context was stored as
+"Coverage Summary / coverage-summary" — the "workflow / job" display
+format used in GitHub's UI, not the actual check-run name. GitHub's
+check-runs API reports the job name only ("coverage-summary"), so the
+matcher could not find a satisfying run on any PR head commit.
+
+Symptom: every open PR surfaced
+"Coverage Summary / coverage-summary — Expected: Waiting for status to
+be reported" as a blocking required check, even though the workflow
+itself was green on that commit. The UI displayed the workflow's
+actual check run as successful AND the ghost "Expected" entry from
+the ruleset side-by-side.
+
+Fix: change the context to "coverage-summary" (matches the actual
+check-run name emitted by .github/workflows/coverage.yml's aggregator
+job) and pin it to the github-actions app (app_id=15368) so no
+third-party app can satisfy it by posting a status with the same
+name.
+
+Everything else in the ruleset — merge queue, PR review requirements,
+code-owner review, thread resolution, bypass actors, strict mode —
+is unchanged.
+
+This JSON file is the source of truth; the Sync Rulesets workflow
+applies it to the live repo on push to main, so this commit restores
+consistency between the checked-in config and the running rule. (b04dc82)
+
+- Ci: parallelize coverage, stop running tests twice per PR (#377)
+
+* ci: parallelize coverage, stop running tests twice per PR
+
+The Coverage Summary job was running every test suite in the repo a
+second time, serially, in one ~5.5min job. Tests ran once in the
+per-surface workflows (control-plane.yml, sdk-go.yml, ...) and then
+again inside coverage-summary.sh just to produce coverage numbers.
+
+This restructures coverage.yml as a 5-job parallel matrix (one per
+surface) plus an aggregator that downloads their artifacts and runs
+the existing coverage-gate.py + patch-coverage-gate.sh unchanged.
+
+Changes:
+
+* scripts/coverage-surface.sh (new)
+  Single source of truth for "what commands run for surface X with
+  coverage". Takes one arg (control-plane|sdk-go|sdk-python|
+  sdk-typescript|web-ui), runs that surface's tests, writes all the
+  expected filenames under test-reports/coverage/.
+
+* scripts/coverage-aggregate.py (new)
+  Extracted from the trailing Python block of coverage-summary.sh so
+  the aggregation can run independently after CI flattens per-surface
+  artifacts into one directory. Byte-equivalent output to the old
+  inline block — verified against coverage-baseline.json.
+
+* scripts/coverage-summary.sh (refactored)
+  Now a thin orchestrator that calls coverage-surface.sh for each of
+  the five surfaces then runs coverage-aggregate.py. Local behavior
+  is unchanged.
+
+* .github/workflows/coverage.yml (rewritten)
+  Matrix of 5 parallel per-surface jobs, each running
+  coverage-surface.sh and uploading a coverage-<surface> artifact.
+  Aggregator job (needs: per-surface) downloads them, flattens into
+  test-reports/coverage/, runs coverage-aggregate.py, then the
+  existing coverage-gate.py + patch-coverage-gate.sh + sticky PR
+  comments + badge gist steps, all unchanged. Job name stays
+  `coverage-summary` so branch protection rules targeting that check
+  continue to match without reconfiguration.
+
+* .github/workflows/control-plane.yml
+  Delete the `Run tests` step from linux-tests. Tests now run only in
+  coverage.yml; linux-tests keeps building the binary (needed for
+  compile-matrix's needs: dependency) and linting.
+
+* .github/workflows/sdk-go.yml
+  Delete the `Test` step from build-and-test for the same reason.
+
+sdk-python.yml and sdk-typescript.yml are intentionally unchanged:
+their matrices test cross-version compatibility (Python 3.8-3.12,
+Node 18+20) which is independent of the coverage measurement
+(3.11 / Node 20 only). The coverage workflow remains a required
+status check, so a regression on any surface still blocks merge.
+
+* ci(coverage): fix extract_go_total cwd regression
+
+`go tool cover -func=<coverprofile>` resolves package paths in the
+coverprofile against the nearest go.mod. When it's invoked from the
+repo root (no go.mod) it fails with:
+
+  cover: no required module provides package <pkg>: go.mod file not
+  found in current directory or any parent directory
+
+The original coverage-summary.sh extract_go_total() took the module
+dir as an arg and cd'd into it inside a subshell. I dropped that arg
+when I extracted the function into coverage-surface.sh, so the
+control-plane and sdk-go matrix jobs ran the `go test` with coverage
+successfully but then failed at the total-extraction step.
+
+Restore the two-argument form and cd into the module dir before
+running `go tool cover -func`. (051b967)
+
+
+
+### Chores
+
+- Chore(deps): bump axios
+
+Bumps the npm_and_yarn group with 1 update in the /sdk/typescript directory: [axios](https://github.com/axios/axios).
+
+
+Updates `axios` from 1.13.5 to 1.15.0
+- [Release notes](https://github.com/axios/axios/releases)
+- [Changelog](https://github.com/axios/axios/blob/v1.x/CHANGELOG.md)
+- [Commits](https://github.com/axios/axios/compare/v1.13.5...v1.15.0)
+
+---
+updated-dependencies:
+- dependency-name: axios
+  dependency-version: 1.15.0
+  dependency-type: direct:production
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] <support@github.com> (e3faeb1)
+
 ## [0.1.65-rc.21] - 2026-04-09
 
 
