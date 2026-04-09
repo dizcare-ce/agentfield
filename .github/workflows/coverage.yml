@@ -1,6 +1,7 @@
 name: Coverage Summary
 
 on:
+  merge_group:
   pull_request:
     paths:
       - "control-plane/**"
@@ -58,6 +59,7 @@ jobs:
   # a required status check so a test regression still blocks merge.
   # ---------------------------------------------------------------------
   per-surface:
+    if: github.event_name != 'merge_group'
     name: coverage (${{ matrix.surface }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -122,11 +124,24 @@ jobs:
   # ---------------------------------------------------------------------
   coverage-summary:
     name: coverage-summary
+    # Use always() so this job runs even when per-surface is skipped
+    # (merge_group). This ensures the required check always reports a
+    # status instead of being stuck as "Expected".
+    if: ${{ always() }}
     needs: per-surface
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # ---------------------------------------------------------------
+      # Merge-queue fast path: coverage already passed on the PR — just
+      # succeed immediately to satisfy the required check.
+      # ---------------------------------------------------------------
+      - name: Skip coverage in merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "Coverage already verified on the pull request — skipping in merge queue."
+
       - name: Checkout
+        if: github.event_name != 'merge_group'
         uses: actions/checkout@v4
         with:
           # Full history so diff-cover can compute patch coverage against
@@ -134,20 +149,24 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
+        if: github.event_name != 'merge_group'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install diff-cover (for per-PR patch coverage)
+        if: github.event_name != 'merge_group'
         run: python -m pip install "diff-cover>=9.0.0"
 
       - name: Download all per-surface artifacts
+        if: github.event_name != 'merge_group'
         uses: actions/download-artifact@v4
         with:
           path: /tmp/coverage-artifacts
           pattern: coverage-*
 
       - name: Stage artifacts into test-reports/coverage/
+        if: github.event_name != 'merge_group'
         run: |
           mkdir -p test-reports/coverage
           # Each per-surface artifact lands in its own subdirectory under
@@ -159,12 +178,15 @@ jobs:
           ls -la test-reports/coverage/
 
       - name: Aggregate per-surface coverage
+        if: github.event_name != 'merge_group'
         run: python3 scripts/coverage-aggregate.py --report-dir test-reports/coverage
 
       - name: Publish coverage summary
+        if: github.event_name != 'merge_group'
         run: cat test-reports/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run coverage gate
+        if: github.event_name != 'merge_group'
         id: gate
         # Thresholds live in .coverage-gate.toml at the repo root so they
         # stay in-version-control and are the single source of truth for
@@ -190,6 +212,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload aggregated coverage artifact
+        if: github.event_name != 'merge_group'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-summary
@@ -211,7 +234,7 @@ jobs:
           path: test-reports/coverage/patch-gate-report.md
 
       - name: Fail the job if any gate failed
-        if: steps.gate.outcome == 'failure' || steps.patch_gate.outcome == 'failure'
+        if: github.event_name != 'merge_group' && (steps.gate.outcome == 'failure' || steps.patch_gate.outcome == 'failure')
         run: |
           echo "::error::Coverage gate failed. See the coverage report comment(s) on the PR for details and remediation steps."
           exit 1
