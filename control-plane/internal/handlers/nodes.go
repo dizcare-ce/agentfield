@@ -552,8 +552,17 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 				// The SDK never sends approved_tags (only proposed_tags), so without
 				// this the UPSERT would overwrite approved_tags with an empty array,
 				// forcing re-approval after every CP restart or re-registration.
+				//
+				// IMPORTANT: We deliberately do NOT preserve existingNode.LifecycleStatus
+				// here. The lifecycle state machine owns that field — a stale terminal
+				// status (stopping/offline) from a previous shutdown would otherwise
+				// leak into the fresh registration, causing the re-registered agent to
+				// appear mid-shutdown, which breaks downstream status inference
+				// (e.g. webhook event type determination, health monitoring, and the
+				// docs-quick-start execution webhook contract test). The fallback
+				// below resets empty/offline to AgentStatusStarting, and the state
+				// machine takes it from there.
 				newNode.ApprovedTags = existingNode.ApprovedTags
-				newNode.LifecycleStatus = existingNode.LifecycleStatus
 
 				// Carry over per-reasoner and per-skill approved tags.
 				if len(existingNode.ApprovedTags) > 0 {
@@ -1358,6 +1367,7 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 				Description  string                 `json:"description"`
 				InputSchema  map[string]interface{} `json:"input_schema"`
 				OutputSchema map[string]interface{} `json:"output_schema"`
+				Tags         []string               `json:"tags"`
 			} `json:"skills"`
 		}
 
@@ -1394,13 +1404,18 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 			}
 		}
 
-		// Convert discovered skills to AgentNode format
+		// Convert discovered skills to AgentNode format. Tags must be copied
+		// here so the re-registration preservation path below (which filters
+		// Skills[].Tags against existingNode.ApprovedTags) can actually do
+		// its job; without this, skills carried no tags in production and
+		// the preservation loop was silently a no-op for the Skills slice.
 		skills := make([]types.SkillDefinition, len(discoveryData.Skills))
 		for i, s := range discoveryData.Skills {
 			inputSchemaBytes, _ := json.Marshal(s.InputSchema)
 			skills[i] = types.SkillDefinition{
 				ID:          s.ID,
 				InputSchema: json.RawMessage(inputSchemaBytes),
+				Tags:        s.Tags,
 			}
 		}
 
@@ -1439,6 +1454,53 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 		existingNode, err := storageProvider.GetAgent(ctx, newNode.ID)
 		if err == nil && existingNode != nil {
 			logger.Logger.Warn().Msgf("⚠️ Serverless agent %s already registered, updating...", newNode.ID)
+
+			adminRevoked := existingNode.LifecycleStatus == types.AgentStatusPendingApproval &&
+				len(existingNode.ApprovedTags) == 0
+			if adminRevoked {
+				logger.Logger.Warn().Msgf("⏸️ Rejecting serverless re-registration for node %s: agent is pending_approval (admin action required)", newNode.ID)
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error":   "agent_pending_approval",
+					"message": fmt.Sprintf("agent node '%s' is awaiting tag approval and cannot re-register", existingNode.ID),
+				})
+				return
+			}
+
+			// Preserve existing approval state so re-registration does not clear
+			// approved tags during the UPSERT.
+			//
+			// IMPORTANT: We deliberately do NOT preserve existingNode.LifecycleStatus
+			// here. The serverless node is constructed above with
+			// LifecycleStatus = AgentStatusReady, which is the correct state for a
+			// serverless agent that just completed discovery. Overwriting with a
+			// stale terminal status from a previous row would break downstream
+			// status inference (webhook event type, health monitoring, etc.).
+			newNode.ApprovedTags = existingNode.ApprovedTags
+
+			if len(existingNode.ApprovedTags) > 0 {
+				approvedSet := make(map[string]struct{})
+				for _, t := range existingNode.ApprovedTags {
+					approvedSet[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+				}
+				for i := range newNode.Reasoners {
+					var approved []string
+					for _, t := range newNode.Reasoners[i].Tags {
+						if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+							approved = append(approved, t)
+						}
+					}
+					newNode.Reasoners[i].ApprovedTags = approved
+				}
+				for i := range newNode.Skills {
+					var approved []string
+					for _, t := range newNode.Skills[i].Tags {
+						if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+							approved = append(approved, t)
+						}
+					}
+					newNode.Skills[i].ApprovedTags = approved
+				}
+			}
 		}
 
 		// Register the node
