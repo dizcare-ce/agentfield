@@ -219,6 +219,24 @@ func TestRegisterNode(t *testing.T) {
 	}
 }
 
+func TestGetNode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/nodes/node-1", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Accept"))
+		_, _ = w.Write([]byte(`{"id":"node-1","status":"ready"}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL)
+	require.NoError(t, err)
+
+	resp, err := client.GetNode(context.Background(), "node-1")
+	require.NoError(t, err)
+	assert.Equal(t, "node-1", resp["id"])
+	assert.Equal(t, "ready", resp["status"])
+}
+
 func TestUpdateStatus(t *testing.T) {
 	tests := []struct {
 		name           string

@@ -3,9 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RootRedirect } from "./components/RootRedirect";
 import { ModeProvider } from "./contexts/ModeContext";
 import { ThemeProvider } from "./components/theme-provider";
-import { useFocusManagement } from "./hooks/useFocusManagement";
 import { AppLayout } from "./components/AppLayout";
-import { EnhancedDashboardPage } from "./pages/EnhancedDashboardPage";
 import { NewDashboardPage } from "./pages/NewDashboardPage";
 import { NewSettingsPage } from "./pages/NewSettingsPage";
 import { AgentsPage } from "./pages/AgentsPage";
@@ -19,6 +17,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { NotificationProvider } from "./components/ui/notification";
 
 function NavigateToPlayground() {
   const { reasonerId } = useParams();
@@ -26,14 +25,11 @@ function NavigateToPlayground() {
 }
 
 function AppContent() {
-  useFocusManagement();
-
   return (
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/dashboard" element={<NewDashboardPage />} />
-        <Route path="/dashboard/legacy" element={<EnhancedDashboardPage />} />
         <Route path="/settings" element={<NewSettingsPage />} />
         <Route path="/settings/observability-webhook" element={<Navigate to="/settings" replace />} />
         <Route path="/agents" element={<AgentsPage />} />
@@ -74,15 +70,17 @@ function App() {
         disableTransitionOnChange
       >
         <ModeProvider>
-          <AuthProvider>
-            <AuthGuard>
-              <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
-                <ErrorBoundary>
-                  <AppContent />
-                </ErrorBoundary>
-              </Router>
-            </AuthGuard>
-          </AuthProvider>
+          <NotificationProvider>
+            <AuthProvider>
+              <AuthGuard>
+                <Router basename={import.meta.env.VITE_BASE_PATH || "/ui"}>
+                  <ErrorBoundary>
+                    <AppContent />
+                  </ErrorBoundary>
+                </Router>
+              </AuthGuard>
+            </AuthProvider>
+          </NotificationProvider>
         </ModeProvider>
       </ThemeProvider>
     </QueryClientProvider>

@@ -3,17 +3,15 @@ import { Handle, Position, useStore } from "@xyflow/react";
 import {
   Calendar,
   CheckmarkFilled,
-  ErrorFilled,
-  InProgress,
-  PauseFilled,
   Time,
   User,
 } from "@/components/ui/icon-bridge";
 import { cn } from "../../lib/utils";
-import { statusTone, type StatusTone as StatusToneKey } from "../../lib/theme";
+import { type StatusTone as StatusToneKey } from "../../lib/theme";
 import { agentColorManager } from "../../utils/agentColorManager";
 import {
   getStatusLabel,
+  getStatusTheme,
   normalizeExecutionStatus,
   type CanonicalStatus,
 } from "../../utils/status";
@@ -49,19 +47,6 @@ interface WorkflowNodeProps {
   selected?: boolean;
 }
 
-const STATUS_TONE_TOKEN_MAP: Record<CanonicalStatus, StatusToneKey> = {
-  succeeded: "success",
-  failed: "error",
-  running: "info",
-  paused: "warning",
-  waiting: "warning",
-  queued: "warning",
-  pending: "warning",
-  timeout: "neutral",
-  cancelled: "neutral",
-  unknown: "neutral",
-};
-
 // Zoom selector to determine when to show simplified view
 const zoomSelector = (s: any) => s.transform[2] >= 0.4; // Show full content when zoom >= 0.4
 
@@ -76,9 +61,9 @@ const StatusPlaceholder = memo(
     agentColor: ReturnType<typeof agentColorManager.getAgentColor>;
     data: WorkflowNodeData;
   }) => {
-    const toneKey = STATUS_TONE_TOKEN_MAP[status] ?? "neutral";
-    const statusColorVar = `var(--status-${toneKey})`;
-    const glowColor = `color-mix(in srgb, var(--status-${toneKey}) 55%, transparent)`;
+    const theme = getStatusTheme(status);
+    const statusColorVar = theme.hexColor;
+    const glowColor = `color-mix(in srgb, ${theme.hexColor} 55%, transparent)`;
 
     return (
       <div
@@ -126,33 +111,19 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
     });
   };
 
+  // Icon reflects this node's OWN canonical status only. A running child
+  // under a cancelled parent must still spin/pulse — do not propagate parent
+  // state into child node visuals.
   const getStatusIcon = (status: CanonicalStatus) => {
-    const toneKeyForStatus = STATUS_TONE_TOKEN_MAP[status] ?? "neutral";
-    const iconClass = cn("h-4 w-4", statusTone[toneKeyForStatus].accent);
-    const iconProps = {
-      size: 12,
-      className: iconClass,
-    } as const;
-
-    switch (status) {
-      case "succeeded":
-        return <CheckmarkFilled {...iconProps} />;
-      case "failed":
-        return <ErrorFilled {...iconProps} />;
-      case "running":
-        return <InProgress {...iconProps} className={cn(iconClass, "animate-spin")} />;
-      case "pending":
-      case "queued":
-        return <PauseFilled {...iconProps} />;
-      case "timeout":
-        return <Time {...iconProps} />;
-      case "cancelled":
-        return <PauseFilled {...iconProps} />;
-      default:
-        return (
-          <span className="inline-flex h-3 w-3 rounded-full bg-muted-foreground/60" />
-        );
-    }
+    const theme = getStatusTheme(status);
+    const Icon = theme.icon;
+    const iconClass = cn("h-4 w-4", theme.iconClass);
+    return (
+      <Icon
+        size={12}
+        className={cn(iconClass, theme.motion === "live" && "animate-spin")}
+      />
+    );
   };
 
   const getStatusText = (status: string) => {
@@ -259,11 +230,10 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
     return { line1, line2, isSingleLine: false };
   };
 
-  const toneKey = STATUS_TONE_TOKEN_MAP[normalizedStatus] ?? "neutral";
-  const tone = statusTone[toneKey];
-  const statusColorVar = `var(--status-${toneKey})`;
-  const statusBorderVar = `var(--status-${toneKey}-border)`;
-  const statusGlowVar = `color-mix(in srgb, var(--status-${toneKey}) 38%, transparent)`;
+  const statusTheme = getStatusTheme(normalizedStatus);
+  const statusColorVar = statusTheme.hexColor;
+  const statusBorderVar = `color-mix(in srgb, ${statusTheme.hexColor} 60%, transparent)`;
+  const statusGlowVar = `color-mix(in srgb, ${statusTheme.hexColor} 38%, transparent)`;
 
   const agentColor = agentColorManager.getAgentColor(
     data.agent_name || data.agent_node_id,
@@ -414,7 +384,8 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
               <div
                 className={cn(
                   "flex flex-col justify-start text-sm font-semibold leading-[1.15] text-foreground",
-                  taskFormatted.isSingleLine ? "min-h-[16px]" : "min-h-[32px]"
+                  taskFormatted.isSingleLine ? "min-h-[16px]" : "min-h-[32px]",
+                  normalizedStatus === "cancelled" && "line-through opacity-60",
                 )}
               >
                 <div
@@ -515,7 +486,7 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
             {data.parent_execution_id && <div>Parent: {data.parent_execution_id.slice(0, 8)}…</div>}
             <div>
               Status:{" "}
-              <span className={cn("font-semibold", tone.accent)}>
+              <span className={cn("font-semibold", statusTheme.iconClass)}>
                 {getStatusText(normalizedStatus)}
               </span>
             </div>
@@ -548,7 +519,7 @@ export const WorkflowNode = memo(({ data, selected }: WorkflowNodeProps) => {
                 {getStatusIcon(normalizedStatus)}
                 Status:
               </span>
-              <span className={cn("font-medium", tone.accent)}>
+              <span className={cn("font-medium", statusTheme.iconClass)}>
                 {getStatusText(normalizedStatus)}
               </span>
             </div>

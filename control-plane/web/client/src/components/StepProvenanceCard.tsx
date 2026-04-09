@@ -1,42 +1,41 @@
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ChevronDown } from "@/components/ui/icon-bridge";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
 
-function CopyableLine({
+function ProvenanceRow({
   label,
   value,
-  mono,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const short =
-    value.length > 44 ? `${value.slice(0, 20)}…${value.slice(-12)}` : value;
+    value.length > 40 ? `${value.slice(0, 16)}…${value.slice(-12)}` : value;
 
   return (
-    <div className="flex items-start justify-between gap-2 py-1.5 border-b border-border/60 last:border-0">
-      <div className="min-w-0 flex-1">
-        <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
-        </p>
-        <p
-          className={cn(
-            "mt-0.5 text-micro-plus text-foreground break-all",
-            mono && "font-mono",
-          )}
-          title={value}
-        >
-          {short}
-        </p>
-      </div>
+    <div className="flex min-w-0 items-center gap-2 py-1 first:pt-0 last:pb-0">
+      <span className="w-[7rem] shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <code
+        className="min-w-0 flex-1 truncate text-xs font-mono leading-tight text-foreground/90"
+        title={value}
+      >
+        {short}
+      </code>
       <Button
         type="button"
         variant="ghost"
-        size="sm"
-        className="h-7 shrink-0 px-2 text-micro text-muted-foreground"
+        size="icon-sm"
+        className="shrink-0 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+        aria-label={`Copy ${label}`}
         onClick={() => {
           void navigator.clipboard.writeText(value).then(() => {
             setCopied(true);
@@ -44,17 +43,13 @@ function CopyableLine({
           });
         }}
       >
-        {copied ? (
-          <Check className="size-3" />
-        ) : (
-          <Copy className="size-3" />
-        )}
+        {copied ? <Check /> : <Copy />}
       </Button>
     </div>
   );
 }
 
-/** Lean secondary card: VC-backed caller/target DIDs and content hashes (when DID/VC enabled). */
+/** Collapsible VC provenance: caller/target DIDs and content hashes (secondary to I/O). */
 export function StepProvenanceCard({
   callerDid,
   targetDid,
@@ -75,15 +70,21 @@ export function StepProvenanceCard({
   if (rows.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2">
-      <p className="text-micro font-medium text-muted-foreground mb-1">
+    <Collapsible defaultOpen={false}>
+      <CollapsibleTrigger className="flex min-w-0 w-full items-center gap-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronDown className="size-3 shrink-0 transition-transform [[data-state=open]_&]:rotate-0 [[data-state=closed]_&]:-rotate-90" />
         Provenance (VC)
-      </p>
-      <div className="divide-y-0">
-        {rows.map((r) => (
-          <CopyableLine key={r.label} label={r.label} value={r.value} mono />
-        ))}
-      </div>
-    </div>
+        <span className="ml-1 font-normal text-muted-foreground/70">
+          ({rows.length})
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-2 min-w-0 max-w-full divide-y divide-border/50 rounded-md border border-border/60 bg-muted/25 px-2.5 py-1.5">
+          {rows.map((r) => (
+            <ProvenanceRow key={r.label} label={r.label} value={r.value} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

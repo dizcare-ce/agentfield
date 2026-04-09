@@ -16,6 +16,7 @@ import {
 import { AppSidebar } from "./AppSidebar";
 import { HealthStrip } from "./HealthStrip";
 import { CommandPalette } from "./CommandPalette";
+import { NotificationBell } from "./NotificationBell";
 import { SSESyncProvider } from "@/hooks/useSSEQuerySync";
 
 const routeNames: Record<string, string> = {
@@ -23,13 +24,9 @@ const routeNames: Record<string, string> = {
   "/runs": "Runs",
   "/agents": "Agent nodes",
   "/playground": "Playground",
-  "/verify": "Audit",
+  "/verify": "Provenance",
   "/access": "Access management",
   "/settings": "Settings",
-  "/nodes": "Nodes",
-  "/reasoners": "Reasoners",
-  "/executions": "Executions",
-  "/workflows": "Workflows",
 };
 
 /** Match the longest configured section prefix so `/dashboard/legacy` maps to `/dashboard`. */
@@ -105,16 +102,6 @@ function resolveHeaderCrumbs(
     };
   }
 
-  if (section === "/dashboard" && parts[0] === "legacy") {
-    return {
-      mode: "trail",
-      crumbs: [
-        { label: sectionTitle, to: section },
-        { label: "Classic dashboard" },
-      ],
-    };
-  }
-
   const last = parts[parts.length - 1] ?? rest;
   const display =
     last.length > 24 ? shortResourceId(last, 10) : last.replace(/-/g, " ");
@@ -142,10 +129,23 @@ function AppLayoutShell() {
   const params = useParams();
   const header = resolveHeaderCrumbs(location.pathname, params);
   return (
-    <SidebarProvider defaultOpen={true}>
+    // h-svh + overflow-hidden on the wrapper forces the inner content div
+    // to be the scroll container (not the body). That way the top header
+    // below stays pinned at the top of the viewport regardless of scroll
+    // position — no sticky hack needed.
+    <SidebarProvider
+      defaultOpen={true}
+      className="h-svh overflow-hidden"
+    >
       <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-border/60 bg-background px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+      <SidebarInset className="min-h-0 overflow-hidden">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
+        <header className="sticky top-0 z-30 flex h-16 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-border/60 bg-background/85 px-4 backdrop-blur transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <SidebarTrigger className="-ml-1 shrink-0" />
           <Separator orientation="vertical" className="mr-2 h-4 shrink-0" />
           <div className="min-w-0 flex-1 overflow-hidden pr-1">
@@ -198,10 +198,15 @@ function AppLayoutShell() {
             <kbd className="hidden md:inline-flex h-5 shrink-0 items-center gap-1 rounded border border-border bg-muted px-1.5 text-micro font-mono text-muted-foreground">
               ⌘K
             </kbd>
+            <Separator orientation="vertical" className="hidden h-4 sm:block" />
+            <NotificationBell />
           </div>
         </header>
         <CommandPalette />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+        <div
+          id="main-content"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"
+        >
           <Outlet />
         </div>
       </SidebarInset>

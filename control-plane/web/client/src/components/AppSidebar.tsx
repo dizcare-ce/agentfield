@@ -97,30 +97,35 @@ export function AppSidebar() {
       <SidebarSeparator />
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navigation.map((item) => {
-                const active = location.pathname.startsWith(item.path);
-                return (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={active}
-                      tooltip={item.title}
-                    >
-                      <Link to={item.path}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navigation.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const active =
+                    item.path === location.pathname ||
+                    location.pathname.startsWith(`${item.path}/`);
+
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={active}
+                        tooltip={item.title}
+                      >
+                        <Link to={item.path}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
 
         <SidebarGroup>
           <SidebarGroupLabel>Resources</SidebarGroupLabel>

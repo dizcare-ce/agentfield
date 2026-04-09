@@ -36,6 +36,7 @@ import { formatRelativeTime } from "@/utils/dateFormat";
 import {
   getStatusTheme,
   isFailureStatus,
+  isTerminalStatus,
   isTimeoutStatus,
 } from "@/utils/status";
 import type { WorkflowSummary } from "@/types/workflows";
@@ -50,18 +51,27 @@ function terminalActivityMs(run: WorkflowSummary): number {
 }
 
 function partitionDashboardRuns(runs: WorkflowSummary[]) {
-  const active = runs.filter((r) => !r.terminal);
+  // A run is "active" only when the ROOT execution is non-terminal. The
+  // children-aggregated `terminal` flag lies in the presence of still-
+  // dispatched child requests after the root has already been marked
+  // cancelled or timed out. root_execution_status is the honest signal.
+  const isActive = (r: WorkflowSummary) => {
+    const effective = r.root_execution_status ?? r.status;
+    return !isTerminalStatus(effective);
+  };
+  const active = runs.filter(isActive);
   active.sort(
     (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
   );
 
-  const terminal = runs.filter((r) => r.terminal);
+  const terminal = runs.filter((r) => !isActive(r));
   terminal.sort((a, b) => terminalActivityMs(b) - terminalActivityMs(a));
   const latestCompleted = terminal[0];
 
-  const failures = runs.filter(
-    (r) => isFailureStatus(r.status) || isTimeoutStatus(r.status),
-  );
+  const failures = runs.filter((r) => {
+    const effective = r.root_execution_status ?? r.status;
+    return isFailureStatus(effective) || isTimeoutStatus(effective);
+  });
   failures.sort(
     (a, b) =>
       new Date(b.latest_activity).getTime() - new Date(a.latest_activity).getTime(),
@@ -231,7 +241,7 @@ function PrimaryRunFocus({
                         >
                           {shortRunId(run.run_id)}
                         </span>
-                        <RunStatusBadge status={run.status} />
+                        <RunStatusBadge status={run.root_execution_status ?? run.status} />
                       </div>
                       <p className="truncate text-sm font-medium text-foreground">
                         {run.root_reasoner || run.display_name || "—"}
@@ -276,7 +286,7 @@ function PrimaryRunFocus({
                 into the DAG.
               </CardDescription>
             </div>
-            <RunStatusBadge status={run.status} />
+            <RunStatusBadge status={run.root_execution_status ?? run.status} />
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
@@ -445,7 +455,7 @@ function FailuresAttention({
                   >
                     {shortRunId(run.run_id)}
                   </span>
-                  <RunStatusBadge status={run.status} />
+                  <RunStatusBadge status={run.root_execution_status ?? run.status} />
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
                   {run.root_reasoner || run.display_name || "—"} ·{" "}
@@ -520,10 +530,10 @@ function RecentRunsTable({ runs, loading, onRowClick }: RecentRunsTableProps) {
               {run.total_executions ?? "—"}
             </TableCell>
             <TableCell className="px-3 py-1.5">
-              <RunStatusBadge status={run.status} />
+              <RunStatusBadge status={run.root_execution_status ?? run.status} />
             </TableCell>
             <TableCell className="px-3 py-1.5 text-right font-mono text-xs text-muted-foreground tabular-nums">
-              {run.terminal ? (
+              {isTerminalStatus(run.root_execution_status ?? run.status) ? (
                 formatDurationHumanReadable(run.duration_ms)
               ) : (
                 <LiveElapsedDuration
@@ -558,7 +568,7 @@ export function NewDashboardPage() {
 
   const llmHealthQuery = useLLMHealth();
   const queueQuery = useQueueStatus();
-  const agentsQuery = useAgents();
+  const agentsQuery = useAgents({ refetchInterval: 10_000 });
 
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary"],

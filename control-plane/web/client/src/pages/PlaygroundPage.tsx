@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -107,6 +107,9 @@ function buildAsyncCurlCommand(
 export function PlaygroundPage() {
   const { reasonerId: paramReasonerId } = useParams<{ reasonerId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const replayInput = (location.state as { replayInput?: unknown } | null)?.replayInput;
+  const hasReplayInput = replayInput != null && replayInput !== "" && JSON.stringify(replayInput) !== "{}" && JSON.stringify(replayInput) !== "null";
 
   // ── reasoner list ─────────────────────────────────────────────────────────
   const [reasonersData, setReasoners] = useState<ReasonersResponse | null>(null);
@@ -121,7 +124,18 @@ export function PlaygroundPage() {
   const [loadingReasonerDetails, setLoadingReasonerDetails] = useState(false);
 
   // ── playground state ──────────────────────────────────────────────────────
-  const [input, setInput] = useState("{}");
+  const [input, setInput] = useState(() => {
+    if (replayInput != null) {
+      try {
+        return typeof replayInput === "string"
+          ? replayInput
+          : JSON.stringify(replayInput, null, 2);
+      } catch {
+        return "{}";
+      }
+    }
+    return "{}";
+  });
   const [inputError, setInputError] = useState<string | null>(null);
   const [result, setResult] = useState<unknown>(null);
   const [resultError, setResultError] = useState<string | null>(null);
@@ -172,15 +186,17 @@ export function PlaygroundPage() {
       .then((data) => {
         if (!cancelled) {
           setSelectedReasoner(data);
-          // Seed input textarea with schema example
-          if (data.input_schema?.properties) {
-            const example: Record<string, string> = {};
-            for (const key of Object.keys(data.input_schema.properties)) {
-              example[key] = "";
+          // Seed input textarea with schema example, unless replay data was provided
+          if (!hasReplayInput) {
+            if (data.input_schema?.properties) {
+              const example: Record<string, string> = {};
+              for (const key of Object.keys(data.input_schema.properties)) {
+                example[key] = "";
+              }
+              setInput(JSON.stringify(example, null, 2));
+            } else {
+              setInput("{}");
             }
-            setInput(JSON.stringify(example, null, 2));
-          } else {
-            setInput("{}");
           }
           setResult(null);
           setResultError(null);
@@ -377,23 +393,38 @@ export function PlaygroundPage() {
         {/* INPUT */}
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            <label
+              htmlFor="playground-input"
+              className="text-sm font-semibold uppercase tracking-wider text-muted-foreground leading-none"
+            >
               Input
-            </CardTitle>
+            </label>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 flex-1">
             <textarea
+              id="playground-input"
+              autoFocus
               className="flex-1 min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm resize-vertical focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 placeholder:text-muted-foreground"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
                 if (inputError) setInputError(null);
               }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  if (!executing && selectedId) handleExecute();
+                }
+              }}
               placeholder={inputPlaceholder}
               spellCheck={false}
+              aria-describedby={inputError ? "playground-input-error" : undefined}
+              aria-invalid={inputError ? true : undefined}
             />
             {inputError && (
-              <p className="text-xs text-destructive">{inputError}</p>
+              <p id="playground-input-error" className="text-xs text-destructive">
+                {inputError}
+              </p>
             )}
 
             {/* ── Schema collapsible ──────────────────────────────────── */}

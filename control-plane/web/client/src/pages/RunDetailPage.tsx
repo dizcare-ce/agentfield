@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRunDAG, useCancelExecution } from "@/hooks/queries";
+import {
+  useRunDAG,
+  useCancelExecution,
+  usePauseExecution,
+  useResumeExecution,
+} from "@/hooks/queries";
 import {
   Card,
   CardContent,
@@ -10,15 +15,31 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Activity,
   BadgeCheck,
   ChevronDown,
   FileJson,
   FileCheck2,
   Info,
   Link2,
+  PauseCircle,
+  Play,
   RefreshCw,
   RotateCcw,
+  XCircle,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useRunNotification } from "@/components/ui/notification";
+import { CANCEL_RUN_COPY } from "@/components/runs/RunLifecycleMenu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,7 +62,8 @@ import { StepDetail } from "@/components/StepDetail";
 import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ExecutionObservabilityPanel } from "@/components/execution";
-import { normalizeExecutionStatus } from "@/utils/status";
+import { normalizeExecutionStatus, isTerminalStatus } from "@/utils/status";
+import { StatusPill } from "@/components/ui/status-pill";
 import type {
   WebhookFailurePreview,
   WebhookRunSummary,
@@ -49,27 +71,13 @@ import type {
   WorkflowDAGLightweightResponse,
 } from "@/types/workflows";
 import type { WorkflowExecution } from "@/types/executions";
-import { retryExecutionWebhook } from "@/services/executionsApi";
+import { retryExecutionWebhook, getExecutionDetails } from "@/services/executionsApi";
 import {
   downloadWorkflowVCAuditFile,
   getWorkflowVCChain,
 } from "@/services/vcApi";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function statusVariant(
-  status: string,
-): "default" | "destructive" | "secondary" | "outline" {
-  switch (status) {
-    case "succeeded":
-      return "default";
-    case "failed":
-    case "timeout":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
 
 function computeMaxDuration(
   timeline: WorkflowDAGLightweightNode[],
@@ -402,6 +410,13 @@ export function RunDetailPage() {
   const queryClient = useQueryClient();
   const { data: dag, isLoading, isError, error } = useRunDAG(runId);
   const cancelMutation = useCancelExecution();
+  const pauseMutation = usePauseExecution();
+  const resumeMutation = useResumeExecution();
+  const showRunNotification = useRunNotification();
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState<
+    null | "pause" | "resume" | "cancel"
+  >(null);
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"trace" | "graph">("trace");
@@ -603,13 +618,17 @@ export function RunDetailPage() {
               noValueTitle="Verifiable credentials disabled or issuer DID not yet issued"
               idTailVisible={8}
             />
-            <Badge
-              variant={statusVariant(dag.workflow_status)}
-              size="md"
-              className="shrink-0 px-2.5 py-1 text-xs font-medium capitalize leading-snug shadow-xs"
-            >
-              {dag.workflow_status}
-            </Badge>
+            {(() => {
+              const rootNodeForBadge =
+                dag.timeline.find((n) => n.workflow_depth === 0) ??
+                dag.timeline[0];
+              const effective = normalizeExecutionStatus(
+                rootNodeForBadge?.status ?? dag.workflow_status,
+              );
+              return (
+                <StatusPill status={effective} size="md" className="shrink-0 shadow-xs" />
+              );
+            })()}
           </div>
 
           <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1">
@@ -657,14 +676,24 @@ export function RunDetailPage() {
             variant="outline"
             size="sm"
             className="h-8 text-xs"
-            onClick={() => {
+            onClick={async () => {
               const agentNodeId = rootNode?.agent_node_id;
               const reasonerId = rootNode?.reasoner_id;
+              const execId = rootNode?.execution_id ?? selectedExecution.execution_id;
               const target =
                 agentNodeId && reasonerId
                   ? `${agentNodeId}.${reasonerId}`
                   : agentNodeId ?? reasonerId ?? "";
-              navigate(`/playground${target ? `/${target}` : ""}`);
+              let replayInput: unknown = null;
+              if (execId) {
+                try {
+                  const details = await getExecutionDetails(execId);
+                  replayInput = details.input_data;
+                } catch { /* best effort */ }
+              }
+              navigate(`/playground${target ? `/${target}` : ""}`, {
+                state: { replayInput },
+              });
             }}
           >
             <RotateCcw className="size-3.5 mr-1" />
@@ -757,26 +786,246 @@ export function RunDetailPage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Cancel (running only) */}
-          {dag.workflow_status === "running" && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={cancelMutation.isPending}
-              onClick={() => {
-                const execId =
-                  dag.timeline.find((n) => n.workflow_depth === 0)
-                    ?.execution_id ?? dag.timeline[0]?.execution_id;
-                if (execId) cancelMutation.mutate(execId);
-              }}
-            >
-              Cancel
-            </Button>
-          )}
+          {/* Lifecycle cluster — Pause / Resume / Cancel. Uses the ROOT
+              execution's own status (not the aggregated workflow status)
+              because that's the row the user controls. A run can be
+              aggregate-'running' while the root is already 'paused' if
+              in-flight children are still finishing. */}
+          {(() => {
+            const rootNodeForStatus =
+              dag.timeline.find((n) => n.workflow_depth === 0) ??
+              dag.timeline[0];
+            const normalized = normalizeExecutionStatus(
+              rootNodeForStatus?.status ?? dag.workflow_status,
+            );
+            const isRunning = normalized === "running";
+            const isPaused = normalized === "paused";
+            if (isTerminalStatus(normalized)) return null;
+
+            const rootExecId = rootNodeForStatus?.execution_id;
+            if (!rootExecId) return null;
+
+            const busy = lifecycleBusy !== null;
+
+            const runLabelForNotif =
+              dag.workflow_name?.trim() ||
+              (rootNodeForStatus?.agent_node_id && rootNodeForStatus?.reasoner_id
+                ? `${rootNodeForStatus.agent_node_id}.${rootNodeForStatus.reasoner_id}`
+                : rootNodeForStatus?.reasoner_id ?? "run");
+            const runIdForNotif = runId ?? "";
+
+            const handlePause = async () => {
+              setLifecycleBusy("pause");
+              try {
+                await pauseMutation.mutateAsync(rootExecId);
+                showRunNotification({
+                  type: "success",
+                  eventKind: "pause",
+                  title: "Paused",
+                  message: `${runLabelForNotif} is now paused. In-flight steps will finish; no new steps will start until you resume.`,
+                  runId: runIdForNotif,
+                  runLabel: runLabelForNotif,
+                });
+              } catch (err) {
+                showRunNotification({
+                  type: "error",
+                  eventKind: "error",
+                  title: "Pause failed",
+                  message:
+                    err instanceof Error ? err.message : "Unable to pause run.",
+                  runId: runIdForNotif,
+                  runLabel: runLabelForNotif,
+                });
+              } finally {
+                setLifecycleBusy(null);
+              }
+            };
+
+            const handleResume = async () => {
+              setLifecycleBusy("resume");
+              try {
+                await resumeMutation.mutateAsync(rootExecId);
+                showRunNotification({
+                  type: "success",
+                  eventKind: "resume",
+                  title: "Resumed",
+                  message: `${runLabelForNotif} is running again.`,
+                  runId: runIdForNotif,
+                  runLabel: runLabelForNotif,
+                });
+              } catch (err) {
+                showRunNotification({
+                  type: "error",
+                  eventKind: "error",
+                  title: "Resume failed",
+                  message:
+                    err instanceof Error
+                      ? err.message
+                      : "Unable to resume run.",
+                  runId: runIdForNotif,
+                  runLabel: runLabelForNotif,
+                });
+              } finally {
+                setLifecycleBusy(null);
+              }
+            };
+
+            return (
+              <>
+                {isRunning ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={busy}
+                    onClick={handlePause}
+                  >
+                    {lifecycleBusy === "pause" ? (
+                      <Activity
+                        className="size-3.5 animate-spin"
+                        aria-hidden
+                      />
+                    ) : (
+                      <PauseCircle className="size-3.5" aria-hidden />
+                    )}
+                    Pause
+                  </Button>
+                ) : null}
+                {isPaused ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    disabled={busy}
+                    onClick={handleResume}
+                  >
+                    {lifecycleBusy === "resume" ? (
+                      <Activity
+                        className="size-3.5 animate-spin"
+                        aria-hidden
+                      />
+                    ) : (
+                      <Play className="size-3.5" aria-hidden />
+                    )}
+                    Resume
+                  </Button>
+                ) : null}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={busy}
+                  onClick={() => setCancelDialogOpen(true)}
+                >
+                  {lifecycleBusy === "cancel" ? (
+                    <Activity className="size-3.5 animate-spin" aria-hidden />
+                  ) : (
+                    <XCircle className="size-3.5" aria-hidden />
+                  )}
+                  Cancel
+                </Button>
+
+                <AlertDialog
+                  open={cancelDialogOpen}
+                  onOpenChange={setCancelDialogOpen}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {CANCEL_RUN_COPY.title(1)}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {CANCEL_RUN_COPY.description}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={busy}>
+                        {CANCEL_RUN_COPY.keepLabel}
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={busy}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async () => {
+                          setCancelDialogOpen(false);
+                          setLifecycleBusy("cancel");
+                          try {
+                            await cancelMutation.mutateAsync(rootExecId);
+                            showRunNotification({
+                              type: "success",
+                              eventKind: "cancel",
+                              title: "Cancelled",
+                              message: `${runLabelForNotif} will stop after its current step finishes. In-flight work will be discarded.`,
+                              runId: runIdForNotif,
+                              runLabel: runLabelForNotif,
+                            });
+                          } catch (err) {
+                            showRunNotification({
+                              type: "error",
+                              eventKind: "error",
+                              title: "Cancel failed",
+                              message:
+                                err instanceof Error
+                                  ? err.message
+                                  : "Unable to cancel run.",
+                              runId: runIdForNotif,
+                              runLabel: runLabelForNotif,
+                            });
+                          } finally {
+                            setLifecycleBusy(null);
+                          }
+                        }}
+                      >
+                        {CANCEL_RUN_COPY.confirmLabel(1)}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            );
+          })()}
 
         </div>
       </div>
+
+      {/* Cancellation / pause registered strip — shown when the root
+          execution is cancelled or paused by the user but at least one
+          child is still reporting 'running'. This is the honest depiction
+          of the backend semantics: the control plane flipped the root's
+          status immediately but in-flight HTTP calls to agent workers
+          cannot be killed mid-dispatch and will finish naturally. */}
+      {(() => {
+        const rootNodeForStrip =
+          dag.timeline.find((n) => n.workflow_depth === 0) ??
+          dag.timeline[0];
+        const rootStatus = normalizeExecutionStatus(rootNodeForStrip?.status);
+        if (rootStatus !== "cancelled" && rootStatus !== "paused") return null;
+        const stillRunning = dag.timeline.filter(
+          (n) => normalizeExecutionStatus(n.status) === "running",
+        ).length;
+        if (stillRunning === 0) return null;
+        const verb = rootStatus === "cancelled" ? "Cancellation" : "Pause";
+        return (
+          <div
+            role="status"
+            className="mb-3 flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <Info
+              className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
+            <p className="leading-snug">
+              <span className="font-medium text-foreground">
+                {verb} registered
+              </span>{" "}
+              — {stillRunning} node{stillRunning === 1 ? "" : "s"} still
+              finishing the current step. No new nodes will start
+              {rootStatus === "cancelled"
+                ? "; their output will be discarded."
+                : " until you resume."}
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Nodes + webhooks — always show run-level strip (empty states explicit) */}
       <TooltipProvider delayDuration={280}>
@@ -896,6 +1145,10 @@ export function RunDetailPage() {
                           maxDuration={maxDuration}
                           selectedId={selectedStepId}
                           onSelect={setSelectedStepId}
+                          rootStatus={
+                            dag.timeline.find((n) => n.workflow_depth === 0)
+                              ?.status ?? dag.workflow_status
+                          }
                           runStartedAt={
                             dag.timeline.find((n) => n.workflow_depth === 0)
                               ?.started_at ??

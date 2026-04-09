@@ -50,7 +50,8 @@ export function HealthStrip({ className }: HealthStripProps) {
     (n) =>
       n.health_status === "ready" ||
       n.health_status === "active" ||
-      n.lifecycle_status === "running",
+      n.lifecycle_status === "running" ||
+      n.lifecycle_status === "ready",
   ).length;
 
   const totalRunning = Object.values(queueStatus.data?.agents ?? {}).reduce(

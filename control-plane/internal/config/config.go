@@ -34,6 +34,7 @@ type UIConfig struct {
 // AgentFieldConfig holds the core AgentField server configuration.
 type AgentFieldConfig struct {
 	Port             int                    `yaml:"port"`
+	Registration     RegistrationConfig     `yaml:"registration" mapstructure:"registration"`
 	NodeHealth       NodeHealthConfig       `yaml:"node_health" mapstructure:"node_health"`
 	LLMHealth        LLMHealthConfig        `yaml:"llm_health" mapstructure:"llm_health"`
 	ExecutionCleanup ExecutionCleanupConfig `yaml:"execution_cleanup" mapstructure:"execution_cleanup"`
@@ -41,6 +42,11 @@ type AgentFieldConfig struct {
 	Approval         ApprovalConfig         `yaml:"approval" mapstructure:"approval"`
 	NodeLogProxy     NodeLogProxyConfig     `yaml:"node_log_proxy" mapstructure:"node_log_proxy"`
 	ExecutionLogs    ExecutionLogsConfig    `yaml:"execution_logs" mapstructure:"execution_logs"`
+}
+
+// RegistrationConfig governs validation of agent-supplied registration endpoints.
+type RegistrationConfig struct {
+	ServerlessDiscoveryAllowedHosts []string `yaml:"serverless_discovery_allowed_hosts" mapstructure:"serverless_discovery_allowed_hosts"`
 }
 
 // NodeLogProxyConfig limits the control plane proxy to agent process logs (NDJSON).
@@ -162,6 +168,16 @@ type LLMEndpoint struct {
 type FeatureConfig struct {
 	DID       DIDConfig       `yaml:"did" mapstructure:"did"`
 	Connector ConnectorConfig `yaml:"connector" mapstructure:"connector"`
+	Tracing   TracingConfig   `yaml:"tracing" mapstructure:"tracing"`
+}
+
+// TracingConfig holds configuration for OpenTelemetry distributed tracing.
+type TracingConfig struct {
+	Enabled     bool   `yaml:"enabled" mapstructure:"enabled"`           // Enable OTel trace export (default: false)
+	Exporter    string `yaml:"exporter" mapstructure:"exporter"`         // "otlp-http" (default) or "otlp-grpc"
+	Endpoint    string `yaml:"endpoint" mapstructure:"endpoint"`         // OTLP endpoint (default: "localhost:4318")
+	ServiceName string `yaml:"service_name" mapstructure:"service_name"` // Service name for traces (default: "agentfield")
+	Insecure    bool   `yaml:"insecure" mapstructure:"insecure"`         // Skip TLS verification
 }
 
 // ConnectorConfig holds configuration for the connector service integration.
@@ -351,6 +367,17 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.API.Auth.APIKey = apiKey
 	}
 
+	if val := os.Getenv("AGENTFIELD_REGISTRATION_SERVERLESS_DISCOVERY_ALLOWED_HOSTS"); val != "" {
+		parts := strings.Split(val, ",")
+		cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts = cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts[:0]
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts = append(cfg.AgentField.Registration.ServerlessDiscoveryAllowedHosts, trimmed)
+			}
+		}
+	}
+
 	// Node health monitoring overrides
 	if val := os.Getenv("AGENTFIELD_HEALTH_CHECK_INTERVAL"); val != "" {
 		if d, err := time.ParseDuration(val); err == nil {
@@ -507,6 +534,21 @@ func ApplyEnvOverrides(cfg *Config) {
 		if i, err := strconv.Atoi(val); err == nil {
 			cfg.AgentField.Approval.DefaultExpiryHours = i
 		}
+	}
+
+	// OpenTelemetry tracing overrides (also supports standard OTEL_* env vars)
+	if val := os.Getenv("AGENTFIELD_TRACING_ENABLED"); val != "" {
+		cfg.Features.Tracing.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); val != "" {
+		cfg.Features.Tracing.Endpoint = val
+		cfg.Features.Tracing.Enabled = true
+	}
+	if val := os.Getenv("OTEL_SERVICE_NAME"); val != "" {
+		cfg.Features.Tracing.ServiceName = val
+	}
+	if val := os.Getenv("AGENTFIELD_TRACING_INSECURE"); val != "" {
+		cfg.Features.Tracing.Insecure = val == "true" || val == "1"
 	}
 
 	// Connector overrides

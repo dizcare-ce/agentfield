@@ -24,7 +24,6 @@ import {
 import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import { NotificationProvider } from "@/components/ui/notification";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -72,7 +71,7 @@ function AccessManagementPageInner() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-1">
-            <h1 className="text-2xl font-bold tracking-tight">Access management</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Access management</h1>
             <HintIcon label="What this page does">
               Tag rules for cross-agent calls and registration-tag approvals. When
               the server expects it, use the browser admin token below—separate from
@@ -253,11 +252,7 @@ function AccessManagementPageInner() {
 }
 
 export function AccessManagementPage() {
-  return (
-    <NotificationProvider>
-      <AccessManagementPageInner />
-    </NotificationProvider>
-  );
+  return <AccessManagementPageInner />;
 }
 
 export default AccessManagementPage;

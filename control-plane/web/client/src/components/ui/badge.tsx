@@ -2,15 +2,16 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "../../lib/utils"
 import { getStatusBadgeClasses, statusTone, type StatusTone } from "../../lib/theme"
+import { getStatusTheme, type CanonicalStatus } from "../../utils/status"
 import {
-  CheckCircle,
+  CheckCircle2,
   XCircle,
-  SpinnerGap,
+  Loader2,
   Clock,
-  WarningDiamond,
-  Question,
-} from "@/components/ui/icon-bridge"
-import type { IconComponent } from "@/components/ui/icon-bridge"
+  AlertTriangle,
+  HelpCircle,
+  type LucideIcon,
+} from "lucide-react"
 
 const badgeVariants = cva(
   "inline-flex items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -79,43 +80,42 @@ export interface BadgeProps
   showIcon?: boolean;
 }
 
-const statusIcons: Partial<Record<BadgeVariant, { icon: IconComponent }>> = {
-  success: { icon: CheckCircle },
-  failed: { icon: XCircle },
-  running: { icon: SpinnerGap },
-  pending: { icon: Clock },
-  degraded: { icon: WarningDiamond },
-  unknown: { icon: Question },
-  destructive: { icon: XCircle },
-};
+const STATUS_VARIANT_META: Partial<Record<BadgeVariant, {
+  icon: LucideIcon
+  tone: StatusTone
+  canonical: CanonicalStatus
+}>> = {
+  success: { icon: CheckCircle2, tone: "success", canonical: "succeeded" },
+  failed: { icon: XCircle, tone: "error", canonical: "failed" },
+  running: { icon: Loader2, tone: "info", canonical: "running" },
+  pending: { icon: Clock, tone: "warning", canonical: "pending" },
+  degraded: { icon: AlertTriangle, tone: "warning", canonical: "paused" },
+  unknown: { icon: HelpCircle, tone: "neutral", canonical: "unknown" },
+  destructive: { icon: XCircle, tone: "error", canonical: "failed" },
+}
 
 function Badge({ className, variant, size, icon, showIcon = true, children, ...props }: BadgeProps) {
-  const toneByVariant: Partial<Record<BadgeVariant, StatusTone>> = {
-    success: "success",
-    failed: "error",
-    running: "info",
-    pending: "warning",
-    degraded: "warning",
-    unknown: "neutral",
-    destructive: "error",
-  };
-
-  const shouldShowIcon = showIcon && variant && variant in statusIcons;
-  const statusIconEntry = shouldShowIcon ? statusIcons[variant] : null;
-  const StatusIconComponent = statusIconEntry?.icon;
-  const iconTone = variant ? toneByVariant[variant] : undefined;
+  const statusMeta = variant ? STATUS_VARIANT_META[variant] : undefined
+  const StatusIconComponent = statusMeta?.icon
+  const shouldSpinIcon = statusMeta
+    ? getStatusTheme(statusMeta.canonical).motion === "live"
+    : false;
 
   return (
     <div className={cn(badgeVariants({ variant, size }), className)} {...props}>
-      {icon || (StatusIconComponent && (
+      {showIcon && (icon || (StatusIconComponent && (
         <StatusIconComponent
           size={12}
           className={cn(
             "flex-shrink-0",
-            iconTone ? statusTone[iconTone].accent : undefined
+            statusMeta ? statusTone[statusMeta.tone].accent : undefined,
+            shouldSpinIcon && "motion-safe:animate-spin"
           )}
+          style={
+            shouldSpinIcon ? { animationDuration: "2.5s" } : undefined
+          }
         />
-      ))}
+      )))}
       {children}
     </div>
   )
