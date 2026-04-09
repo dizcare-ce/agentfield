@@ -463,11 +463,11 @@ func RegisterNodeHandler(storageProvider storage.StorageProvider, uiService *ser
 			}
 		}
 
-			if len(candidateList) > 0 && !skipAutoDiscovery {
-				logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
-				resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(candidateList, defaultPort)
+		if len(candidateList) > 0 && !skipAutoDiscovery {
+			logger.Logger.Debug().Msgf("🔍 Auto-discovering callback URL for %s from %d candidates", newNode.ID, len(candidateList))
+			resolvedBaseURL, normalizedCandidates, probeResults = resolveCallbackCandidates(candidateList, defaultPort)
 
-				if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
+			if resolvedBaseURL != "" && resolvedBaseURL != newNode.BaseURL {
 				logger.Logger.Info().Msgf("🔗 Auto-discovered callback URL for %s: %s (was %s)", newNode.ID, resolvedBaseURL, newNode.BaseURL)
 				newNode.BaseURL = resolvedBaseURL
 			}
@@ -1439,6 +1439,47 @@ func RegisterServerlessAgentHandler(storageProvider storage.StorageProvider, uiS
 		existingNode, err := storageProvider.GetAgent(ctx, newNode.ID)
 		if err == nil && existingNode != nil {
 			logger.Logger.Warn().Msgf("⚠️ Serverless agent %s already registered, updating...", newNode.ID)
+
+			adminRevoked := existingNode.LifecycleStatus == types.AgentStatusPendingApproval &&
+				len(existingNode.ApprovedTags) == 0
+			if adminRevoked {
+				logger.Logger.Warn().Msgf("⏸️ Rejecting serverless re-registration for node %s: agent is pending_approval (admin action required)", newNode.ID)
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error":   "agent_pending_approval",
+					"message": fmt.Sprintf("agent node '%s' is awaiting tag approval and cannot re-register", existingNode.ID),
+				})
+				return
+			}
+
+			// Preserve existing approval state so re-registration does not clear
+			// approved tags or lifecycle status during the UPSERT.
+			newNode.ApprovedTags = existingNode.ApprovedTags
+			newNode.LifecycleStatus = existingNode.LifecycleStatus
+
+			if len(existingNode.ApprovedTags) > 0 {
+				approvedSet := make(map[string]struct{})
+				for _, t := range existingNode.ApprovedTags {
+					approvedSet[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+				}
+				for i := range newNode.Reasoners {
+					var approved []string
+					for _, t := range newNode.Reasoners[i].Tags {
+						if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+							approved = append(approved, t)
+						}
+					}
+					newNode.Reasoners[i].ApprovedTags = approved
+				}
+				for i := range newNode.Skills {
+					var approved []string
+					for _, t := range newNode.Skills[i].Tags {
+						if _, ok := approvedSet[strings.ToLower(strings.TrimSpace(t))]; ok {
+							approved = append(approved, t)
+						}
+					}
+					newNode.Skills[i].ApprovedTags = approved
+				}
+			}
 		}
 
 		// Register the node
