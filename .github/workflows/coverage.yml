@@ -221,6 +221,10 @@ jobs:
 
       - name: Comment coverage report on PR
         if: github.event_name == 'pull_request'
+        # continue-on-error: fork PRs get a read-only GITHUB_TOKEN that
+        # cannot post comments. The coverage gate result is unaffected —
+        # only the PR comment is skipped.
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: coverage-gate
@@ -228,6 +232,7 @@ jobs:
 
       - name: Comment patch coverage report on PR
         if: github.event_name == 'pull_request' && hashFiles('test-reports/coverage/patch-gate-report.md') != ''
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: patch-coverage-gate
