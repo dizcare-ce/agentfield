@@ -121,21 +121,37 @@ result = await app.harness(
 # Returns HarnessResult with .text, .parsed (validated schema), .result
 ```
 
-**The atomic unit of intelligence has shifted.** A single LLM call is stateless — you control every step. A harness is stateful, agentic, and opaque: you give it a goal and it decides what to read, what approach to take, what to try when the first approach fails. The harness is a model plus tools, plus a filesystem, plus a control loop, plus the ability to iterate and backtrack.
+**The atomic unit of intelligence has shifted.** A single LLM call (`app.ai()`) is stateless — you control every step, you provide the input, you get a structured response. A harness (`app.harness()`) is stateful, agentic, and opaque: you give it a goal and it decides what to read, what approach to take, what to try when the first approach fails. The harness is a model plus tools, plus a filesystem, plus a control loop, plus the ability to iterate and backtrack.
 
-This creates a fundamental design question: **does this task require agency — the ability to autonomously decide what actions to take based on what is discovered? Or do you already know the actions?**
+**Understanding `app.ai()` constraints:** A single `app.ai()` call accepts bounded input and produces bounded output — a structured Pydantic schema with a few fields. It excels as a gate: classification, routing, interpreting a bounded piece of data, making a judgment call. It is NOT suited for:
+- Reasoning across many files simultaneously
+- Producing complex output like writing files or generating large documents
+- Multi-step research where step N depends on what step N-1 discovered
+- Tasks where the input exceeds what fits in a single context window
 
-- If you already know the action → that's code. Use `@app.skill()`. You don't need intelligence to execute a known operation.
-- If the action requires judgment but not autonomy → that's `app.ai()`. The LLM reasons over data you provide.
-- If the task requires an agent that autonomously navigates, discovers, and decides its own actions → that's `app.harness()`. The LLM's reasoning drives which files to read, which commands to run, which approach to try next.
+**Understanding `app.harness()` capabilities:** A harness is an autonomous reasoning agent with file system access, shell access, memory, and a control loop. It can read multiple files, reason across them, write output files, run commands, backtrack on failure, and iterate. Use it when the task exceeds what a single `app.ai()` call can handle:
+
+- **Multi-file reasoning** — reading and reasoning across several files to understand relationships, dependencies, or cross-cutting concerns
+- **Complex output** — producing files, reports, or artifacts that go beyond a flat schema
+- **Research and exploration** — investigating a codebase, document tree, or system where the path depends on what is discovered
+- **Multi-step coding** — fixing bugs, refactoring, writing tests where each step informs the next
+- **Any task where the reasoning itself requires iteration** — try an approach, evaluate the result, adjust
 
 **OpenCode is pre-installed in the default Docker container** (`app.harness(provider="opencode")`), so harness is available out of the box.
 
-**Capability and predictability are inversely related.** `@app.skill()` is perfectly predictable — same input, same output. `app.ai()` varies in content but the shape is known (structured schema). `app.harness()` is unpredictable in action space — two invocations with the same goal may read different files, take different approaches, write different code. This unpredictability is the direct consequence of capability. Use the lightest primitive that gets the job done.
+**The three primitives form a capability ladder:**
 
-**The verification principle:** As you move from skill → ai → harness, spend proportionally more on verifying outcomes. A skill's output is deterministic and needs no verification. An ai call's output needs a `confident` flag. A harness's output needs structural verification — did it actually accomplish the goal? The system should spend more on checking work than on doing work at the harness level.
+| Primitive | Input | Output | Statefulness | Cost | Use when |
+|-----------|-------|--------|--------------|------|----------|
+| `@app.skill()` | Any (programmatic) | Any (deterministic) | None | Free | You know exactly what to do — code it |
+| `app.ai()` | Bounded text/data | Structured schema (small) | Stateless | Low | You need judgment on bounded input — classification, routing, interpretation, gating |
+| `app.harness()` | A goal + filesystem | Text, files, artifacts | Stateful + agentic | High | The task exceeds a single AI call — multi-file reasoning, complex output, research, multi-step coding |
 
-**The split pattern:** Many tasks that seem to need a harness are actually two tasks — a programmatic action and an intelligent interpretation. Separate them. The programmatic part is a skill; the interpretation is an ai call. This decomposition is cheaper, faster, more reliable, and more observable than delegating both to a harness. A harness should be reserved for tasks where the decomposition itself requires intelligence — where you can't predetermine the steps because they depend on what the agent discovers.
+**Capability and predictability are inversely related.** `@app.skill()` is perfectly predictable. `app.ai()` varies in content but the shape is known. `app.harness()` is unpredictable in action space — two invocations may take different approaches. This unpredictability is the direct consequence of capability.
+
+**The verification principle:** As you move up the ladder, spend proportionally more on verifying outcomes. A skill needs no verification. An ai call needs a `confident` flag. A harness needs structural verification — did it actually accomplish the goal? The system should spend more on checking work than on doing work at the harness level.
+
+**The split pattern (when it applies):** Some tasks can be decomposed into "programmatic action + intelligent interpretation" — a skill runs a command, an ai call interprets the output. This decomposition is cheaper and more observable. But do NOT force the split when the reasoning itself is complex: if interpreting the output requires reading additional files, or the interpretation drives further actions, that's harness territory. The split works for simple pairs (run linter → interpret output). It fails when the reasoning is inherently multi-step or multi-file.
 
 ## What `app.call()` actually does
 
@@ -155,41 +171,55 @@ result = ScoreResult(**result_dict)
 
 **Critical:** always reference reasoners as `f"{app.node_id}.reasoner_name"` so renaming the node via `AGENT_NODE_ID` env doesn't break the system. Hardcoding the node ID is a bug waiting to happen.
 
-**Workflow tracking:** every `app.call` is recorded in the control plane's workflow DAG. Direct HTTP between reasoners bypasses this and is forbidden.
+**Workflow DAG tracking:** Every `app.call()` is automatically recorded in the control plane's workflow DAG. The control plane propagates `X-Workflow-ID` and `X-Parent-Execution-ID` headers, building a full call tree with parent-child relationships, execution depth, timing, and status. This means:
+
+- The UI at `/ui/` renders the live DAG — you can see which reasoners called which, in what order, how long each took
+- `GET /api/v1/workflows/{id}/dag` returns the full tree as JSON with `WorkflowDAGNode` entries (each has `execution_id`, `parent_execution_id`, `workflow_depth`, `children`, `status`, `duration_ms`)
+- Verifiable credential chains (`/api/v1/did/workflow/{id}/vc-chain`) trace cryptographic provenance through the entire call graph
+- When a reasoner calls another reasoner which calls another, the depth tracks automatically — this is how the system proves it has depth ≥ 3
+
+**This is why `app.call()` is mandatory for all inter-reasoner traffic.** Direct HTTP between reasoners bypasses the DAG, breaks observability, and loses the audit trail. The workflow DAG is how you prove the system's reasoning shape is composite intelligence, not a flat chain.
 
 ## The decision tree (real, not aspirational)
 
 ```
 For each unit of work, ask three questions in order:
 
-1. Do I already know exactly what to do?
-   YES → @app.skill()  — deterministic, free, perfectly predictable.
-   Code can read files, run commands, sort, parse, score, validate.
-   If it can be programmed, it's not intelligence — it's code.
+1. Do I already know exactly what to do, and is the action deterministic?
+   YES → @app.skill()  — free, perfectly predictable, replayable.
+   Code can read files, run commands, sort, parse, score, validate, HTTP call.
+   If it can be programmed without judgment, it's code, not intelligence.
 
-2. Do I need judgment to interpret, classify, route, or reason?
+2. Is the input bounded, the output a small structured schema, and the
+   reasoning completable in a single judgment call?
    YES → app.ai()  — the LLM reasons over data you provide.
-   Single-shot: app.ai(schema=...) for structured output.
-   Multi-turn: app.ai(tools=[...]) when the LLM needs to call tools iteratively.
-   The shape of the action is known; the content requires intelligence.
+   Single-shot: app.ai(schema=...) for classification, routing, interpretation.
+   Multi-turn: app.ai(tools=[...]) when iterative tool use stays in-process.
+   This is the GATING primitive — small input, small structured output,
+   one judgment. It excels at: confident/not-confident decisions, routing,
+   interpreting bounded data, structured extraction.
 
-3. Do I need an autonomous agent that discovers its own path?
+3. Does the task involve multi-file reasoning, complex output (writing files),
+   research/exploration, multi-step coding, or input that exceeds a single
+   AI call's context?
    YES → app.harness(provider="opencode")  — pre-installed in default container.
-   The agent decides what to read, what to try, how to recover from failure.
-   You give it a goal and verify the outcome. You don't control the process.
-   Capability and predictability are inversely related — this is the most
-   powerful primitive AND the least predictable. Use it when the task
-   requires agency, not just intelligence.
+   The harness is a full reasoning agent: filesystem, shell, memory, iteration.
+   It can read many files, reason across them, write outputs, run commands,
+   backtrack on failure, and try different approaches.
+   Use it for: codebase exploration, multi-file analysis, report generation
+   that requires reading source, bug fixing, research tasks, any reasoning
+   where step N depends on what step N-1 discovered in the filesystem.
 
-Always: decompose before escalating.
-   → @app.reasoner() that composes app.call() + asyncio.gather
-   Many small cognitive units > one big autonomous agent.
-   Each reasoner has a single responsibility you can state in one sentence.
+Always: compose reasoners into deep DAGs.
+   → @app.reasoner() that uses app.call() + asyncio.gather
+   Each reasoner has a single cognitive responsibility.
+   Reasoners call other reasoners — not just a flat fan-out from the top.
+   The control plane tracks every app.call() in the workflow DAG automatically.
 ```
 
-**The meta-principle:** The value of a multi-reasoner system is that the architecture itself encodes intelligence — how to break down problems, allocate cognitive resources, combine partial solutions, and maintain coherence across steps. A well-composed system of ten focused reasoners outperforms a single powerful agent because the composition is the intelligence.
+**The meta-principle:** The value of a multi-reasoner system is that the architecture itself encodes intelligence — how to break down problems, allocate cognitive resources, combine partial solutions, and maintain coherence across steps. A well-composed system of focused reasoners outperforms a single powerful agent because the composition is the intelligence.
 
-The primitive choice follows from this: use the lightest primitive that preserves the intelligence you need. Skills are free and deterministic — use them aggressively. AI calls add judgment — use them where human-level interpretation is required. Harnesses add agency — use them only when the task cannot be decomposed into known steps, because the steps themselves depend on what is discovered. Every time you can split "action + interpretation" into "skill + ai call," you've made the system faster, cheaper, and more observable without losing intelligence.
+`app.ai()` is a gate — bounded input, structured output, single judgment. `app.harness()` is an agent — unbounded reasoning across files and steps. `@app.skill()` is code — deterministic execution. The mistake is using `app.ai()` for tasks that exceed its constraints (complex multi-file reasoning, large output), or using `app.harness()` for tasks that `app.ai()` handles cleanly (classification, routing, bounded interpretation). Match the primitive to the task's actual complexity.
 
 ## The model-propagation pattern (mandatory in every build)
 
