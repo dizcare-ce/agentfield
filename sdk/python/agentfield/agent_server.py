@@ -82,6 +82,47 @@ class AgentServer:
                 },
             )
 
+        @self.agent.get("/debug/tasks")
+        async def debug_tasks():
+            """Dump every live asyncio task with its current stack frames.
+
+            Use this to find deadlocked workflows: any task whose stack stays
+            the same across two calls is suspended on an await that never
+            resolves.
+            """
+            import io
+
+            tasks = list(asyncio.all_tasks())
+            out = []
+            for t in tasks:
+                buf = io.StringIO()
+                try:
+                    name = t.get_name()
+                except Exception:
+                    name = "?"
+                buf.write(f"=== Task {name} done={t.done()} cancelled={t.cancelled()} ===\n")
+                try:
+                    coro = t.get_coro()
+                    buf.write(f"coro: {coro!r}\n")
+                except Exception:
+                    pass
+                try:
+                    stack = t.get_stack(limit=30)
+                    if stack:
+                        for frame in stack:
+                            buf.write(
+                                f"  {frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}\n"
+                            )
+                    else:
+                        buf.write("  <no stack — task is suspended on a Future/awaitable>\n")
+                except Exception as e:
+                    buf.write(f"  <stack error: {e}>\n")
+                out.append(buf.getvalue())
+            return JSONResponse(
+                content={"count": len(tasks), "tasks": out},
+                media_type="application/json",
+            )
+
         @self.agent.get("/health")
         async def health():
             health_response = {

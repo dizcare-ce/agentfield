@@ -2018,9 +2018,16 @@ class Agent(FastAPI):
             log_warn("Unable to construct callback URL for execution updates")
             return
 
+        # Wall-clock timeout to guarantee the callback always fires.
+        # Without this, a hung reasoner blocks the execution forever and the
+        # control plane never sees a terminal status.
+        reasoner_timeout = getattr(
+            self.async_config, "default_execution_timeout", 7200.0
+        )
+
         start_time = time.time()
         try:
-            result = await reasoner_coro()
+            result = await asyncio.wait_for(reasoner_coro(), timeout=reasoner_timeout)
             payload = {
                 "status": "succeeded",
                 "result": jsonable_encoder(result),
@@ -2030,6 +2037,21 @@ class Agent(FastAPI):
                 "reasoner": reasoner_name,
             }
             log_info(f"Execution {execution_id} completed asynchronously")
+        except asyncio.TimeoutError:
+            payload = {
+                "status": "failed",
+                "error": (
+                    f"Reasoner '{reasoner_name}' timed out after {reasoner_timeout}s"
+                ),
+                "error_details": {"reason": "reasoner_timeout"},
+                "duration_ms": int((time.time() - start_time) * 1000),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "execution_id": execution_id,
+                "reasoner": reasoner_name,
+            }
+            log_error(
+                f"Execution {execution_id} timed out after {reasoner_timeout}s"
+            )
         except Exception as exc:
             error_details = getattr(exc, "error_details", None)
             payload = {
