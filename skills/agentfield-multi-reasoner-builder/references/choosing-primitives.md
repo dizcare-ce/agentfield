@@ -121,9 +121,9 @@ result = await app.harness(
 # Returns HarnessResult with .text, .parsed (validated schema), .result
 ```
 
-**Use harness when:** you need a real coding agent (Claude Code, Codex, Gemini CLI) to perform a task that requires actual file I/O, shell access, or multi-step coding. Example: a "fix-this-failing-test" reasoner spawns a Claude Code harness to actually edit the test file.
+**Use harness when:** you need a real coding agent to perform a task that requires actual file I/O, shell access, or multi-step coding. **OpenCode is pre-installed in the default Docker container**, so `app.harness(provider="opencode")` works out of the box. Example: a "fix-this-failing-test" reasoner spawns an OpenCode harness to actually read the test file, understand the error, and edit the code.
 
-**Do NOT use harness for:** in-process stateful LLM reasoning over a document. That's `app.ai(..., tools=[...])`. Harness is heavyweight — it spawns a subprocess running an entire agent CLI.
+**Do NOT use harness for:** in-process stateful LLM reasoning over a document. That's `app.ai(..., tools=[...])`. Harness is heavyweight — it spawns a subprocess running an entire agent CLI. Use it when you need the power (file system, shell), not as a substitute for tool-calling.
 
 ## What `app.call()` actually does
 
@@ -165,7 +165,7 @@ What is this reasoner doing?
 │    OR pre-process with a @app.skill() chunker then fan-out via asyncio.gather
 │
 ├─ Need an actual coding agent to write/edit files / run shell?
-│  → app.harness(prompt, provider="claude-code", tools=[...])
+│  → app.harness(prompt, provider="opencode")  (pre-installed in default container)
 │
 └─ Composing multiple reasoners?
    → @app.reasoner() that uses app.call() and asyncio.gather
@@ -426,7 +426,7 @@ Every `.ai()` schema includes a `confident: bool` field, and the call site check
 |---|---|---|
 | **(a) Escalate to a deeper reasoner** | The system has another `@app.reasoner()` that can handle the harder case (chunked-loop, multi-call, more context) | Extra call |
 | **(b) Deterministic safe default (RECOMMENDED for safety/regulated systems)** | The use case has a "safe" terminal state — `REFER_TO_HUMAN`, `REJECT`, `RETRY_LATER`, `NEEDS_HUMAN_REVIEW`. Return a Pydantic instance hard-coded to that safe state | Free |
-| **(c) Escalate to `app.harness()`** | ONLY when `recommendation.harness_usable == true` from `af doctor`, AND the Dockerfile installs the CLI, AND there's a startup `shutil.which()` check | Heavy |
+| **(c) Escalate to `app.harness()`** | When the task needs file I/O or shell access. `opencode` is pre-installed in the default container, so `app.harness(provider="opencode")` works out of the box | Heavy |
 
 **Default for regulated, safety-critical, or judgment-based systems: option (b).** A confident-wrong automated decision is almost always worse than a referral. Build `fallback_*` constructors in `helpers.py` that return Pydantic instances hard-coded to the safe-default state.
 
@@ -488,7 +488,7 @@ The philosophy doc talks about "navigating documents" with a harness that has to
 
 **Option B — Loop yourself in a `@app.reasoner()`.** Chunk the document with a `@app.skill()`, fan out `app.ai()` calls per chunk via `asyncio.gather`, then synthesize.
 
-**Option C — `app.harness(provider="claude-code", tools=["read", "grep"])`.** Spawn a real coding agent CLI to navigate the document on the filesystem. Most powerful, also the most expensive.
+**Option C — `app.harness(provider="opencode")`.** Spawn a real coding agent CLI (pre-installed in the default container) to navigate the document on the filesystem. Most powerful, also the most expensive.
 
 Pick A for in-process tool-calling, B for embarrassingly-parallel chunked analysis, C for "I need a real agent to do file system work".
 

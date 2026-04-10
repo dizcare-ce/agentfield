@@ -482,7 +482,7 @@ Then **run this visual-invariant checklist** against the generated files. Every 
 - [ ] Entry reasoner accepts `model` and propagates via `app.call(..., model=model)` to every child
 - [ ] All `app.call(...)` use `f"{app.node_id}.X"` — no hardcoded node IDs
 - [ ] No `requests.post()` / `httpx.post()` between reasoners (use `app.call`)
-- [ ] No `app.harness(provider="...")` unless the Dockerfile installs the CLI AND main.py has a startup `shutil.which()` check
+- [ ] `app.harness()` uses `provider="opencode"` (pre-installed) unless user specifically requests another provider with Dockerfile modification
 - [ ] No `input_schema=` / `output_schema=` parameters on `@app.reasoner()`
 - [ ] README curl uses body shape `{"input": {...kwargs...}}` (NOT raw kwargs at top level)
 - [ ] `Agent(agentfield_server=os.getenv("AGENTFIELD_SERVER", ...))` — exact parameter name
