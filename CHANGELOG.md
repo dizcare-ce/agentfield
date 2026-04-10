@@ -6,6 +6,216 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.66-rc.2] - 2026-04-10
+
+
+### Fixed
+
+- Fix(sdk/python): clear stale litellm clients on timeout + add task debug endpoint
+
+When litellm.acompletion hangs and asyncio cancels it, the underlying httpx
+connection is left in a half-closed state. Subsequent acompletion calls grab
+the stale pooled connection and hang forever — a true deadlock that py-spy
+shows as 'all asyncio worker threads idle, 0 active frames'.
+
+Root cause confirmed by py-spy + the new /debug/tasks endpoint:
+- Task-N: <coroutine acompletion at litellm/utils.py:1889 in wrapper_async>
+- Stack frozen at `await original_function(*args, **kwargs)` for the entire
+  240s safety net window, even after asyncio.wait_for cancelled the parent.
+
+Fixes:
+- agent_ai.py: pass `timeout` to litellm_params so litellm/httpx aborts the
+  socket itself; on TimeoutError call new `_reset_litellm_http_clients()`
+  helper that clears module_level_aclient, in_memory_llm_clients_cache, and
+  the custom_httpx default handlers so the next call opens a fresh pool.
+  asyncio.wait_for safety net at 2× the configured timeout in case litellm
+  fails to honor its own timeout (which it currently does — verified
+  experimentally with timeout=2 returning in 6s).
+- agent_server.py: add GET /debug/tasks endpoint that dumps every live
+  asyncio.Task with its current stack, so future hangs can be diagnosed in
+  production without needing py-spy attach.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (af9532e)
+
+- Fix(sdk/python): bound reasoner execution with wall-clock timeout
+
+_execute_async_with_callback awaited reasoner_coro() without any
+overall timeout. If a reasoner hangs (deadlock, infinite loop, lost
+wakeup), the callback to the control plane never fires and the
+execution stays in "running" forever — there is no way for the
+control plane or polling client to recover.
+
+Now wraps the reasoner call in asyncio.wait_for() using
+default_execution_timeout. On timeout, fires a "failed" callback so
+the control plane can transition the execution to a terminal state.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (837636c)
+
+- Fix(sdk/python): prevent silent deadlocks in LLM calls and async contexts
+
+Two related issues caused agents to silently hang during long workflows:
+
+1. **Missing timeout on litellm.acompletion() calls** — when the LLM
+   provider hangs (network issue, service hang, connection pool
+   exhaustion), the await never returns and no exception fires. The
+   reasoner appears running but produces no output. Now wrapped in
+   asyncio.wait_for() with a configurable timeout (llm_call_timeout,
+   default 120s, env: AGENTFIELD_ASYNC_LLM_CALL_TIMEOUT).
+
+2. **agent_registry used threading.local** — coroutines may resume on
+   different threads in some asyncio runtimes, causing
+   get_current_agent_instance() to return None and break dynamic
+   model/key dispatch ("No agent instance found"). Switched to
+   contextvars.ContextVar which is the correct primitive for
+   asyncio-aware context propagation.
+
+Symptoms before fix: long-running research agents (e.g. extract_all_entities
+with concurrent sub-tasks) would hang silently after dozens of successful
+reasoner calls. No traceback, no error log — just frozen.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (2befd5c)
+
+
+
+### Testing
+
+- Test(sdk/python): fix ruff lint errors in deadlock-recovery tests
+
+CI lint-and-test was failing on Python 3.9/3.10/3.11/3.12 with two ruff
+violations introduced by the previous commit:
+
+  E731 — lambda assigned to a name (use def instead)
+  F841 — local variable `result` assigned but never used
+
+Both fixed without changing test semantics.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (0876607)
+
+- Test(sdk/python): more realistic deadlock-recovery scenarios
+
+Adds 9 additional regression tests covering scenarios closer to the
+production failure shape and edge cases that could surface more bugs.
+
+Concurrency / realistic workloads (test_agent_ai_deadlock_recovery.py):
+
+- test_parallel_hangs_some_succeed_some_recover_via_pool_reset:
+    The exact production scenario from extract_all_entities. Spawns 10
+    concurrent ai() calls via asyncio.gather; calls #3 and #7 hang on a
+    "stale socket". Asserts the 8 healthy ones return successfully (a
+    hung call's safety-net firing must not corrupt unrelated in-flight
+    requests), the 2 hung ones surface as TimeoutError, the pool is
+    reset, AND a follow-up batch of 5 calls all succeed (recovery is
+    durable, not one-shot).
+
+- test_cascading_sequential_hangs_each_recover_independently:
+    Three calls in a row each hang then time out, then a fourth call
+    succeeds. Catches a future regression where reset accidentally
+    caches state (e.g. someone adds a `_already_reset` flag). Each
+    timeout must trigger a fresh reset.
+
+- test_fallback_model_used_after_primary_hangs:
+    Primary model hangs, fallback model is configured, fallback must be
+    invoked successfully and the pool reset must run between them.
+    Exercises the interplay between `_make_litellm_call` and
+    `_execute_with_fallbacks`.
+
+- test_tool_calling_loop_recovers_from_hang:
+    The tool-calling loop has its own copy of the timeout + reset logic
+    in `_tool_loop_completion._make_call`. This test routes through
+    `execute_tool_call_loop` (mocked to just call make_completion once)
+    and verifies the tool-loop path also recovers from hangs. Catches
+    the regression where someone fixes one path and forgets the other.
+
+Reset robustness:
+
+- test_concurrent_resets_are_safe:
+    20 concurrent resets via asyncio.gather. None should raise; all
+    should observe the final cleared state. Pins down the property so
+    a future "optimization" cannot break it.
+
+- test_reset_swallows_exceptions_from_broken_cache:
+    If `in_memory_llm_clients_cache.clear()` raises (e.g. third-party
+    plugin replaced the cache with a broken object), the reset must
+    NOT propagate — otherwise it would mask the original TimeoutError
+    the caller is trying to surface.
+
+- test_reset_does_not_clobber_unrelated_module_attrs:
+    Catches a regression where someone changes the implementation to
+    iterate over `dir(litellm_module)` and accidentally wipes config
+    flags, callbacks, or api_key. Asserts suppress_debug_info,
+    set_verbose, api_key, and success_callback all survive.
+
+/debug/tasks robustness (test_agent_server.py):
+
+- test_debug_tasks_endpoint_survives_cancelled_and_done_tasks:
+    The endpoint must remain responsive even when the live task set
+    contains tasks in pathological states (cancelled, done with
+    exception). JSON must still be well-formed.
+
+- test_debug_tasks_endpoint_reports_done_and_cancelled_state:
+    Pins down the schema: each task entry must include `done=` and
+    `cancelled=` markers so operators can quickly distinguish "stuck on
+    await" from "finished but not yet collected" when diagnosing a hang.
+
+Total: 63 passing tests across test_agent_ai.py + test_agent_server.py +
+test_agent_ai_deadlock_recovery.py.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (fc3cb49)
+
+- Test(sdk/python): regression tests for litellm deadlock recovery + /debug/tasks
+
+Adds functional tests that pin down the failure mode this PR fixes:
+
+tests/test_agent_ai_deadlock_recovery.py
+- test_reset_litellm_http_clients_clears_known_caches:
+    Asserts every module-level cache attribute we know litellm uses
+    (module_level_client, module_level_aclient, aclient_session,
+    client_session, in_memory_llm_clients_cache) is wiped or cleared.
+    If litellm renames/removes one of these in a future version, this
+    test catches it before production does.
+- test_reset_litellm_http_clients_tolerates_missing_attrs / _none_module:
+    Defensive — must not raise on bare/None modules across litellm versions.
+- test_hanging_acompletion_triggers_timeout_and_pool_reset:
+    The smoking gun. Mocks litellm.acompletion to hang on first call
+    (asyncio.Event that never sets, like a half-closed httpx socket),
+    then verifies (1) the asyncio.wait_for safety net at 2x the
+    configured llm_call_timeout fires, (2) module_level_aclient et al
+    are reset to None, (3) a *second* call returns successfully —
+    proving the deadlock cycle is broken.
+- test_litellm_params_includes_request_timeout:
+    Ensures the per-call `timeout` kwarg is always passed to
+    litellm.acompletion. Today litellm ignores it, but if a future
+    version honors it, this is what makes us pick up the cleaner
+    socket-level abort path automatically.
+- test_safety_net_fires_within_two_times_llm_call_timeout:
+    Bounds the worst-case wall-clock time of a hung call. If the
+    safety-net multiplier regresses (e.g., someone bumps it to 10x
+    or removes it), production hangs that *do* happen would become
+    invisible for many minutes — exactly the bug we were chasing.
+
+tests/test_agent_server.py
+- test_debug_tasks_endpoint_returns_running_task_stacks:
+    GET /debug/tasks must enumerate all live asyncio.Tasks and include
+    the request handler task itself.
+- test_debug_tasks_endpoint_captures_pending_coroutines:
+    Spawns a coroutine suspended on an asyncio.Event that never sets
+    (the production hang shape) and asserts its task name appears in
+    the dump. This is the diagnostic capability the endpoint exists
+    for — without it, finding the hang requires attaching py-spy to
+    a production container.
+
+Bug caught while writing the tests:
+    The original _reset_litellm_http_clients used a single loop with
+    `if hasattr(val, "clear"): val.clear() else: setattr(...)`. That
+    short-circuits on MagicMock (which auto-creates a `clear` attr) and
+    — more importantly — would short-circuit on any object that happens
+    to expose a `clear` method but isn't actually a dict. Split into
+    two distinct loops: client *instances* are replaced with None;
+    only the dict-like `in_memory_llm_clients_cache` is .clear()'d.
+    This is what the tests now enforce.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (853c990)
+
 ## [0.1.66-rc.1] - 2026-04-10
 
 
