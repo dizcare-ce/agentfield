@@ -70,10 +70,10 @@ Signatures here come from reading `sdk/python/agentfield/agent.py`, `router.py`,
 | Primitive | What it really does | When to use |
 |---|---|---|
 | `@app.reasoner()` | Registers a function as a reasoner with the control plane. The function body is yours — make as many `app.ai()` / `app.call()` calls as you want | Wrap **every cognitive unit** in your system |
-| `@app.skill()` | Registers a deterministic function. No LLM | Pure transforms, scoring, parsing, dedup, validation — anything code can do |
+| `@app.skill()` | Registers a deterministic function. No LLM. **Can do file I/O, shell commands, HTTP calls** — anything programmatic | Pure transforms, scoring, parsing, dedup, validation, running linters (`subprocess.run`), reading files (`open()`), listing directories (`os.walk`) — anything code can do without needing LLM judgment |
 | `app.ai(...)` | Single call OR multi-turn tool-using LLM call (when `tools=` is passed). Returns text or a Pydantic schema | Classification, routing, structured analysis, **and** stateful tool-using reasoning when you give it tools |
 | `app.call(target, **kwargs)` | Calls another reasoner/skill THROUGH the control plane. Tracks the workflow DAG | All inter-reasoner traffic. Never use direct HTTP |
-| `app.harness(prompt, provider=...)` | **Delegates to an external coding-agent CLI** (claude-code, codex, gemini, opencode). Returns a `HarnessResult` | When you need a real coding agent to read/write files, run shell commands, or execute a non-trivial coding task as part of your pipeline |
+| `app.harness(prompt, provider=...)` | **Delegates to an external coding-agent CLI** (claude-code, codex, gemini, opencode). Returns a `HarnessResult` | When you need an **intelligent agent that uses judgment to navigate** a codebase, decide what to read/edit, or perform multi-step coding tasks where the LLM's reasoning drives the file/shell interactions. **NOT** for deterministic file I/O or shell commands — those are `@app.skill()` |
 
 ## What `app.ai()` actually accepts
 
@@ -121,9 +121,21 @@ result = await app.harness(
 # Returns HarnessResult with .text, .parsed (validated schema), .result
 ```
 
-**Use harness when:** you need a real coding agent to perform a task that requires actual file I/O, shell access, or multi-step coding. **OpenCode is pre-installed in the default Docker container**, so `app.harness(provider="opencode")` works out of the box. Example: a "fix-this-failing-test" reasoner spawns an OpenCode harness to actually read the test file, understand the error, and edit the code.
+**The atomic unit of intelligence has shifted.** A single LLM call is stateless — you control every step. A harness is stateful, agentic, and opaque: you give it a goal and it decides what to read, what approach to take, what to try when the first approach fails. The harness is a model plus tools, plus a filesystem, plus a control loop, plus the ability to iterate and backtrack.
 
-**Do NOT use harness for:** in-process stateful LLM reasoning over a document. That's `app.ai(..., tools=[...])`. Harness is heavyweight — it spawns a subprocess running an entire agent CLI. Use it when you need the power (file system, shell), not as a substitute for tool-calling.
+This creates a fundamental design question: **does this task require agency — the ability to autonomously decide what actions to take based on what is discovered? Or do you already know the actions?**
+
+- If you already know the action → that's code. Use `@app.skill()`. You don't need intelligence to execute a known operation.
+- If the action requires judgment but not autonomy → that's `app.ai()`. The LLM reasons over data you provide.
+- If the task requires an agent that autonomously navigates, discovers, and decides its own actions → that's `app.harness()`. The LLM's reasoning drives which files to read, which commands to run, which approach to try next.
+
+**OpenCode is pre-installed in the default Docker container** (`app.harness(provider="opencode")`), so harness is available out of the box.
+
+**Capability and predictability are inversely related.** `@app.skill()` is perfectly predictable — same input, same output. `app.ai()` varies in content but the shape is known (structured schema). `app.harness()` is unpredictable in action space — two invocations with the same goal may read different files, take different approaches, write different code. This unpredictability is the direct consequence of capability. Use the lightest primitive that gets the job done.
+
+**The verification principle:** As you move from skill → ai → harness, spend proportionally more on verifying outcomes. A skill's output is deterministic and needs no verification. An ai call's output needs a `confident` flag. A harness's output needs structural verification — did it actually accomplish the goal? The system should spend more on checking work than on doing work at the harness level.
+
+**The split pattern:** Many tasks that seem to need a harness are actually two tasks — a programmatic action and an intelligent interpretation. Separate them. The programmatic part is a skill; the interpretation is an ai call. This decomposition is cheaper, faster, more reliable, and more observable than delegating both to a harness. A harness should be reserved for tasks where the decomposition itself requires intelligence — where you can't predetermine the steps because they depend on what the agent discovers.
 
 ## What `app.call()` actually does
 
@@ -148,30 +160,36 @@ result = ScoreResult(**result_dict)
 ## The decision tree (real, not aspirational)
 
 ```
-What is this reasoner doing?
+For each unit of work, ask three questions in order:
 
-├─ Pure deterministic transform (sort, parse, dedup, score-with-formula)?
-│  → @app.skill()  (no LLM, free, replayable)
-│
-├─ Single classification with ≤4 flat fields, input fits comfortably in ~2k tokens?
-│  → app.ai(system, user, schema=FlatModel)  (with confident: bool, with fallback)
-│
-├─ Stateful reasoning where the LLM needs to call tools, search, iterate?
-│  → app.ai(system, user, tools=[...])  (multi-turn tool-using mode)
-│
-├─ Long input (a document, a transcript, a corpus) that needs navigation?
-│  → @app.reasoner() that does LOOPED app.ai() calls with chunking,
-│    OR app.ai(..., tools=["read_section", ...]) if you've defined the tools,
-│    OR pre-process with a @app.skill() chunker then fan-out via asyncio.gather
-│
-├─ Need an actual coding agent to write/edit files / run shell?
-│  → app.harness(prompt, provider="opencode")  (pre-installed in default container)
-│
-└─ Composing multiple reasoners?
-   → @app.reasoner() that uses app.call() and asyncio.gather
+1. Do I already know exactly what to do?
+   YES → @app.skill()  — deterministic, free, perfectly predictable.
+   Code can read files, run commands, sort, parse, score, validate.
+   If it can be programmed, it's not intelligence — it's code.
+
+2. Do I need judgment to interpret, classify, route, or reason?
+   YES → app.ai()  — the LLM reasons over data you provide.
+   Single-shot: app.ai(schema=...) for structured output.
+   Multi-turn: app.ai(tools=[...]) when the LLM needs to call tools iteratively.
+   The shape of the action is known; the content requires intelligence.
+
+3. Do I need an autonomous agent that discovers its own path?
+   YES → app.harness(provider="opencode")  — pre-installed in default container.
+   The agent decides what to read, what to try, how to recover from failure.
+   You give it a goal and verify the outcome. You don't control the process.
+   Capability and predictability are inversely related — this is the most
+   powerful primitive AND the least predictable. Use it when the task
+   requires agency, not just intelligence.
+
+Always: decompose before escalating.
+   → @app.reasoner() that composes app.call() + asyncio.gather
+   Many small cognitive units > one big autonomous agent.
+   Each reasoner has a single responsibility you can state in one sentence.
 ```
 
-**The bias:** decompose into many small `@app.reasoner()` units. Use `app.ai()` with explicit prompts. Use `tools=` when you need tool-calling. Reserve `app.harness()` for when you literally need a coding agent in the loop.
+**The meta-principle:** The value of a multi-reasoner system is that the architecture itself encodes intelligence — how to break down problems, allocate cognitive resources, combine partial solutions, and maintain coherence across steps. A well-composed system of ten focused reasoners outperforms a single powerful agent because the composition is the intelligence.
+
+The primitive choice follows from this: use the lightest primitive that preserves the intelligence you need. Skills are free and deterministic — use them aggressively. AI calls add judgment — use them where human-level interpretation is required. Harnesses add agency — use them only when the task cannot be decomposed into known steps, because the steps themselves depend on what is discovered. Every time you can split "action + interpretation" into "skill + ai call," you've made the system faster, cheaper, and more observable without losing intelligence.
 
 ## The model-propagation pattern (mandatory in every build)
 
@@ -426,7 +444,7 @@ Every `.ai()` schema includes a `confident: bool` field, and the call site check
 |---|---|---|
 | **(a) Escalate to a deeper reasoner** | The system has another `@app.reasoner()` that can handle the harder case (chunked-loop, multi-call, more context) | Extra call |
 | **(b) Deterministic safe default (RECOMMENDED for safety/regulated systems)** | The use case has a "safe" terminal state — `REFER_TO_HUMAN`, `REJECT`, `RETRY_LATER`, `NEEDS_HUMAN_REVIEW`. Return a Pydantic instance hard-coded to that safe state | Free |
-| **(c) Escalate to `app.harness()`** | When the task needs file I/O or shell access. `opencode` is pre-installed in the default container, so `app.harness(provider="opencode")` works out of the box | Heavy |
+| **(c) Escalate to `app.harness()`** | When the fallback requires an intelligent agent to **navigate** a codebase or filesystem with LLM judgment (not just run a known command — that's `@app.skill()`). `opencode` is pre-installed. Use sparingly | Heavy |
 
 **Default for regulated, safety-critical, or judgment-based systems: option (b).** A confident-wrong automated decision is almost always worse than a referral. Build `fallback_*` constructors in `helpers.py` that return Pydantic instances hard-coded to the safe-default state.
 
@@ -488,9 +506,11 @@ The philosophy doc talks about "navigating documents" with a harness that has to
 
 **Option B — Loop yourself in a `@app.reasoner()`.** Chunk the document with a `@app.skill()`, fan out `app.ai()` calls per chunk via `asyncio.gather`, then synthesize.
 
-**Option C — `app.harness(provider="opencode")`.** Spawn a real coding agent CLI (pre-installed in the default container) to navigate the document on the filesystem. Most powerful, also the most expensive.
+**Option C — `app.harness(provider="opencode")`.** Spawn a real coding agent CLI (pre-installed in the default container) to **intelligently navigate** the document tree on the filesystem — the LLM decides what to read next based on what it's found so far. Most powerful, also the most expensive.
 
-Pick A for in-process tool-calling, B for embarrassingly-parallel chunked analysis, C for "I need a real agent to do file system work".
+**Option D — `@app.skill()` for deterministic reads + `app.ai()` for interpretation.** When you know exactly which files to read, use `@app.skill()` with `open()` to read them, then pass content to `app.ai()` for analysis. No LLM needed for the reading step.
+
+Pick A for in-process tool-calling, B for embarrassingly-parallel chunked analysis, C for "I need an intelligent agent to explore and decide what to read," D for "I know exactly what files to read — just read and analyze them."
 
 ## The cost-of-being-wrong test
 
