@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.67-rc.4] - 2026-04-13
+
+
+### Fixed
+
+- Fix: opencode CLI v1.4+ compatibility — use run subcommand
+
+opencode v1.4+ changed its CLI interface:
+- `-p` flag removed — prompt is now a positional arg to `run`
+- `-c` now means `--continue`, not project directory
+- Model passed via `-m` flag on the `run` subcommand
+
+This caused every open_code runtime execution to fail silently
+(opencode printed help text and exited with no output).
+
+Changes:
+- `opencode` → `opencode run` subcommand
+- `-c <dir>` → `--dir <dir>`
+- `-p <prompt>` → positional arg (last)
+- Model via env var → `-m <model>` flag
+- Add `--dangerously-skip-permissions` for headless execution
+
+Ref: Agent-Field/SWE-AF#45
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com> (b81f21a)
+
 ## [0.1.67-rc.3] - 2026-04-13
 
 
