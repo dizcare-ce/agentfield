@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.67-rc.3] - 2026-04-13
+
+
+### Fixed
+
+- Fix(py): use scheme-prefix replacement instead of substring replace for URL protocol conversion
+
+`.replace("http", "ws")` replaces ALL occurrences of the substring,
+not just the scheme prefix — e.g. `http://httpbin.org` becomes
+`ws://wsbin.org`. Use explicit prefix checks to only swap the scheme.
+
+Resolves CodeQL alert #31 (py/incomplete-url-substring-sanitization). (4d514b5)
+
 ## [0.1.67-rc.2] - 2026-04-13
 
 
