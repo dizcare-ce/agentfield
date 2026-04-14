@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,4 +147,158 @@ func TestNewSSRFSafeClient_AllowsPublicIPs(t *testing.T) {
 	client := NewSSRFSafeClient(5e9)
 	require.NotNil(t, client)
 	require.NotNil(t, client.Transport)
+}
+
+func TestSetWebhookAllowedHosts(t *testing.T) {
+	// Save and restore allowlist so other tests aren't affected.
+	original := webhookAllowedHosts()
+	defer SetWebhookAllowedHosts(original)
+
+	t.Run("trims and skips empty entries", func(t *testing.T) {
+		SetWebhookAllowedHosts([]string{"  foo  ", "", "   ", "bar"})
+		got := webhookAllowedHosts()
+		require.Equal(t, []string{"foo", "bar"}, got)
+	})
+
+	t.Run("empty list clears allowlist", func(t *testing.T) {
+		SetWebhookAllowedHosts(nil)
+		got := webhookAllowedHosts()
+		assert.Empty(t, got)
+	})
+}
+
+func TestIsHostAllowlisted(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		ip      string
+		allowed []string
+		want    bool
+	}{
+		{"empty allowlist", "foo.com", "1.2.3.4", nil, false},
+		{"exact hostname match", "test-runner", "", []string{"test-runner"}, true},
+		{"case-insensitive hostname", "Test-Runner", "", []string{"test-runner"}, true},
+		{"hostname mismatch", "other", "", []string{"test-runner"}, false},
+		{"wildcard match", "foo.internal", "", []string{"*.internal"}, true},
+		{"wildcard does not match base", "internal", "", []string{"*.internal"}, false},
+		{"wildcard mismatch", "foo.external", "", []string{"*.internal"}, false},
+		{"cidr match", "any", "172.18.0.5", []string{"172.18.0.0/16"}, true},
+		{"cidr no match", "any", "10.0.0.1", []string{"172.18.0.0/16"}, false},
+		{"cidr but no ip", "any", "", []string{"172.18.0.0/16"}, false},
+		{"empty entry skipped", "foo", "", []string{"", "foo"}, true},
+		{"multiple entries last matches", "b", "", []string{"a", "b"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ip net.IP
+			if tt.ip != "" {
+				ip = net.ParseIP(tt.ip)
+			}
+			got := isHostAllowlisted(tt.host, ip, tt.allowed)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestValidateWebhookURL_WithAllowlist(t *testing.T) {
+	original := webhookAllowedHosts()
+	defer SetWebhookAllowedHosts(original)
+
+	t.Run("allowlisted hostname bypasses private-host check", func(t *testing.T) {
+		SetWebhookAllowedHosts([]string{"test-runner"})
+		err := ValidateWebhookURL("http://test-runner:8080/cb")
+		// test-runner won't resolve in test env; allowlisted hostname returns nil
+		// (skips DNS-resolved IP check too).
+		assert.NoError(t, err)
+	})
+
+	t.Run("allowlisted CIDR bypasses private-IP check for raw IPs", func(t *testing.T) {
+		SetWebhookAllowedHosts([]string{"172.18.0.0/16"})
+		err := ValidateWebhookURL("http://172.18.0.5:8080/cb")
+		assert.NoError(t, err)
+	})
+
+	t.Run("allowlist for one IP does not bypass others", func(t *testing.T) {
+		SetWebhookAllowedHosts([]string{"172.18.0.0/16"})
+		err := ValidateWebhookURL("http://10.0.0.1:8080/cb")
+		assert.Error(t, err)
+	})
+
+	t.Run("wildcard hostname allowlist", func(t *testing.T) {
+		SetWebhookAllowedHosts([]string{"*.svc.cluster.local"})
+		err := ValidateWebhookURL("http://my-service.svc.cluster.local:8080/cb")
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty allowlist still blocks private IPs", func(t *testing.T) {
+		SetWebhookAllowedHosts(nil)
+		err := ValidateWebhookURL("http://127.0.0.1:8080/cb")
+		assert.Error(t, err)
+	})
+}
+
+func TestNewSSRFSafeClient_BadAddress(t *testing.T) {
+	client := NewSSRFSafeClient(5 * time.Second)
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+
+	// Pass a malformed addr (no port) to DialContext directly.
+	_, err := transport.DialContext(context.Background(), "tcp", "no-port-here")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ssrf: invalid address")
+}
+
+func TestNewSSRFSafeClient_DNSFailure(t *testing.T) {
+	client := NewSSRFSafeClient(2 * time.Second)
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+
+	// Use a hostname guaranteed not to resolve.
+	_, err := transport.DialContext(context.Background(), "tcp", "no-such-host.invalid:80")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ssrf: DNS lookup failed")
+}
+
+func TestValidateWebhookURL_InvalidURL(t *testing.T) {
+	// url.Parse rejects URLs with control characters in the scheme.
+	err := ValidateWebhookURL("http://exa\x00mple.com/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ssrf: invalid URL")
+}
+
+func TestValidateWebhookURL_HostnameResolvesToPrivate(t *testing.T) {
+	// "localhost" hits the early isPrivateHost check, so to exercise the
+	// hostname-resolves-to-private-IP branch we need a hostname that is not
+	// "localhost" but still resolves to a private/loopback IP.
+	//
+	// Many hosts file setups define "ip6-loopback" → "::1". When the host
+	// can't be resolved, the function returns nil (best-effort), so this
+	// test asserts only on the resolution-succeeded outcome to avoid CI flake.
+	err := ValidateWebhookURL("http://ip6-loopback/cb")
+	if err != nil {
+		assert.Contains(t, err.Error(), "private/internal")
+	}
+}
+
+func TestNewSSRFSafeClient_AllowlistedLoopback(t *testing.T) {
+	original := webhookAllowedHosts()
+	defer SetWebhookAllowedHosts(original)
+
+	// Allow the entire 127.0.0.0/8 range and verify the transport now connects
+	// to a loopback test server.
+	SetWebhookAllowedHosts([]string{"127.0.0.0/8"})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	client := NewSSRFSafeClient(5 * time.Second)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

@@ -7,8 +7,72 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// allowedHostsList holds hosts/CIDRs/wildcards that are exempt from SSRF
+// filtering. Set once at server startup from the AGENTFIELD_WEBHOOK_ALLOWED_HOSTS
+// config, typically to trust hostnames on the deployment's internal network
+// (e.g. Docker compose service names, Kubernetes cluster DNS).
+var allowedHostsList atomic.Pointer[[]string]
+
+// SetWebhookAllowedHosts configures which hosts bypass SSRF filtering. Entries
+// may be hostnames ("test-runner"), wildcard subdomains ("*.internal"), or
+// CIDR blocks ("172.18.0.0/16"). Empty list disables the bypass.
+func SetWebhookAllowedHosts(hosts []string) {
+	cleaned := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		trimmed := strings.TrimSpace(h)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	allowedHostsList.Store(&cleaned)
+}
+
+func webhookAllowedHosts() []string {
+	if p := allowedHostsList.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// isHostAllowlisted reports whether host (hostname or IP literal) matches any
+// entry in the configured allowlist. Matches CIDRs against the IP if the host
+// resolves to one, hostnames case-insensitively, and wildcards like "*.foo".
+func isHostAllowlisted(host string, ip net.IP, allowed []string) bool {
+	if len(allowed) == 0 {
+		return false
+	}
+	hostLower := strings.ToLower(host)
+	for _, entry := range allowed {
+		candidate := strings.ToLower(entry)
+		if candidate == "" {
+			continue
+		}
+		// CIDR match against the resolved IP.
+		if _, network, err := net.ParseCIDR(candidate); err == nil {
+			if ip != nil && network.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		// Wildcard suffix match ("*.foo" matches "bar.foo" but not "foo").
+		if strings.HasPrefix(candidate, "*.") {
+			suffix := candidate[1:] // includes the leading dot
+			if strings.HasSuffix(hostLower, suffix) && hostLower != strings.TrimPrefix(suffix, ".") {
+				return true
+			}
+			continue
+		}
+		// Exact hostname match.
+		if hostLower == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // privateRanges contains all IP ranges that should be blocked for outbound webhook requests.
 var privateRanges []*net.IPNet
@@ -54,6 +118,8 @@ func isPrivateIP(ip net.IP) bool {
 // and rejects connections to private/internal IP addresses before the TCP
 // connection is established. This prevents SSRF attacks including DNS
 // rebinding, since the check happens at dial time after resolution.
+// Hosts matching the configured allowlist (see SetWebhookAllowedHosts) bypass
+// the private-IP check.
 func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
@@ -71,8 +137,12 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 				return nil, fmt.Errorf("ssrf: no addresses found for %q", host)
 			}
 
+			allowed := webhookAllowedHosts()
 			for _, ipStr := range ips {
 				ip := net.ParseIP(ipStr)
+				if isHostAllowlisted(host, ip, allowed) {
+					continue
+				}
 				if isPrivateIP(ip) {
 					return nil, fmt.Errorf("ssrf: webhook target resolves to private/internal address %s", ipStr)
 				}
@@ -101,16 +171,25 @@ func ValidateWebhookURL(rawURL string) error {
 		return fmt.Errorf("ssrf: URL has no host")
 	}
 
-	if isPrivateHost(host) {
-		return fmt.Errorf("webhook url must not target private/internal host %q", host)
-	}
+	allowed := webhookAllowedHosts()
 
 	// If the host is a raw IP, check it directly.
 	if ip := net.ParseIP(host); ip != nil {
+		if isHostAllowlisted(host, ip, allowed) {
+			return nil
+		}
 		if isPrivateIP(ip) {
 			return fmt.Errorf("webhook url must not target private/internal address %s", host)
 		}
 		return nil
+	}
+
+	// Hostname path. Allowlisted names bypass the private-host check.
+	if isHostAllowlisted(host, nil, allowed) {
+		return nil
+	}
+	if isPrivateHost(host) {
+		return fmt.Errorf("webhook url must not target private/internal host %q", host)
 	}
 
 	// Resolve hostname and check all returned IPs.
@@ -126,6 +205,9 @@ func ValidateWebhookURL(rawURL string) error {
 
 	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
+		if isHostAllowlisted(host, ip, allowed) {
+			continue
+		}
 		if isPrivateIP(ip) {
 			return fmt.Errorf("webhook url host %q resolves to private/internal address %s", host, ipStr)
 		}
