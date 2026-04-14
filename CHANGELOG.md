@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.68-rc.2] - 2026-04-14
+
+
+### Chores
+
+- Chore(deps): bump follow-redirects
+
+Bumps the npm_and_yarn group with 1 update in the /sdk/typescript directory: [follow-redirects](https://github.com/follow-redirects/follow-redirects).
+
+
+Updates `follow-redirects` from 1.15.11 to 1.16.0
+- [Release notes](https://github.com/follow-redirects/follow-redirects/releases)
+- [Commits](https://github.com/follow-redirects/follow-redirects/compare/v1.15.11...v1.16.0)
+
+---
+updated-dependencies:
+- dependency-name: follow-redirects
+  dependency-version: 1.16.0
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] <support@github.com> (fe6cead)
+
 ## [0.1.68-rc.1] - 2026-04-14
 
 
