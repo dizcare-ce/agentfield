@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.69-rc.2] - 2026-04-15
+
+
+### Changed
+
+- Refactor: split agent.py into mixins (#411) (bab38af)
+
+- Refactor: split agent.py into mixins (#411) (2c23f8a)
+
+
+
+### Other
+
+- Removed unused module asyncio (033697b)
+
+- Agent.py split into mixins (4798b61)
+
 ## [0.1.69-rc.1] - 2026-04-15
 
 
