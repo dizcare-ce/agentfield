@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.69-rc.3] - 2026-04-15
+
+
+### Testing
+
+- Test: add tests for TypeScript SDK utils (pattern, schema, httpAgents)
+
+Resolves #406 (a945b79)
+
 ## [0.1.69-rc.2] - 2026-04-15
 
 
