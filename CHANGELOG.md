@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.69-rc.5] - 2026-04-16
+
+
+### Testing
+
+- Tests/added tests for pydantic_utils + agent_registry thread(#401) (16de38a)
+
 ## [0.1.69-rc.4] - 2026-04-16
 
 
