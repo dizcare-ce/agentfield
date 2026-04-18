@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -249,4 +250,80 @@ func TestOpenRouterGenerateVideoSubmitError(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "403")
+}
+
+func TestOpenRouterGenerateVideoFullLifecycle(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/videos":
+			json.NewEncoder(w).Encode(map[string]string{"id": "job-123"})
+		case r.Method == http.MethodGet && r.URL.Path == "/videos/job-123":
+			callCount++
+			if callCount == 1 {
+				json.NewEncoder(w).Encode(map[string]any{
+					"id": "job-123", "status": "processing",
+				})
+			} else {
+				json.NewEncoder(w).Encode(map[string]any{
+					"id":           "job-123",
+					"status":       "completed",
+					"unsigned_url": "https://example.com/video.mp4",
+					"duration":     5.0,
+					"cost_usd":     0.05,
+				})
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	p := &OpenRouterMediaProvider{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+		Client:  srv.Client(),
+	}
+
+	resp, err := p.GenerateVideo(context.Background(), VideoRequest{
+		Prompt:       "test video",
+		Model:        "openrouter/kling",
+		PollInterval: 10 * time.Millisecond,
+		Timeout:      5 * time.Second,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Videos, 1)
+	assert.Equal(t, "https://example.com/video.mp4", resp.Videos[0].URL)
+	assert.Equal(t, "generated_video.mp4", resp.Videos[0].Filename)
+	assert.Equal(t, 5.0, resp.Videos[0].Duration)
+	assert.Equal(t, 0.05, resp.Videos[0].CostUSD)
+	assert.Equal(t, "video/mp4", resp.Videos[0].MimeType)
+}
+
+func TestOpenRouterGenerateVideoEmptyPrompt(t *testing.T) {
+	p := &OpenRouterMediaProvider{
+		APIKey:  "test-key",
+		BaseURL: "http://localhost",
+		Client:  &http.Client{},
+	}
+	_, err := p.GenerateVideo(context.Background(), VideoRequest{
+		Prompt: "",
+		Model:  "openrouter/kling",
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "prompt must not be empty")
+}
+
+func TestOpenRouterGenerateAudioEmptyText(t *testing.T) {
+	p := &OpenRouterMediaProvider{
+		APIKey:  "test-key",
+		BaseURL: "http://localhost",
+		Client:  &http.Client{},
+	}
+	_, err := p.GenerateAudio(context.Background(), AudioRequest{
+		Text: "  ",
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "text input must not be empty")
 }
