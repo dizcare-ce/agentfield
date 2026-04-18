@@ -29,19 +29,32 @@ export interface OpenRouterMediaProviderOptions {
   baseUrl?: string;
 }
 
+/** WeakMap keeps API key off the instance — not observable via JSON.stringify, Object.keys, or console.log */
+const apiKeys = new WeakMap<OpenRouterMediaProvider, string>();
+
 export class OpenRouterMediaProvider implements MediaProvider {
   readonly name = 'openrouter';
   readonly supportedModalities = ['image', 'audio', 'video'];
 
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
+  readonly baseUrl: string;
 
   constructor(options: OpenRouterMediaProviderOptions = {}) {
-    this.apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
-    this.baseUrl = options.baseUrl ?? OPENROUTER_BASE;
-    if (!this.apiKey) {
+    const key = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+    if (!key) {
       throw new Error('OpenRouter API key required: pass apiKey or set OPENROUTER_API_KEY');
     }
+    apiKeys.set(this, key);
+    this.baseUrl = options.baseUrl ?? OPENROUTER_BASE;
+  }
+
+  /** Retrieve API key from WeakMap (never on the instance). */
+  private getKey(): string {
+    return apiKeys.get(this)!;
+  }
+
+  /** Exclude API key from serialization. */
+  toJSON(): object {
+    return { name: this.name, supportedModalities: this.supportedModalities, baseUrl: this.baseUrl };
   }
 
   // ── Video ──────────────────────────────────────────────────────────
@@ -263,23 +276,25 @@ export class OpenRouterMediaProvider implements MediaProvider {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
-  private post(url: string, body: unknown): Promise<Response> {
+  private post(url: string, body: unknown, timeoutMs = 30_000): Promise<Response> {
     return fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.getKey()}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   }
 
-  private get(url: string): Promise<Response> {
+  private get(url: string, timeoutMs = 30_000): Promise<Response> {
     return fetch(url, {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.getKey()}`,
       },
+      signal: AbortSignal.timeout(timeoutMs),
     });
   }
 }
