@@ -224,7 +224,7 @@ class VideoOutput(BaseModel):
             try:
                 import requests
 
-                response = requests.get(self.url)
+                response = requests.get(self.url, timeout=120)
                 response.raise_for_status()
                 with open(path, "wb") as f:
                     f.write(response.content)
@@ -243,7 +243,7 @@ class VideoOutput(BaseModel):
             try:
                 import requests
 
-                response = requests.get(self.url)
+                response = requests.get(self.url, timeout=120)
                 response.raise_for_status()
                 return response.content
             except ImportError:
@@ -393,15 +393,20 @@ class MultimodalResponse:
         # Save videos
         for i, video in enumerate(self._videos):
             ext = video.mime_type.split("/")[-1] if video.mime_type else "mp4"
-            filename = video.filename or f"{prefix}_video_{i}.{ext}"
-            video_path = directory / filename
+            raw_filename = video.filename or f"{prefix}_video_{i}.{ext}"
+            safe_filename = os.path.basename(raw_filename)  # Strip path components
+            video_path = directory / safe_filename
             video.save(video_path)
             saved_files[f"video_{i}"] = str(video_path)
 
         # Save files
         for i, file in enumerate(self._files):
-            filename = file.filename or f"{prefix}_file_{i}"
-            file_path = directory / filename
+            # Skip video files — they're saved in the videos loop
+            if file.mime_type and file.mime_type.startswith("video/"):
+                continue
+            raw_filename = file.filename or f"{prefix}_file_{i}"
+            safe_filename = os.path.basename(raw_filename)  # Strip path components
+            file_path = directory / safe_filename
             file.save(file_path)
             saved_files[f"file_{i}"] = str(file_path)
 
@@ -437,7 +442,11 @@ def _extract_image_from_data(data: Any) -> Optional[ImageOutput]:
     # OpenRouter/Gemini pattern: {"type": "image_url", "image_url": {"url": "..."}}
     if hasattr(data, "image_url"):
         image_url_obj = data.image_url
-        url = getattr(image_url_obj, "url", None) if hasattr(image_url_obj, "url") else None
+        url = (
+            getattr(image_url_obj, "url", None)
+            if hasattr(image_url_obj, "url")
+            else None
+        )
         if url:
             # Handle data URLs (base64 encoded)
             if url.startswith("data:image"):
@@ -472,9 +481,13 @@ def _extract_image_from_data(data: Any) -> Optional[ImageOutput]:
                     if url.startswith("data:image"):
                         try:
                             b64_data = url.split(",", 1)[1] if "," in url else None
-                            return ImageOutput(url=url, b64_json=b64_data, revised_prompt=None)
+                            return ImageOutput(
+                                url=url, b64_json=b64_data, revised_prompt=None
+                            )
                         except Exception:
-                            return ImageOutput(url=url, b64_json=None, revised_prompt=None)
+                            return ImageOutput(
+                                url=url, b64_json=None, revised_prompt=None
+                            )
                     return ImageOutput(url=url, b64_json=None, revised_prompt=None)
 
     return None
@@ -627,6 +640,12 @@ def detect_multimodal_response(response: Any) -> MultimodalResponse:
             pass
 
     return MultimodalResponse(
-        text=text, audio=audio, images=images, files=files, raw_response=response,
-        cost_usd=cost_usd, usage=usage_dict,
+        text=text,
+        audio=audio,
+        images=images,
+        files=files,
+        videos=[],
+        raw_response=response,
+        cost_usd=cost_usd,
+        usage=usage_dict,
     )
