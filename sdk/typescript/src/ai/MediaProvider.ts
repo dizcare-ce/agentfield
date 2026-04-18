@@ -66,6 +66,14 @@ export interface MediaProvider {
   generateVideo(request: VideoRequest): Promise<MediaResponse>;
 }
 
+/** Typed error for media provider resolution failures. */
+export class MediaProviderError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MediaProviderError';
+  }
+}
+
 /**
  * Prefix-based media provider router.
  * Resolves model strings to providers by longest-prefix match.
@@ -85,6 +93,6 @@ export class MediaRouter {
         return provider;
       }
     }
-    throw new Error(`No provider for model '${model}' with '${capability}' capability`);
+    throw new MediaProviderError(`No provider for model '${model}' with '${capability}' capability`);
   }
 }
