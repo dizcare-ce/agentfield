@@ -245,6 +245,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let consecutiveParseErrors = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -263,6 +264,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
 
         try {
           const chunk = JSON.parse(payload) as Record<string, unknown>;
+          consecutiveParseErrors = 0; // reset on success
           const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
           if (!choices) continue;
           for (const choice of choices) {
@@ -277,7 +279,10 @@ export class OpenRouterMediaProvider implements MediaProvider {
             }
           }
         } catch {
-          // skip malformed chunks
+          consecutiveParseErrors = consecutiveParseErrors + 1;
+          if (consecutiveParseErrors > 50) {
+            throw new Error(`Too many SSE parse errors (${consecutiveParseErrors}), aborting audio stream`);
+          }
         }
       }
     }
