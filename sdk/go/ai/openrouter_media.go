@@ -69,6 +69,10 @@ func stripPrefix(model string) string {
 
 // GenerateVideo submits a video job, polls until complete, downloads result.
 func (p *OpenRouterMediaProvider) GenerateVideo(ctx context.Context, req VideoRequest) (*MediaResponse, error) {
+	if strings.TrimSpace(req.Prompt) == "" {
+		return nil, fmt.Errorf("video prompt must not be empty")
+	}
+
 	pollInterval := req.PollInterval
 	if pollInterval == 0 {
 		pollInterval = defaultVideoPollInterval
@@ -326,6 +330,10 @@ func (p *OpenRouterMediaProvider) GenerateImage(ctx context.Context, req ImageRe
 
 // GenerateAudio uses streaming chat completions with audio modality.
 func (p *OpenRouterMediaProvider) GenerateAudio(ctx context.Context, req AudioRequest) (*MediaResponse, error) {
+	if strings.TrimSpace(req.Text) == "" {
+		return nil, fmt.Errorf("audio text input must not be empty")
+	}
+
 	model := req.Model
 	if model == "" {
 		model = "openai/gpt-4o-audio-preview"
