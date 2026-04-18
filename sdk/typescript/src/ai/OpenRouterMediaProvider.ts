@@ -129,9 +129,9 @@ export class OpenRouterMediaProvider implements MediaProvider {
     const signedUrl = jobData.url as string | undefined;
     const videoUrl = unsignedUrl ?? signedUrl;
 
-    // Download video bytes if URL available and passes SSRF validation
+    // Download video bytes only when opt-in (avoids OOM on large videos)
     let videoData: string | undefined;
-    if (videoUrl && isAllowedDownloadUrl(videoUrl)) {
+    if (videoUrl && request.downloadContent && isAllowedDownloadUrl(videoUrl)) {
       const dlRes = await fetch(videoUrl, {
         redirect: 'error',
         signal: AbortSignal.timeout(120_000),

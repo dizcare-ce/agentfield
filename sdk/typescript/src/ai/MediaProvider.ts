@@ -15,6 +15,7 @@ export interface VideoRequest {
   inputReferences?: Array<{ type: string; imageUrl: { url: string } }>;
   pollInterval?: number; // ms, default 30000
   timeout?: number; // ms, default 600000
+  downloadContent?: boolean; // download video bytes to memory (default false, return URL only)
 }
 
 export interface ImageRequest {

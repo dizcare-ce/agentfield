@@ -150,6 +150,7 @@ describe('OpenRouterMediaProvider', () => {
         prompt: 'a sunset',
         model: 'openrouter/google/veo-3',
         pollInterval: 1, // 1ms for test speed
+        downloadContent: true,
       });
 
       expect(resp.videos).toHaveLength(1);
