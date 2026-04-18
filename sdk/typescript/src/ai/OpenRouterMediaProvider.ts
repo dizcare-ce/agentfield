@@ -94,12 +94,12 @@ export class OpenRouterMediaProvider implements MediaProvider {
     // Submit job
     const submitRes = await this.post(`${this.baseUrl}/videos`, body);
     if (!submitRes.ok) {
-      throw new Error(`Video submit failed: ${submitRes.status} ${await submitRes.text()}`);
+      throw new Error(`Video submit failed for model '${model}' at ${this.baseUrl}/videos: ${submitRes.status} ${await submitRes.text()}`);
     }
     const submitData = (await submitRes.json()) as Record<string, unknown>;
     const jobId = submitData.id as string;
     if (!jobId) {
-      throw new Error('No job id returned from video submit');
+      throw new Error(`No job id returned from video submit for model '${model}'`);
     }
 
     // Poll until done -- check deadline after sleep, before network call
@@ -110,7 +110,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
       if (Date.now() >= deadline) break;
       const pollRes = await this.get(`${this.baseUrl}/videos/${jobId}`);
       if (!pollRes.ok) {
-        throw new Error(`Video poll failed: ${pollRes.status} ${await pollRes.text()}`);
+        throw new Error(`Video poll failed for model '${model}' (job ${jobId}): ${pollRes.status} ${await pollRes.text()}`);
       }
       jobData = (await pollRes.json()) as Record<string, unknown>;
       const status = jobData.status as string | undefined;
@@ -173,7 +173,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
 
     const res = await this.post(`${this.baseUrl}/chat/completions`, body);
     if (!res.ok) {
-      throw new Error(`Image generation failed: ${res.status} ${await res.text()}`);
+      throw new Error(`Image generation failed for model '${model}' at ${this.baseUrl}/chat/completions: ${res.status} ${await res.text()}`);
     }
     const data = (await res.json()) as Record<string, unknown>;
     const resp = emptyMediaResponse(data);
@@ -232,7 +232,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
     const audioTimeout = request.timeout ?? 120_000;
     const res = await this.post(`${this.baseUrl}/chat/completions`, body, audioTimeout);
     if (!res.ok) {
-      throw new Error(`Audio generation failed: ${res.status} ${await res.text()}`);
+      throw new Error(`Audio generation failed for model '${model}' at ${this.baseUrl}/chat/completions: ${res.status} ${await res.text()}`);
     }
 
     // Parse SSE stream and collect audio chunks

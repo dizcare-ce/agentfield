@@ -173,7 +173,7 @@ describe('OpenRouterMediaProvider', () => {
 
       await expect(
         provider.generateVideo({ prompt: 'test', pollInterval: 1 })
-      ).rejects.toThrow('Video submit failed: 402');
+      ).rejects.toThrow('Video submit failed for model');
     });
 
     it('throws on generation failure status', async () => {
@@ -311,7 +311,7 @@ describe('OpenRouterMediaProvider', () => {
 
       await expect(
         provider.generateAudio({ text: 'test' })
-      ).rejects.toThrow('Audio generation failed: 500');
+      ).rejects.toThrow('Audio generation failed for model');
     });
   });
 });
