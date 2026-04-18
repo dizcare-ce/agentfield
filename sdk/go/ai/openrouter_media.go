@@ -442,10 +442,10 @@ func (p *OpenRouterMediaProvider) GenerateAudio(ctx context.Context, req AudioRe
 		for _, chunk := range audioChunks {
 			decoded, err := base64.StdEncoding.DecodeString(chunk)
 			if err != nil {
-				// Try with padding correction
+				// Try without padding
 				decoded, err = base64.RawStdEncoding.DecodeString(chunk)
 				if err != nil {
-					continue
+					return nil, fmt.Errorf("decode audio chunk: %w (chunk length: %d)", err, len(chunk))
 				}
 			}
 			raw = append(raw, decoded...)
