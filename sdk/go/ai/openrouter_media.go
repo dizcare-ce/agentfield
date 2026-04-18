@@ -235,6 +235,7 @@ func (p *OpenRouterMediaProvider) buildVideoResponse(_ context.Context, status *
 	video := VideoData{
 		URL:      status.UnsignedURL,
 		MimeType: "video/mp4",
+		Filename: "generated_video.mp4",
 		Duration: status.Duration,
 		CostUSD:  status.CostUSD,
 	}
