@@ -11,7 +11,7 @@ Supported Providers:
 
 import asyncio
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from agentfield.logger import log_error
 
 
@@ -92,6 +92,7 @@ async def generate_image_openrouter(
     quality: str,
     style: Optional[str],
     response_format: str,
+    image_config: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> Any:
     """
@@ -143,8 +144,12 @@ async def generate_image_openrouter(
         "model": model,
         "messages": messages,
         "modalities": ["image", "text"],
-        **kwargs,  # Pass through any additional kwargs (e.g., image_config)
+        **kwargs,
     }
+
+    # Add image_config if provided
+    if image_config:
+        completion_params["image_config"] = image_config
 
     try:
         # Use LiteLLM's completion function (OpenRouter uses chat API)

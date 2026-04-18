@@ -730,6 +730,7 @@ class OpenRouterProvider(MediaProvider):
         model: Optional[str] = None,
         size: str = "1024x1024",
         quality: str = "standard",
+        image_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> MultimodalResponse:
         """Generate image using OpenRouter's chat completions API."""
@@ -748,6 +749,7 @@ class OpenRouterProvider(MediaProvider):
             quality=quality,
             style=None,
             response_format="url",
+            image_config=image_config,
             **kwargs,
         )
 
