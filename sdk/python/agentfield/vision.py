@@ -113,7 +113,10 @@ async def generate_image_openrouter(
         quality: Image quality (may not be used by all OpenRouter models)
         style: Image style (may not be used by all OpenRouter models)
         response_format: Response format (may not be used by all OpenRouter models)
-        **kwargs: Additional OpenRouter-specific parameters (e.g., image_config)
+        image_config: Optional dict of OpenRouter image generation settings
+            (e.g., {"aspect_ratio": "16:9"}). Pass an empty dict to use
+            provider defaults explicitly.
+        **kwargs: Additional OpenRouter-specific parameters
 
     Returns:
         MultimodalResponse with generated image(s)
@@ -121,10 +124,6 @@ async def generate_image_openrouter(
     Raises:
         ImportError: If litellm is not installed
         Exception: If image generation fails
-
-    Note:
-        OpenRouter-specific parameters like `image_config` should be passed via kwargs.
-        Example: image_config={"aspect_ratio": "16:9"}
     """
     try:
         import litellm
@@ -148,7 +147,7 @@ async def generate_image_openrouter(
     }
 
     # Add image_config if provided
-    if image_config:
+    if image_config is not None:
         completion_params["image_config"] = image_config
 
     try:
