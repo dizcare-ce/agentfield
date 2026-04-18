@@ -80,8 +80,11 @@ describe('OpenRouterMediaProvider', () => {
   it('throws without API key', () => {
     const orig = process.env.OPENROUTER_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
-    expect(() => new OpenRouterMediaProvider()).toThrow('API key required');
-    if (orig) process.env.OPENROUTER_API_KEY = orig;
+    try {
+      expect(() => new OpenRouterMediaProvider()).toThrow('API key required');
+    } finally {
+      if (orig !== undefined) process.env.OPENROUTER_API_KEY = orig;
+    }
   });
 
   it('accepts apiKey in constructor', () => {
