@@ -377,6 +377,8 @@ func (p *OpenRouterMediaProvider) GenerateAudio(ctx context.Context, req AudioRe
 	var textParts []string
 
 	scanner := bufio.NewScanner(resp.Body)
+	// SSE audio chunks can be large base64; set 1MB max line size
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
