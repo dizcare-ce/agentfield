@@ -1,0 +1,435 @@
+package ai
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+const (
+	defaultOpenRouterBaseURL  = "https://openrouter.ai/api/v1"
+	defaultVideoPollInterval  = 30 * time.Second
+	defaultVideoTimeout       = 10 * time.Minute
+)
+
+// OpenRouterMediaProvider implements MediaProvider for OpenRouter's media APIs.
+type OpenRouterMediaProvider struct {
+	APIKey  string
+	BaseURL string
+	Client  *http.Client
+}
+
+// NewOpenRouterMediaProvider creates a provider. If apiKey is empty, reads OPENROUTER_API_KEY.
+func NewOpenRouterMediaProvider(apiKey string) *OpenRouterMediaProvider {
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENROUTER_API_KEY")
+	}
+	return &OpenRouterMediaProvider{
+		APIKey:  apiKey,
+		BaseURL: defaultOpenRouterBaseURL,
+		Client:  &http.Client{Timeout: 60 * time.Second},
+	}
+}
+
+func (p *OpenRouterMediaProvider) Name() string {
+	return "openrouter"
+}
+
+func (p *OpenRouterMediaProvider) SupportedModalities() []string {
+	return []string{"image", "audio", "video"}
+}
+
+func (p *OpenRouterMediaProvider) baseURL() string {
+	if p.BaseURL != "" {
+		return strings.TrimSuffix(p.BaseURL, "/")
+	}
+	return defaultOpenRouterBaseURL
+}
+
+// stripPrefix removes the "openrouter/" prefix from model names.
+func stripPrefix(model string) string {
+	return strings.TrimPrefix(model, "openrouter/")
+}
+
+// GenerateVideo submits a video job, polls until complete, downloads result.
+func (p *OpenRouterMediaProvider) GenerateVideo(ctx context.Context, req VideoRequest) (*MediaResponse, error) {
+	pollInterval := req.PollInterval
+	if pollInterval == 0 {
+		pollInterval = defaultVideoPollInterval
+	}
+	timeout := req.Timeout
+	if timeout == 0 {
+		timeout = defaultVideoTimeout
+	}
+
+	// Build submit payload
+	payload := map[string]any{
+		"model":  stripPrefix(req.Model),
+		"prompt": req.Prompt,
+	}
+	if req.Duration > 0 {
+		payload["duration"] = req.Duration
+	}
+	if req.Resolution != "" {
+		payload["resolution"] = req.Resolution
+	}
+	if req.AspectRatio != "" {
+		payload["aspect_ratio"] = req.AspectRatio
+	}
+	if req.GenerateAudio != nil {
+		payload["generate_audio"] = *req.GenerateAudio
+	}
+	if req.Seed != nil {
+		payload["seed"] = *req.Seed
+	}
+	if len(req.FrameImages) > 0 {
+		payload["frame_images"] = req.FrameImages
+	}
+	if len(req.InputReferences) > 0 {
+		payload["input_references"] = req.InputReferences
+	}
+	for k, v := range req.Extra {
+		payload[k] = v
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal video request: %w", err)
+	}
+
+	// Submit job
+	submitURL := p.baseURL() + "/videos"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create submit request: %w", err)
+	}
+	p.setHeaders(httpReq)
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("submit video job: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read submit response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("video submit error (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var submitResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(respBody, &submitResp); err != nil {
+		return nil, fmt.Errorf("parse submit response: %w", err)
+	}
+	if submitResp.ID == "" {
+		return nil, fmt.Errorf("no job ID in submit response: %s", string(respBody))
+	}
+
+	// Poll until completed or failed
+	deadline := time.Now().Add(timeout)
+	pollURL := p.baseURL() + "/videos/" + submitResp.ID
+
+	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("video generation timed out after %v", timeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+
+		status, err := p.pollVideoJob(ctx, pollURL)
+		if err != nil {
+			return nil, err
+		}
+
+		switch status.Status {
+		case "completed":
+			return p.buildVideoResponse(ctx, status)
+		case "failed":
+			return nil, fmt.Errorf("video generation failed: %s", status.Error)
+		}
+		// pending/processing — continue polling
+	}
+}
+
+type videoJobStatus struct {
+	ID          string  `json:"id"`
+	Status      string  `json:"status"`
+	Error       string  `json:"error,omitempty"`
+	UnsignedURL string  `json:"unsigned_url,omitempty"`
+	Duration    float64 `json:"duration,omitempty"`
+	CostUSD     float64 `json:"cost_usd,omitempty"`
+}
+
+func (p *OpenRouterMediaProvider) pollVideoJob(ctx context.Context, url string) (*videoJobStatus, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create poll request: %w", err)
+	}
+	p.setHeaders(httpReq)
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("poll video job: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read poll response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("poll error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var status videoJobStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, fmt.Errorf("parse poll response: %w", err)
+	}
+	return &status, nil
+}
+
+func (p *OpenRouterMediaProvider) buildVideoResponse(_ context.Context, status *videoJobStatus) (*MediaResponse, error) {
+	video := VideoData{
+		URL:      status.UnsignedURL,
+		MimeType: "video/mp4",
+		Duration: status.Duration,
+		CostUSD:  status.CostUSD,
+	}
+
+	return &MediaResponse{
+		Videos:      []VideoData{video},
+		RawResponse: status,
+	}, nil
+}
+
+// GenerateImage uses chat completions with image modality.
+func (p *OpenRouterMediaProvider) GenerateImage(ctx context.Context, req ImageRequest) (*MediaResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "openai/gpt-image-1"
+	}
+	model = stripPrefix(model)
+
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]any{
+			{"role": "user", "content": req.Prompt},
+		},
+		"modalities": []string{"image", "text"},
+	}
+	if req.Size != "" {
+		payload["size"] = req.Size
+	}
+	if req.Quality != "" {
+		payload["quality"] = req.Quality
+	}
+	if req.ImageConfig != nil {
+		payload["image_config"] = req.ImageConfig
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal image request: %w", err)
+	}
+
+	url := p.baseURL() + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create image request: %w", err)
+	}
+	p.setHeaders(httpReq)
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("execute image request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read image response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("image generation error (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var chatResp struct {
+		Choices []struct {
+			Message struct {
+				Content []struct {
+					Type    string `json:"type"`
+					Text    string `json:"text,omitempty"`
+					B64JSON string `json:"b64_json,omitempty"`
+				} `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return nil, fmt.Errorf("parse image response: %w", err)
+	}
+
+	result := &MediaResponse{RawResponse: json.RawMessage(respBody)}
+	for _, choice := range chatResp.Choices {
+		for _, part := range choice.Message.Content {
+			switch part.Type {
+			case "text":
+				result.Text = part.Text
+			case "image_url", "image":
+				result.Images = append(result.Images, ImageData{
+					B64JSON: part.B64JSON,
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// GenerateAudio uses streaming chat completions with audio modality.
+func (p *OpenRouterMediaProvider) GenerateAudio(ctx context.Context, req AudioRequest) (*MediaResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "openai/gpt-4o-audio-preview"
+	}
+	model = stripPrefix(model)
+
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]any{
+			{"role": "user", "content": req.Text},
+		},
+		"modalities": []string{"text", "audio"},
+		"stream":     true,
+	}
+
+	audioConfig := map[string]string{"format": "wav"}
+	if req.Voice != "" {
+		audioConfig["voice"] = req.Voice
+	} else {
+		audioConfig["voice"] = "alloy"
+	}
+	if req.Format != "" {
+		audioConfig["format"] = req.Format
+	}
+	payload["audio"] = audioConfig
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal audio request: %w", err)
+	}
+
+	url := p.baseURL() + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create audio request: %w", err)
+	}
+	p.setHeaders(httpReq)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := p.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("execute audio request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("audio generation error (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse SSE stream, collect audio chunks
+	var audioChunks []string
+	var textParts []string
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content,omitempty"`
+					Audio   *struct {
+						Data string `json:"data,omitempty"`
+					} `json:"audio,omitempty"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				textParts = append(textParts, choice.Delta.Content)
+			}
+			if choice.Delta.Audio != nil && choice.Delta.Audio.Data != "" {
+				audioChunks = append(audioChunks, choice.Delta.Audio.Data)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read audio stream: %w", err)
+	}
+
+	// Concatenate base64 audio chunks
+	audioFormat := "wav"
+	if req.Format != "" {
+		audioFormat = req.Format
+	}
+
+	var audioData string
+	if len(audioChunks) > 0 {
+		// Decode all chunks, concatenate raw bytes, re-encode
+		var raw []byte
+		for _, chunk := range audioChunks {
+			decoded, err := base64.StdEncoding.DecodeString(chunk)
+			if err != nil {
+				// Try with padding correction
+				decoded, err = base64.RawStdEncoding.DecodeString(chunk)
+				if err != nil {
+					continue
+				}
+			}
+			raw = append(raw, decoded...)
+		}
+		audioData = base64.StdEncoding.EncodeToString(raw)
+	}
+
+	return &MediaResponse{
+		Text: strings.Join(textParts, ""),
+		Audio: &AudioData{
+			Data:   audioData,
+			Format: audioFormat,
+		},
+	}, nil
+}
+
+func (p *OpenRouterMediaProvider) setHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.APIKey)
+}
