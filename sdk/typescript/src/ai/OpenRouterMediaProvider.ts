@@ -282,6 +282,27 @@ export class OpenRouterMediaProvider implements MediaProvider {
       }
     }
 
+    // Process remaining buffer after stream ends (WR-02)
+    const remaining = buffer.trim();
+    if (remaining.startsWith('data:')) {
+      const payload = remaining.slice(5).trim();
+      if (payload !== '[DONE]') {
+        try {
+          const chunk = JSON.parse(payload) as Record<string, unknown>;
+          const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+          if (choices) {
+            for (const choice of choices) {
+              const delta = choice.delta as Record<string, unknown> | undefined;
+              if (!delta) continue;
+              if (typeof delta.content === 'string') textContent += delta.content;
+              const audioDelta = delta.audio as Record<string, unknown> | undefined;
+              if (audioDelta?.data) audioChunks.push(audioDelta.data as string);
+            }
+          }
+        } catch { /* skip malformed final chunk */ }
+      }
+    }
+
     const resp = emptyMediaResponse(null);
     resp.text = textContent;
     if (audioChunks.length > 0) {
