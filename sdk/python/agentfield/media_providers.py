@@ -124,6 +124,27 @@ class MediaProvider(ABC):
         """
         raise NotImplementedError(f"{self.name} does not support video generation")
 
+    async def generate_music(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        duration: Optional[int] = None,
+        **kwargs,
+    ) -> MultimodalResponse:
+        """
+        Generate music from a text prompt.
+
+        Args:
+            prompt: Text description of the music to generate
+            model: Music generation model to use
+            duration: Duration in seconds
+            **kwargs: Provider-specific options
+
+        Returns:
+            MultimodalResponse with generated audio
+        """
+        raise NotImplementedError(f"{self.name} does not support music generation")
+
 
 class FalProvider(MediaProvider):
     """
@@ -530,11 +551,24 @@ class FalProvider(MediaProvider):
                     )
                 )
 
+            # Create VideoOutput from the file data
+            videos = []
+            for f in files:
+                videos.append(
+                    VideoOutput(
+                        url=f.url,
+                        data=f.data,
+                        mime_type=f.mime_type or "video/mp4",
+                        filename=f.filename,
+                    )
+                )
+
             return MultimodalResponse(
                 text=prompt,
                 audio=None,
                 images=[],
-                files=files,
+                files=files,  # Keep for backward compat
+                videos=videos,
                 raw_response=result,
             )
 
@@ -743,7 +777,7 @@ class OpenRouterProvider(MediaProvider):
 
     @property
     def supported_modalities(self) -> List[str]:
-        return ["image", "video"]
+        return ["image", "video", "audio", "music"]
 
     async def generate_image(
         self,
@@ -751,9 +785,14 @@ class OpenRouterProvider(MediaProvider):
         model: Optional[str] = None,
         size: str = "1024x1024",
         quality: str = "standard",
+        image_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> MultimodalResponse:
-        """Generate image using OpenRouter's chat completions API."""
+        """Generate image using OpenRouter's chat completions API.
+
+        Note: image_config is an OpenRouter-specific extension not present
+        in the base MediaProvider.generate_image() interface.
+        """
         from agentfield import vision
 
         model = model or "openrouter/google/gemini-2.5-flash-image-preview"
@@ -769,6 +808,7 @@ class OpenRouterProvider(MediaProvider):
             quality=quality,
             style=None,
             response_format="url",
+            image_config=image_config,
             **kwargs,
         )
 
@@ -1016,9 +1056,223 @@ class OpenRouterProvider(MediaProvider):
         format: str = "wav",
         **kwargs,
     ) -> MultimodalResponse:
-        """OpenRouter doesn't support TTS directly."""
-        raise NotImplementedError(
-            "OpenRouter doesn't support audio generation. Use LiteLLMProvider or FalProvider."
+        """
+        Generate audio via OpenRouter chat completions with SSE streaming.
+
+        Uses the modalities parameter to request audio output from audio-capable
+        models on OpenRouter.
+
+        Args:
+            text: Text to convert to speech
+            model: OpenRouter model ID (e.g., "openai/gpt-4o-mini-tts")
+            voice: Voice identifier (alloy, echo, fable, onyx, nova, shimmer)
+            format: Audio format (wav, mp3, flac, opus, pcm16)
+            **kwargs: Additional parameters
+
+        Returns:
+            MultimodalResponse with generated audio
+        """
+        import json as json_mod
+        import os
+
+        import aiohttp
+
+        api_key = self._api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key:
+            raise ValueError(
+                "OpenRouter API key required. Set OPENROUTER_API_KEY env var or pass api_key."
+            )
+
+        # Strip openrouter/ prefix if present
+        send_model = model or "openai/gpt-4o-mini-tts"
+        if send_model.startswith("openrouter/"):
+            send_model = send_model[len("openrouter/") :]
+
+        supported_voices = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+        if voice not in supported_voices:
+            voice = "alloy"
+
+        supported_formats = {"wav", "mp3", "flac", "opus", "pcm16"}
+        if format not in supported_formats:
+            format = "wav"
+
+        payload = {
+            "model": send_model,
+            "messages": [{"role": "user", "content": text}],
+            "modalities": ["text", "audio"],
+            "audio": {"voice": voice, "format": format},
+            "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        b64_chunks: list = []
+        transcript_parts: list = []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(
+                        f"OpenRouter audio request failed ({resp.status}): {body}"
+                    )
+
+                async for line in resp.content:
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    if not decoded.startswith("data: "):
+                        continue
+                    data_str = decoded[len("data: ") :]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        event = json_mod.loads(data_str)
+                    except json_mod.JSONDecodeError:
+                        continue
+
+                    choices = event.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    audio_delta = delta.get("audio", {})
+                    if audio_delta.get("data"):
+                        b64_chunks.append(audio_delta["data"])
+                    if audio_delta.get("transcript"):
+                        transcript_parts.append(audio_delta["transcript"])
+
+        # Concatenate base64 chunks and decode once
+        b64_full = "".join(b64_chunks)
+        transcript = "".join(transcript_parts)
+
+        audio_output = AudioOutput(
+            data=b64_full if b64_full else None,
+            format=format,
+            url=None,
+        )
+
+        return MultimodalResponse(
+            text=transcript or text,
+            audio=audio_output if b64_full else None,
+            images=[],
+            files=[],
+            raw_response={"transcript": transcript, "model": send_model},
+        )
+
+    async def generate_music(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        duration: Optional[int] = None,
+        **kwargs,
+    ) -> MultimodalResponse:
+        """
+        Generate music via OpenRouter using a music-capable model.
+
+        Uses SSE streaming chat completions with audio modality, similar to
+        generate_audio but targeting music generation models.
+
+        Args:
+            prompt: Text description of the music to generate
+            model: Music model (defaults to "google/lyria-3-pro")
+            duration: Duration hint in seconds (passed in prompt context)
+            **kwargs: Additional parameters
+
+        Returns:
+            MultimodalResponse with generated audio (48kHz stereo)
+        """
+        import json as json_mod
+        import os
+
+        import aiohttp
+
+        api_key = self._api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key:
+            raise ValueError(
+                "OpenRouter API key required. Set OPENROUTER_API_KEY env var or pass api_key."
+            )
+
+        send_model = model or "google/lyria-3-pro"
+        if send_model.startswith("openrouter/"):
+            send_model = send_model[len("openrouter/") :]
+
+        # Build the user message with optional duration hint
+        user_content = prompt
+        if duration is not None:
+            user_content = f"{prompt} (duration: {duration} seconds)"
+
+        audio_format = kwargs.pop("format", "wav")
+
+        payload = {
+            "model": send_model,
+            "messages": [{"role": "user", "content": user_content}],
+            "modalities": ["text", "audio"],
+            "audio": {"format": audio_format},
+            "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        b64_chunks: list = []
+        transcript_parts: list = []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(
+                        f"OpenRouter music request failed ({resp.status}): {body}"
+                    )
+
+                async for line in resp.content:
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    if not decoded.startswith("data: "):
+                        continue
+                    data_str = decoded[len("data: ") :]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        event = json_mod.loads(data_str)
+                    except json_mod.JSONDecodeError:
+                        continue
+
+                    choices = event.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    audio_delta = delta.get("audio", {})
+                    if audio_delta.get("data"):
+                        b64_chunks.append(audio_delta["data"])
+                    if audio_delta.get("transcript"):
+                        transcript_parts.append(audio_delta["transcript"])
+
+        b64_full = "".join(b64_chunks)
+        transcript = "".join(transcript_parts)
+
+        audio_output = AudioOutput(
+            data=b64_full if b64_full else None,
+            format=audio_format,
+            url=None,
+        )
+
+        return MultimodalResponse(
+            text=transcript or prompt,
+            audio=audio_output if b64_full else None,
+            images=[],
+            files=[],
+            raw_response={"transcript": transcript, "model": send_model},
         )
 
 
