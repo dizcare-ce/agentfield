@@ -24,6 +24,20 @@ function stripPrefix(model: string): string {
   return model.startsWith('openrouter/') ? model.slice('openrouter/'.length) : model;
 }
 
+/** Validate download URL to prevent SSRF -- must be https, no private/loopback IPs. */
+function isAllowedDownloadUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return false;
+    if (/^(10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface OpenRouterMediaProviderOptions {
   apiKey?: string;
   baseUrl?: string;
@@ -114,10 +128,13 @@ export class OpenRouterMediaProvider implements MediaProvider {
     const signedUrl = jobData.url as string | undefined;
     const videoUrl = unsignedUrl ?? signedUrl;
 
-    // Download video bytes if URL available
+    // Download video bytes if URL available and passes SSRF validation
     let videoData: string | undefined;
-    if (videoUrl) {
-      const dlRes = await fetch(videoUrl, { signal: AbortSignal.timeout(120_000) });
+    if (videoUrl && isAllowedDownloadUrl(videoUrl)) {
+      const dlRes = await fetch(videoUrl, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(120_000),
+      });
       if (dlRes.ok) {
         const buf = Buffer.from(await dlRes.arrayBuffer());
         videoData = buf.toString('base64');
