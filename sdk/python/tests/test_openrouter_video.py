@@ -24,10 +24,11 @@ JOB_ID = "job-abc123"
 UNSIGNED_URL = "https://cdn.openrouter.ai/videos/job-abc123/0.mp4"
 
 
-def _make_response(status, json_data=None, body=None):
+def _make_response(status, json_data=None, body=None, headers=None):
     """Create a mock aiohttp response."""
     resp = AsyncMock()
     resp.status = status
+    resp.headers = headers or {}
     if json_data is not None:
         resp.json = AsyncMock(return_value=json_data)
     if body is not None:
@@ -295,6 +296,39 @@ class TestOpenRouterVideoModelPrefix:
             )
 
         assert captured_body["model"] == "google/veo-2.0-generate-001"
+
+
+class TestOpenRouterVideoImageUrl:
+    @pytest.mark.asyncio
+    async def test_image_url_included_in_body(self):
+        """image_url must be sent in the API request body (CR-01 regression)."""
+        submit_resp = _make_response(202, {"id": JOB_ID, "status": "pending"})
+        poll_resp = _make_response(
+            200, {"status": "completed", "unsigned_urls": [UNSIGNED_URL], "usage": {}}
+        )
+        download_resp = _make_response(200, body=FAKE_VIDEO_BYTES)
+
+        captured_body = {}
+
+        class CapturingSession(FakeSession):
+            def post(self, url, **kwargs):
+                captured_body.update(kwargs.get("json", {}))
+                return super().post(url, **kwargs)
+
+        session = CapturingSession([submit_resp, poll_resp, download_resp])
+        provider = OpenRouterProvider(api_key="sk-test-key")
+
+        with patch("aiohttp.ClientSession", return_value=session):
+            await provider.generate_video(
+                prompt="animate this image",
+                model="openrouter/google/veo-2.0-generate-001",
+                image_url="https://example.com/input.jpg",
+                poll_interval=0.01,
+                timeout=5.0,
+            )
+
+        assert "image_url" in captured_body
+        assert captured_body["image_url"] == "https://example.com/input.jpg"
 
 
 class TestOpenRouterSupportedModalities:

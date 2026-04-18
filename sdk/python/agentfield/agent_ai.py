@@ -1709,7 +1709,7 @@ class AgentAI:
                 prompt=prompt,
                 model=model,
                 image_url=image_url,
-                duration=int(duration) if duration is not None else None,
+                duration=duration,
                 **kwargs,
             )
         elif model.startswith("fal-ai/") or model.startswith("fal/"):

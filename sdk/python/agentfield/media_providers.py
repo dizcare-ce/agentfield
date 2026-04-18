@@ -11,8 +11,10 @@ Each provider implements the same interface, making it easy to swap
 backends or add new ones without changing agent code.
 """
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union
+from urllib.parse import urlparse
 
 from agentfield.multimodal_response import (
     AudioOutput,
@@ -710,6 +712,9 @@ class LiteLLMProvider(MediaProvider):
             raise
 
 
+MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500 MB hard limit for video downloads
+
+
 class OpenRouterProvider(MediaProvider):
     """
     OpenRouter provider for image generation via chat completions.
@@ -720,6 +725,14 @@ class OpenRouterProvider(MediaProvider):
     - google/gemini-2.5-flash-image-preview
     - Other OpenRouter models with image generation capabilities
     """
+
+    _VIDEO_ERROR_MESSAGES = {
+        400: "Bad request — check model name and parameters",
+        401: "Invalid API key",
+        402: "Insufficient credits",
+        429: "Rate limited — try again later",
+        500: "OpenRouter server error",
+    }
 
     def __init__(self, api_key: Optional[str] = None):
         self._api_key = api_key
@@ -764,7 +777,7 @@ class OpenRouterProvider(MediaProvider):
         prompt: str,
         model: Optional[str] = None,
         image_url: Optional[str] = None,
-        duration: Optional[int] = None,
+        duration: Optional[float] = None,
         resolution: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
         generate_audio: Optional[bool] = None,
@@ -842,14 +855,10 @@ class OpenRouterProvider(MediaProvider):
             body["frame_images"] = frame_images
         if input_references is not None:
             body["input_references"] = input_references
+        if image_url is not None:
+            body["image_url"] = image_url
 
-        _error_messages = {
-            400: "Bad request — check model name and parameters",
-            401: "Invalid API key",
-            402: "Insufficient credits",
-            429: "Rate limited — try again later",
-            500: "OpenRouter server error",
-        }
+        _error_messages = self._VIDEO_ERROR_MESSAGES
 
         async with aiohttp.ClientSession() as session:
             # Step 1: Submit video generation job
@@ -862,7 +871,7 @@ class OpenRouterProvider(MediaProvider):
                     )
                     detail = await resp.text()
                     raise RuntimeError(
-                        f"OpenRouter video submit failed: {error_msg} — {detail}"
+                        f"OpenRouter video submit failed: {error_msg} — {detail[:500]}"
                     )
                 submit_data = await resp.json()
 
@@ -871,11 +880,18 @@ class OpenRouterProvider(MediaProvider):
                 raise RuntimeError(
                     f"OpenRouter video submit returned no job id: {submit_data}"
                 )
+            if not re.match(r"^[a-zA-Z0-9_-]+$", job_id):
+                raise RuntimeError(
+                    f"OpenRouter returned invalid job id: {job_id!r}"
+                )
 
             # Step 2: Poll for completion
             poll_url = f"{base_url}/videos/{job_id}"
             start_time = time.monotonic()
             poll_data: Dict[str, Any] = {}
+
+            MAX_POLL_RETRIES = 3
+            consecutive_errors = 0
 
             while True:
                 elapsed = time.monotonic() - start_time
@@ -885,18 +901,36 @@ class OpenRouterProvider(MediaProvider):
                         f"(job {job_id})"
                     )
 
-                await asyncio.sleep(poll_interval)
-
-                async with session.get(poll_url, headers=headers) as resp:
-                    if resp.status != 200:
-                        error_msg = _error_messages.get(
-                            resp.status, f"Unexpected status {resp.status}"
-                        )
-                        detail = await resp.text()
-                        raise RuntimeError(
-                            f"OpenRouter video poll failed: {error_msg} — {detail}"
-                        )
-                    poll_data = await resp.json()
+                try:
+                    async with session.get(poll_url, headers=headers) as resp:
+                        if resp.status in (502, 503, 504):
+                            consecutive_errors = consecutive_errors + 1
+                            if consecutive_errors >= MAX_POLL_RETRIES:
+                                detail = await resp.text()
+                                raise RuntimeError(
+                                    f"OpenRouter video poll failed after "
+                                    f"{MAX_POLL_RETRIES} retries: "
+                                    f"HTTP {resp.status} — {detail[:500]}"
+                                )
+                            await asyncio.sleep(poll_interval)
+                            continue
+                        if resp.status != 200:
+                            error_msg = _error_messages.get(
+                                resp.status, f"Unexpected status {resp.status}"
+                            )
+                            detail = await resp.text()
+                            raise RuntimeError(
+                                f"OpenRouter video poll failed: "
+                                f"{error_msg} — {detail[:500]}"
+                            )
+                        consecutive_errors = 0
+                        poll_data = await resp.json()
+                except aiohttp.ClientError:
+                    consecutive_errors = consecutive_errors + 1
+                    if consecutive_errors >= MAX_POLL_RETRIES:
+                        raise
+                    await asyncio.sleep(poll_interval)
+                    continue
 
                 status = poll_data.get("status", "")
                 if status == "completed":
@@ -908,6 +942,8 @@ class OpenRouterProvider(MediaProvider):
                     )
                 # else pending/in_progress — keep polling
 
+                await asyncio.sleep(poll_interval)
+
             # Step 3: Download video from unsigned URL
             unsigned_urls = poll_data.get("unsigned_urls", [])
             if not unsigned_urls:
@@ -916,13 +952,30 @@ class OpenRouterProvider(MediaProvider):
                 )
 
             video_url = unsigned_urls[0]
+            parsed_url = urlparse(video_url)
+            if parsed_url.scheme not in ("https",):
+                raise RuntimeError(
+                    f"Refusing to download video from non-HTTPS URL: {video_url}"
+                )
+
             video_data_bytes: Optional[bytes] = None
+            # Download without auth headers — video_url is a public CDN URL
             async with session.get(video_url) as resp:
                 if resp.status != 200:
                     raise RuntimeError(
                         f"Failed to download video from {video_url}: HTTP {resp.status}"
                     )
+                content_length = resp.headers.get("Content-Length")
+                if content_length and int(content_length) > MAX_VIDEO_BYTES:
+                    raise RuntimeError(
+                        f"Video too large ({int(content_length)} bytes). "
+                        f"Max: {MAX_VIDEO_BYTES}"
+                    )
                 video_data_bytes = await resp.read()
+                if len(video_data_bytes) > MAX_VIDEO_BYTES:
+                    raise RuntimeError(
+                        f"Video download exceeded {MAX_VIDEO_BYTES} byte limit"
+                    )
 
         # Build response objects
         import base64
