@@ -32,15 +32,19 @@ type OpenRouterMediaProvider struct {
 }
 
 // NewOpenRouterMediaProvider creates a provider. If apiKey is empty, reads OPENROUTER_API_KEY.
-func NewOpenRouterMediaProvider(apiKey string) *OpenRouterMediaProvider {
+// Returns error if no API key is available.
+func NewOpenRouterMediaProvider(apiKey string) (*OpenRouterMediaProvider, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENROUTER_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("OpenRouter API key required: pass apiKey or set OPENROUTER_API_KEY")
 	}
 	return &OpenRouterMediaProvider{
 		APIKey:  apiKey,
 		BaseURL: defaultOpenRouterBaseURL,
 		Client:  &http.Client{Timeout: 60 * time.Second},
-	}
+	}, nil
 }
 
 func (p *OpenRouterMediaProvider) Name() string {

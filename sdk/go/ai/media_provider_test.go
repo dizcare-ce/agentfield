@@ -107,15 +107,24 @@ func TestStripPrefix(t *testing.T) {
 }
 
 func TestOpenRouterMediaProviderName(t *testing.T) {
-	p := NewOpenRouterMediaProvider("test-key")
+	p, err := NewOpenRouterMediaProvider("test-key")
+	require.NoError(t, err)
 	assert.Equal(t, "openrouter", p.Name())
 	assert.Equal(t, []string{"image", "audio", "video"}, p.SupportedModalities())
 }
 
 func TestOpenRouterMediaProviderDefaultKey(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "env-key")
-	p := NewOpenRouterMediaProvider("")
+	p, err := NewOpenRouterMediaProvider("")
+	require.NoError(t, err)
 	assert.Equal(t, "env-key", p.APIKey)
+}
+
+func TestOpenRouterMediaProviderEmptyKey(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "")
+	_, err := NewOpenRouterMediaProvider("")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "API key required")
 }
 
 func TestOpenRouterGenerateImage(t *testing.T) {
