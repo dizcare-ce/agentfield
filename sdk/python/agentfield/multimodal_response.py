@@ -295,6 +295,8 @@ class MultimodalResponse:
             parts.append(f"videos={len(self._videos)}")
         if self._files:
             parts.append(f"files={len(self._files)}")
+        if self._videos:
+            parts.append(f"videos={len(self._videos)}")
         return f"MultimodalResponse({', '.join(parts)})"
 
     @property
@@ -338,14 +340,14 @@ class MultimodalResponse:
         return len(self._files) > 0
 
     @property
-    def has_video(self) -> bool:
-        """Check if response contains video."""
+    def has_videos(self) -> bool:
+        """Check if response contains videos."""
         return len(self._videos) > 0
 
     @property
     def is_multimodal(self) -> bool:
         """Check if response contains any multimodal content."""
-        return self.has_audio or self.has_images or self.has_files or self.has_video
+        return self.has_audio or self.has_images or self.has_files or self.has_videos
 
     @property
     def raw_response(self) -> Optional[Any]:
@@ -409,6 +411,13 @@ class MultimodalResponse:
             file_path = directory / safe_filename
             file.save(file_path)
             saved_files[f"file_{i}"] = str(file_path)
+
+        # Save videos
+        for i, video in enumerate(self._videos):
+            filename = video.filename or f"{prefix}_video_{i}.mp4"
+            video_path = directory / filename
+            video.save(video_path)
+            saved_files[f"video_{i}"] = str(video_path)
 
         # Save text content
         if self._text:

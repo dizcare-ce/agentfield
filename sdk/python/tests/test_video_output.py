@@ -43,15 +43,15 @@ class TestVideoOutput:
 
 
 class TestMultimodalResponseVideo:
-    def test_has_video_false_by_default(self):
+    def test_has_videos_false_by_default(self):
         r = MultimodalResponse(text="hello")
-        assert r.has_video is False
+        assert r.has_videos is False
         assert r.videos == []
 
-    def test_has_video_true(self):
+    def test_has_videos_true(self):
         v = VideoOutput(url="https://example.com/video.mp4")
         r = MultimodalResponse(text="hello", videos=[v])
-        assert r.has_video is True
+        assert r.has_videos is True
         assert len(r.videos) == 1
 
     def test_is_multimodal_with_video(self):
@@ -63,7 +63,7 @@ class TestMultimodalResponseVideo:
         # Existing code that doesn't pass videos= should still work
         r = MultimodalResponse(text="hi", audio=None, images=[], files=[])
         assert r.videos == []
-        assert r.has_video is False
+        assert r.has_videos is False
 
     def test_repr_includes_videos(self):
         v = VideoOutput(url="https://example.com/video.mp4")
