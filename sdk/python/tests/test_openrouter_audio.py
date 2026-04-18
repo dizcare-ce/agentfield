@@ -81,8 +81,10 @@ class _FakeStreamResponse:
 class _FakeSession:
     """Fake aiohttp.ClientSession."""
 
-    def __init__(self, response: _FakeStreamResponse):
+    def __init__(self, response: _FakeStreamResponse, **kwargs):
         self._response = response
+        # Accept timeout and other kwargs like the real ClientSession
+        self._init_kwargs = kwargs
 
     def post(self, url, **kwargs):
         self._last_post_kwargs = kwargs
@@ -119,6 +121,7 @@ class DummyAIConfig:
         self.vision_model = "dall-e-3"
         self.fal_api_key = None
         self.video_model = "fal-ai/minimax-video/image-to-video"
+        self.openrouter_api_key = None
 
     def copy(self, deep=False):
         return copy.deepcopy(self)
@@ -326,23 +329,18 @@ class TestOpenRouterGenerateAudio:
 class TestGenerateMusic:
     """Tests for music generation."""
 
-    def test_abc_generate_music_raises_not_implemented(self):
+    @pytest.mark.asyncio
+    async def test_abc_generate_music_raises_not_implemented(self):
         """MediaProvider.generate_music should raise NotImplementedError by default."""
         # FalProvider and LiteLLMProvider don't override generate_music
         fal = FalProvider()
         litellm_p = LiteLLMProvider()
 
         with pytest.raises(NotImplementedError, match="does not support music"):
-            import asyncio
-
-            asyncio.get_event_loop().run_until_complete(fal.generate_music("test"))
+            await fal.generate_music("test")
 
         with pytest.raises(NotImplementedError, match="does not support music"):
-            import asyncio
-
-            asyncio.get_event_loop().run_until_complete(
-                litellm_p.generate_music("test")
-            )
+            await litellm_p.generate_music("test")
 
     @pytest.mark.asyncio
     async def test_openrouter_generate_music_streams(self, monkeypatch):

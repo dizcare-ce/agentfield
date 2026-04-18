@@ -154,6 +154,23 @@ class AgentAI:
         self._initialization_complete = False
         self._rate_limiter = None
         self._fal_provider_instance = None
+        self._openrouter_provider_instance = None
+
+    @property
+    def _openrouter_provider(self):
+        """
+        Lazy-initialized OpenRouter provider for audio and music generation.
+
+        Returns:
+            OpenRouterProvider: Configured OpenRouter provider instance
+        """
+        if self._openrouter_provider_instance is None:
+            from agentfield.media_providers import OpenRouterProvider
+
+            self._openrouter_provider_instance = OpenRouterProvider(
+                api_key=getattr(self.agent.ai_config, "openrouter_api_key", None)
+            )
+        return self._openrouter_provider_instance
 
     @property
     def _fal_provider(self):
@@ -1676,10 +1693,7 @@ class AgentAI:
                 format="mp3",
             )
         """
-        from agentfield.media_providers import OpenRouterProvider
-
-        provider = OpenRouterProvider(api_key=None)
-        return await provider.generate_music(
+        return await self._openrouter_provider.generate_music(
             prompt=prompt,
             model=model,
             duration=duration,

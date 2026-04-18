@@ -30,10 +30,14 @@ class DummyProvider(MediaProvider):
 
 def test_media_provider_generate_video_and_register_validation():
     provider = DummyProvider()
-    with pytest.raises(NotImplementedError, match="dummy does not support video generation"):
+    with pytest.raises(
+        NotImplementedError, match="dummy does not support video generation"
+    ):
         __import__("asyncio").run(provider.generate_video("prompt"))
 
-    with pytest.raises(TypeError, match="provider_class must be a MediaProvider subclass"):
+    with pytest.raises(
+        TypeError, match="provider_class must be a MediaProvider subclass"
+    ):
         register_provider("bad", object)
 
 
