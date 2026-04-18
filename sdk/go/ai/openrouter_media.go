@@ -146,25 +146,35 @@ func (p *OpenRouterMediaProvider) GenerateVideo(ctx context.Context, req VideoRe
 		return nil, fmt.Errorf("invalid job ID in submit response: %q", submitResp.ID)
 	}
 
-	// Poll until completed or failed
-	deadline := time.Now().Add(timeout)
+	// Derive a context with the video-specific timeout, but respect caller's deadline
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	pollURL := p.baseURL() + "/videos/" + submitResp.ID
 
-	for {
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("video generation timed out after %v", timeout)
-		}
+	// Poll loop using context for deadline enforcement
+	const maxTransientErrors = 3
+	transientErrors := 0
 
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(pollInterval):
+			return nil, fmt.Errorf("video generation: %w", ctx.Err())
+		case <-ticker.C:
 		}
 
 		status, err := p.pollVideoJob(ctx, pollURL)
 		if err != nil {
-			return nil, err
+			transientErrors++
+			if transientErrors >= maxTransientErrors {
+				return nil, fmt.Errorf("video poll failed after %d retries: %w", transientErrors, err)
+			}
+			continue // retry on next tick
 		}
+		transientErrors = 0
 
 		switch status.Status {
 		case "completed":
