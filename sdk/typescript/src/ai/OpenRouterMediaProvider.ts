@@ -102,11 +102,12 @@ export class OpenRouterMediaProvider implements MediaProvider {
       throw new Error('No job id returned from video submit');
     }
 
-    // Poll until done
+    // Poll until done -- check deadline after sleep, before network call
     const deadline = Date.now() + timeout;
     let jobData: Record<string, unknown> = {};
-    while (Date.now() < deadline) {
-      await sleep(pollInterval);
+    while (true) {
+      await sleep(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
+      if (Date.now() >= deadline) break;
       const pollRes = await this.get(`${this.baseUrl}/videos/${jobId}`);
       if (!pollRes.ok) {
         throw new Error(`Video poll failed: ${pollRes.status} ${await pollRes.text()}`);
