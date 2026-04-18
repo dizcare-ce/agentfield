@@ -123,7 +123,7 @@ func (p *OpenRouterMediaProvider) GenerateVideo(ctx context.Context, req VideoRe
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read submit response: %w", err)
 	}
@@ -208,7 +208,7 @@ func (p *OpenRouterMediaProvider) pollVideoJob(ctx context.Context, url string) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read poll response: %w", err)
 	}
@@ -280,7 +280,7 @@ func (p *OpenRouterMediaProvider) GenerateImage(ctx context.Context, req ImageRe
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("read image response: %w", err)
 	}
@@ -368,7 +368,7 @@ func (p *OpenRouterMediaProvider) GenerateAudio(ctx context.Context, req AudioRe
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		return nil, fmt.Errorf("audio generation error (%d): %s", resp.StatusCode, string(respBody))
 	}
 
