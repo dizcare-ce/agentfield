@@ -19,6 +19,7 @@ from agentfield.multimodal_response import (
     FileOutput,
     ImageOutput,
     MultimodalResponse,
+    VideoOutput,
 )
 
 
@@ -522,11 +523,24 @@ class FalProvider(MediaProvider):
                     )
                 )
 
+            # Create VideoOutput from the file data
+            videos = []
+            for f in files:
+                videos.append(
+                    VideoOutput(
+                        url=f.url,
+                        data=f.data,
+                        mime_type=f.mime_type or "video/mp4",
+                        filename=f.filename,
+                    )
+                )
+
             return MultimodalResponse(
                 text=prompt,
                 audio=None,
                 images=[],
-                files=files,
+                files=files,  # Keep for backward compat
+                videos=videos,
                 raw_response=result,
             )
 
