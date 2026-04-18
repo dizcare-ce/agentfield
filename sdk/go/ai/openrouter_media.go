@@ -10,9 +10,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// validJobID restricts job IDs to safe characters (prevents SSRF via path traversal).
+var validJobID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 const (
 	defaultOpenRouterBaseURL  = "https://openrouter.ai/api/v1"
@@ -135,6 +139,11 @@ func (p *OpenRouterMediaProvider) GenerateVideo(ctx context.Context, req VideoRe
 	}
 	if submitResp.ID == "" {
 		return nil, fmt.Errorf("no job ID in submit response: %s", string(respBody))
+	}
+
+	// Validate job ID to prevent SSRF via path traversal
+	if !validJobID.MatchString(submitResp.ID) {
+		return nil, fmt.Errorf("invalid job ID in submit response: %q", submitResp.ID)
 	}
 
 	// Poll until completed or failed
