@@ -145,6 +145,59 @@ class ImageOutput(BaseModel):
             log_error(f"Could not display image: {e}")
 
 
+class VideoOutput(BaseModel):
+    """Represents video output from generation APIs."""
+
+    url: Optional[str] = Field(None, description="URL to video file")
+    data: Optional[str] = Field(None, description="Base64-encoded video data")
+    mime_type: str = Field("video/mp4", description="MIME type of video")
+    filename: Optional[str] = Field(None, description="Suggested filename")
+    duration: Optional[float] = Field(None, description="Video duration in seconds")
+    cost_usd: Optional[float] = Field(None, description="Generation cost in USD")
+
+    def save(self, path: Union[str, Path]) -> None:
+        """Save video to file."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.data:
+            video_bytes = base64.b64decode(self.data)
+            with open(path, "wb") as f:
+                f.write(video_bytes)
+        elif self.url:
+            try:
+                import requests
+
+                response = requests.get(self.url)
+                response.raise_for_status()
+                with open(path, "wb") as f:
+                    f.write(response.content)
+            except ImportError:
+                raise ImportError(
+                    "URL download requires requests: pip install requests"
+                )
+        else:
+            raise ValueError("No video data or URL available to save")
+
+    def get_bytes(self) -> bytes:
+        """Get raw video bytes."""
+        if self.data:
+            return base64.b64decode(self.data)
+        elif self.url:
+            try:
+                import requests
+
+                response = requests.get(self.url)
+                response.raise_for_status()
+                return response.content
+            except ImportError:
+                raise ImportError(
+                    "URL download requires requests: pip install requests"
+                )
+        else:
+            raise ValueError("No video data or URL available")
+
+
 class FileOutput(BaseModel):
     """Represents generic file output from LLM."""
 
@@ -210,6 +263,7 @@ class MultimodalResponse:
         audio: Optional[AudioOutput] = None,
         images: Optional[List[ImageOutput]] = None,
         files: Optional[List[FileOutput]] = None,
+        videos: Optional[List["VideoOutput"]] = None,
         raw_response: Optional[Any] = None,
         cost_usd: Optional[float] = None,
         usage: Optional[Dict[str, int]] = None,
@@ -218,6 +272,7 @@ class MultimodalResponse:
         self._audio = audio
         self._images = images or []
         self._files = files or []
+        self._videos = videos or []
         self._raw_response = raw_response
         self._cost_usd = cost_usd
         self._usage = usage or {}
@@ -235,6 +290,8 @@ class MultimodalResponse:
             parts.append(f"images={len(self._images)}")
         if self._files:
             parts.append(f"files={len(self._files)}")
+        if self._videos:
+            parts.append(f"videos={len(self._videos)}")
         return f"MultimodalResponse({', '.join(parts)})"
 
     @property
@@ -258,6 +315,11 @@ class MultimodalResponse:
         return self._files
 
     @property
+    def videos(self) -> List["VideoOutput"]:
+        """Get list of video outputs."""
+        return self._videos
+
+    @property
     def has_audio(self) -> bool:
         """Check if response contains audio."""
         return self._audio is not None
@@ -273,9 +335,14 @@ class MultimodalResponse:
         return len(self._files) > 0
 
     @property
+    def has_videos(self) -> bool:
+        """Check if response contains videos."""
+        return len(self._videos) > 0
+
+    @property
     def is_multimodal(self) -> bool:
         """Check if response contains any multimodal content."""
-        return self.has_audio or self.has_images or self.has_files
+        return self.has_audio or self.has_images or self.has_files or self.has_videos
 
     @property
     def raw_response(self) -> Optional[Any]:
@@ -327,6 +394,13 @@ class MultimodalResponse:
             file.save(file_path)
             saved_files[f"file_{i}"] = str(file_path)
 
+        # Save videos
+        for i, video in enumerate(self._videos):
+            filename = video.filename or f"{prefix}_video_{i}.mp4"
+            video_path = directory / filename
+            video.save(video_path)
+            saved_files[f"video_{i}"] = str(video_path)
+
         # Save text content
         if self._text:
             text_path = directory / f"{prefix}_text.txt"
@@ -359,7 +433,11 @@ def _extract_image_from_data(data: Any) -> Optional[ImageOutput]:
     # OpenRouter/Gemini pattern: {"type": "image_url", "image_url": {"url": "..."}}
     if hasattr(data, "image_url"):
         image_url_obj = data.image_url
-        url = getattr(image_url_obj, "url", None) if hasattr(image_url_obj, "url") else None
+        url = (
+            getattr(image_url_obj, "url", None)
+            if hasattr(image_url_obj, "url")
+            else None
+        )
         if url:
             # Handle data URLs (base64 encoded)
             if url.startswith("data:image"):
@@ -394,9 +472,13 @@ def _extract_image_from_data(data: Any) -> Optional[ImageOutput]:
                     if url.startswith("data:image"):
                         try:
                             b64_data = url.split(",", 1)[1] if "," in url else None
-                            return ImageOutput(url=url, b64_json=b64_data, revised_prompt=None)
+                            return ImageOutput(
+                                url=url, b64_json=b64_data, revised_prompt=None
+                            )
                         except Exception:
-                            return ImageOutput(url=url, b64_json=None, revised_prompt=None)
+                            return ImageOutput(
+                                url=url, b64_json=None, revised_prompt=None
+                            )
                     return ImageOutput(url=url, b64_json=None, revised_prompt=None)
 
     return None
@@ -549,6 +631,11 @@ def detect_multimodal_response(response: Any) -> MultimodalResponse:
             pass
 
     return MultimodalResponse(
-        text=text, audio=audio, images=images, files=files, raw_response=response,
-        cost_usd=cost_usd, usage=usage_dict,
+        text=text,
+        audio=audio,
+        images=images,
+        files=files,
+        raw_response=response,
+        cost_usd=cost_usd,
+        usage=usage_dict,
     )

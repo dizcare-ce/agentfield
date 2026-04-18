@@ -546,7 +546,9 @@ class AgentAI:
                     )
 
                 async def _make_call():
-                    timeout = getattr(self.agent.async_config, "llm_call_timeout", 120.0)
+                    timeout = getattr(
+                        self.agent.async_config, "llm_call_timeout", 120.0
+                    )
                     # Ensure litellm/httpx itself enforces the timeout at the
                     # socket level, so cancelled requests don't poison the
                     # connection pool for subsequent calls.
@@ -728,7 +730,9 @@ class AgentAI:
                 hasattr(self.agent, "cost_tracker")
                 and multimodal_response.cost_usd is not None
             ):
-                model_name = getattr(resp, "model", "") or final_config.model or "unknown"
+                model_name = (
+                    getattr(resp, "model", "") or final_config.model or "unknown"
+                )
                 usage = multimodal_response.usage
                 from agentfield.execution_context import get_current_context
 
@@ -746,7 +750,11 @@ class AgentAI:
                 try:
                     json_data = json.loads(str(multimodal_response.text))
                     return schema(**json_data)
-                except (json.JSONDecodeError, ValueError, ValidationError) as parse_error:
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    ValidationError,
+                ) as parse_error:
                     log_error(f"Failed to parse JSON response: {parse_error}")
                     log_debug(f"Raw response: {multimodal_response.text}")
                     json_match = re.search(
@@ -1688,20 +1696,35 @@ class AgentAI:
         if model is None:
             model = self.agent.ai_config.video_model
 
-        # Currently only Fal supports video generation
-        if not (model.startswith("fal-ai/") or model.startswith("fal/")):
-            raise ValueError(
-                f"Video generation currently only supports Fal.ai models. "
-                f"Use models like 'fal-ai/minimax-video/image-to-video'. Got: {model}"
-            )
+        # Route to the appropriate provider based on model prefix
+        if model.startswith("openrouter/"):
+            from agentfield.media_providers import OpenRouterProvider
 
-        return await self._fal_provider.generate_video(
-            prompt=prompt,
-            model=model,
-            image_url=image_url,
-            duration=duration,
-            **kwargs,
-        )
+            provider = OpenRouterProvider(
+                api_key=self.agent.ai_config.openrouter_api_key
+                if hasattr(self.agent.ai_config, "openrouter_api_key")
+                else None
+            )
+            return await provider.generate_video(
+                prompt=prompt,
+                model=model,
+                image_url=image_url,
+                duration=int(duration) if duration is not None else None,
+                **kwargs,
+            )
+        elif model.startswith("fal-ai/") or model.startswith("fal/"):
+            return await self._fal_provider.generate_video(
+                prompt=prompt,
+                model=model,
+                image_url=image_url,
+                duration=duration,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                f"Video generation supports Fal.ai and OpenRouter models. "
+                f"Use 'fal-ai/...' or 'openrouter/...' prefix. Got: {model}"
+            )
 
     async def ai_transcribe_audio(
         self,

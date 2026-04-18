@@ -19,17 +19,18 @@ from agentfield.multimodal_response import (
     FileOutput,
     ImageOutput,
     MultimodalResponse,
+    VideoOutput,
 )
 
 
 # Fal image size presets
 FalImageSize = Literal[
-    "square_hd",      # 1024x1024
-    "square",         # 512x512
-    "portrait_4_3",   # 768x1024
+    "square_hd",  # 1024x1024
+    "square",  # 512x512
+    "portrait_4_3",  # 768x1024
     "portrait_16_9",  # 576x1024
     "landscape_4_3",  # 1024x768
-    "landscape_16_9", # 1024x576
+    "landscape_16_9",  # 1024x576
 ]
 
 
@@ -191,6 +192,7 @@ class FalProvider(MediaProvider):
 
                 if self._api_key:
                     import os
+
                     os.environ["FAL_KEY"] = self._api_key
 
                 self._client = fal_client
@@ -200,9 +202,7 @@ class FalProvider(MediaProvider):
                 )
         return self._client
 
-    def _parse_image_size(
-        self, size: str
-    ) -> Union[str, Dict[str, int]]:
+    def _parse_image_size(self, size: str) -> Union[str, Dict[str, int]]:
         """
         Parse image size into fal format.
 
@@ -214,8 +214,12 @@ class FalProvider(MediaProvider):
         """
         # Check if it's a fal preset
         fal_presets = {
-            "square_hd", "square", "portrait_4_3", "portrait_16_9",
-            "landscape_4_3", "landscape_16_9"
+            "square_hd",
+            "square",
+            "portrait_4_3",
+            "portrait_16_9",
+            "landscape_4_3",
+            "landscape_16_9",
         }
         if size in fal_presets:
             return size
@@ -346,6 +350,7 @@ class FalProvider(MediaProvider):
 
         except Exception as e:
             from agentfield.logger import log_error
+
             log_error(f"Fal image generation failed: {e}")
             raise
 
@@ -434,6 +439,7 @@ class FalProvider(MediaProvider):
 
         except Exception as e:
             from agentfield.logger import log_error
+
             log_error(f"Fal audio generation failed: {e}")
             raise
 
@@ -532,6 +538,7 @@ class FalProvider(MediaProvider):
 
         except Exception as e:
             from agentfield.logger import log_error
+
             log_error(f"Fal video generation failed: {e}")
             raise
 
@@ -587,6 +594,7 @@ class FalProvider(MediaProvider):
 
         except Exception as e:
             from agentfield.logger import log_error
+
             log_error(f"Fal transcription failed: {e}")
             raise
 
@@ -722,7 +730,7 @@ class OpenRouterProvider(MediaProvider):
 
     @property
     def supported_modalities(self) -> List[str]:
-        return ["image"]  # OpenRouter primarily supports image generation
+        return ["image", "video"]
 
     async def generate_image(
         self,
@@ -749,6 +757,202 @@ class OpenRouterProvider(MediaProvider):
             style=None,
             response_format="url",
             **kwargs,
+        )
+
+    async def generate_video(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        image_url: Optional[str] = None,
+        duration: Optional[int] = None,
+        resolution: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        generate_audio: Optional[bool] = None,
+        seed: Optional[int] = None,
+        frame_images: Optional[List[Dict]] = None,
+        input_references: Optional[List[Dict]] = None,
+        poll_interval: float = 30.0,
+        timeout: float = 600.0,
+        **kwargs,
+    ) -> MultimodalResponse:
+        """
+        Generate video using OpenRouter's async video API.
+
+        Submits a job to POST /api/v1/videos, polls until completed,
+        then downloads the video content.
+
+        Args:
+            prompt: Text description for video generation
+            model: OpenRouter video model name
+            image_url: Optional input image for image-to-video
+            duration: Video duration in seconds
+            resolution: Video resolution (e.g., "1080p")
+            aspect_ratio: Aspect ratio (e.g., "16:9")
+            generate_audio: Whether to generate audio track
+            seed: Random seed for reproducibility
+            frame_images: List of frame image dicts for guided generation
+            input_references: List of reference input dicts
+            poll_interval: Seconds between status polls (default 30)
+            timeout: Maximum wait time in seconds (default 600)
+            **kwargs: Additional parameters passed to the API
+
+        Returns:
+            MultimodalResponse with video in both files[] and videos[]
+        """
+        import asyncio
+        import os
+        import time
+
+        import aiohttp
+
+        api_key = self._api_key or os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OpenRouter API key required. Set OPENROUTER_API_KEY env var "
+                "or pass api_key to OpenRouterProvider."
+            )
+
+        base_url = "https://openrouter.ai/api/v1"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Strip openrouter/ prefix from model name
+        video_model = model or "openrouter/google/veo-2.0-generate-001"
+        if video_model.startswith("openrouter/"):
+            video_model = video_model[len("openrouter/") :]
+
+        # Build request body
+        body: Dict[str, Any] = {
+            "model": video_model,
+            "prompt": prompt,
+        }
+        if duration is not None:
+            body["duration"] = duration
+        if resolution is not None:
+            body["resolution"] = resolution
+        if aspect_ratio is not None:
+            body["aspect_ratio"] = aspect_ratio
+        if generate_audio is not None:
+            body["generate_audio"] = generate_audio
+        if seed is not None:
+            body["seed"] = seed
+        if frame_images is not None:
+            body["frame_images"] = frame_images
+        if input_references is not None:
+            body["input_references"] = input_references
+
+        _error_messages = {
+            400: "Bad request — check model name and parameters",
+            401: "Invalid API key",
+            402: "Insufficient credits",
+            429: "Rate limited — try again later",
+            500: "OpenRouter server error",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            # Step 1: Submit video generation job
+            async with session.post(
+                f"{base_url}/videos", headers=headers, json=body
+            ) as resp:
+                if resp.status != 202:
+                    error_msg = _error_messages.get(
+                        resp.status, f"Unexpected status {resp.status}"
+                    )
+                    detail = await resp.text()
+                    raise RuntimeError(
+                        f"OpenRouter video submit failed: {error_msg} — {detail}"
+                    )
+                submit_data = await resp.json()
+
+            job_id = submit_data.get("id")
+            if not job_id:
+                raise RuntimeError(
+                    f"OpenRouter video submit returned no job id: {submit_data}"
+                )
+
+            # Step 2: Poll for completion
+            poll_url = f"{base_url}/videos/{job_id}"
+            start_time = time.monotonic()
+            poll_data: Dict[str, Any] = {}
+
+            while True:
+                elapsed = time.monotonic() - start_time
+                if elapsed >= timeout:
+                    raise TimeoutError(
+                        f"OpenRouter video generation timed out after {timeout}s "
+                        f"(job {job_id})"
+                    )
+
+                await asyncio.sleep(poll_interval)
+
+                async with session.get(poll_url, headers=headers) as resp:
+                    if resp.status != 200:
+                        error_msg = _error_messages.get(
+                            resp.status, f"Unexpected status {resp.status}"
+                        )
+                        detail = await resp.text()
+                        raise RuntimeError(
+                            f"OpenRouter video poll failed: {error_msg} — {detail}"
+                        )
+                    poll_data = await resp.json()
+
+                status = poll_data.get("status", "")
+                if status == "completed":
+                    break
+                elif status == "failed":
+                    error = poll_data.get("error", "unknown error")
+                    raise RuntimeError(
+                        f"OpenRouter video generation failed: {error} (job {job_id})"
+                    )
+                # else pending/in_progress — keep polling
+
+            # Step 3: Download video from unsigned URL
+            unsigned_urls = poll_data.get("unsigned_urls", [])
+            if not unsigned_urls:
+                raise RuntimeError(
+                    f"OpenRouter video completed but no URLs returned (job {job_id})"
+                )
+
+            video_url = unsigned_urls[0]
+            video_data_bytes: Optional[bytes] = None
+            async with session.get(video_url) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(
+                        f"Failed to download video from {video_url}: HTTP {resp.status}"
+                    )
+                video_data_bytes = await resp.read()
+
+        # Build response objects
+        import base64
+
+        video_b64 = base64.b64encode(video_data_bytes).decode("utf-8")
+        usage_data = poll_data.get("usage", {})
+        cost = usage_data.get("cost")
+
+        file_out = FileOutput(
+            url=video_url,
+            data=video_b64,
+            mime_type="video/mp4",
+            filename="generated_video.mp4",
+        )
+        video_out = VideoOutput(
+            url=video_url,
+            data=video_b64,
+            mime_type="video/mp4",
+            filename="generated_video.mp4",
+            cost_usd=cost,
+        )
+
+        return MultimodalResponse(
+            text=prompt,
+            audio=None,
+            images=[],
+            files=[file_out],
+            videos=[video_out],
+            raw_response=poll_data,
+            cost_usd=cost,
         )
 
     async def generate_audio(
