@@ -117,7 +117,7 @@ export class OpenRouterMediaProvider implements MediaProvider {
     // Download video bytes if URL available
     let videoData: string | undefined;
     if (videoUrl) {
-      const dlRes = await fetch(videoUrl);
+      const dlRes = await fetch(videoUrl, { signal: AbortSignal.timeout(120_000) });
       if (dlRes.ok) {
         const buf = Buffer.from(await dlRes.arrayBuffer());
         videoData = buf.toString('base64');
@@ -211,7 +211,8 @@ export class OpenRouterMediaProvider implements MediaProvider {
       },
     };
 
-    const res = await this.post(`${this.baseUrl}/chat/completions`, body);
+    const audioTimeout = request.timeout ?? 120_000;
+    const res = await this.post(`${this.baseUrl}/chat/completions`, body, audioTimeout);
     if (!res.ok) {
       throw new Error(`Audio generation failed: ${res.status} ${await res.text()}`);
     }

@@ -35,6 +35,7 @@ export interface AudioRequest {
   model?: string;
   voice?: string;
   format?: string;
+  timeout?: number; // ms, overall timeout for the SSE stream
 }
 
 export interface MediaResponse {
