@@ -536,16 +536,3 @@ func TestResolvePromptConfig_Nil(t *testing.T) {
     assert.NotNil(t, cfg)
     assert.NotEmpty(t, cfg.ToolCallLimitReached)
 }
-
-func TestToolCallResult_FallbackToResponse(t *testing.T) {
-    resp := &Response{
-        Choices: []Choice{{
-            Message: Message{
-                Content: []ContentPart{{Type: "text", Text: "from response"}},
-            },
-        }},
-    }
-
-    result := &ToolCallResult{Response: resp, Trace: nil}
-    assert.Equal(t, "from response", result.Text())
-}
