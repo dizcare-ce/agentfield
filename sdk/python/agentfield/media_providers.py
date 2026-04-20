@@ -11,6 +11,7 @@ Each provider implements the same interface, making it easy to swap
 backends or add new ones without changing agent code.
 """
 
+import ipaddress
 import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -752,6 +753,35 @@ MAX_AUDIO_B64_BYTES = (
 )  # 500 MB hard limit for accumulated audio base64
 
 
+def _assert_safe_download_url(url: str) -> None:
+    parsed_url = urlparse(url)
+    if parsed_url.scheme != "https":
+        raise RuntimeError(f"Refusing to download video from non-HTTPS URL: {url}")
+
+    hostname = parsed_url.hostname
+    if not hostname:
+        raise RuntimeError(f"Refusing to download video from invalid URL: {url}")
+
+    normalized_host = hostname.lower().rstrip(".")
+    if normalized_host in {"localhost", "0.0.0.0"}:
+        raise RuntimeError(f"Refusing to download video from localhost: {url}")
+
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return
+
+    if (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
+        or address.is_reserved
+        or address.is_multicast
+    ):
+        raise RuntimeError(f"Refusing to download video from private IP: {url}")
+
+
 class OpenRouterProvider(MediaProvider):
     """
     OpenRouter provider for image generation via chat completions.
@@ -993,11 +1023,7 @@ class OpenRouterProvider(MediaProvider):
                 )
 
             video_url = unsigned_urls[0]
-            parsed_url = urlparse(video_url)
-            if parsed_url.scheme not in ("https",):
-                raise RuntimeError(
-                    f"Refusing to download video from non-HTTPS URL: {video_url}"
-                )
+            _assert_safe_download_url(video_url)
 
             video_data_bytes: Optional[bytes] = None
             # Download without auth headers — video_url is a public CDN URL

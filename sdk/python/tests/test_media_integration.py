@@ -303,6 +303,49 @@ class TestOpenRouterVideoE2E:
                 )
 
     @pytest.mark.asyncio
+    async def test_video_rejects_private_download_url(self):
+        """SSRF protection: refuse private IP download URL."""
+        provider = OpenRouterProvider(api_key="test-key")
+
+        submit_resp = AsyncMock()
+        submit_resp.status = 202
+        submit_resp.json = AsyncMock(return_value={"id": "job-private"})
+
+        poll_resp = AsyncMock()
+        poll_resp.status = 200
+        poll_resp.json = AsyncMock(
+            return_value={
+                "status": "completed",
+                "unsigned_urls": ["https://192.168.1.10/video.mp4"],
+            }
+        )
+
+        submit_cm = AsyncMock()
+        submit_cm.__aenter__ = AsyncMock(return_value=submit_resp)
+        submit_cm.__aexit__ = AsyncMock(return_value=False)
+
+        poll_cm = AsyncMock()
+        poll_cm.__aenter__ = AsyncMock(return_value=poll_resp)
+        poll_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=submit_cm)
+        mock_session.get = MagicMock(return_value=poll_cm)
+
+        session_cm = AsyncMock()
+        session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("aiohttp.ClientSession", return_value=session_cm):
+            with pytest.raises(RuntimeError, match="private IP"):
+                await provider.generate_video(
+                    prompt="test",
+                    model="openrouter/google/veo-2.0-generate-001",
+                    poll_interval=0.01,
+                    timeout=2.0,
+                )
+
+    @pytest.mark.asyncio
     async def test_video_generation_failed_status(self):
         """Provider returns status=failed."""
         provider = OpenRouterProvider(api_key="test-key")

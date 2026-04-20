@@ -412,13 +412,6 @@ class MultimodalResponse:
             file.save(file_path)
             saved_files[f"file_{i}"] = str(file_path)
 
-        # Save videos
-        for i, video in enumerate(self._videos):
-            filename = video.filename or f"{prefix}_video_{i}.mp4"
-            video_path = directory / filename
-            video.save(video_path)
-            saved_files[f"video_{i}"] = str(video_path)
-
         # Save text content
         if self._text:
             text_path = directory / f"{prefix}_text.txt"

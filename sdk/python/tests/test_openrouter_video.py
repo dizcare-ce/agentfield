@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agentfield.media_providers import OpenRouterProvider
+from agentfield.media_providers import OpenRouterProvider, _assert_safe_download_url
 from agentfield.multimodal_response import (
     MultimodalResponse,
     VideoOutput,
@@ -149,6 +149,26 @@ class TestOpenRouterVideoHappyPath:
 
         assert result.has_videos
         assert result.cost_usd == 0.10
+
+
+class TestOpenRouterVideoDownloadSafety:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://127.0.0.1/video.mp4",
+            "https://localhost/video.mp4",
+            "https://10.0.0.5/video.mp4",
+            "https://172.16.0.1/video.mp4",
+            "https://192.168.1.10/video.mp4",
+            "https://169.254.1.1/video.mp4",
+        ],
+    )
+    def test_rejects_localhost_and_private_download_urls(self, url):
+        with pytest.raises(RuntimeError, match="Refusing to download"):
+            _assert_safe_download_url(url)
+
+    def test_allows_https_public_download_url(self):
+        _assert_safe_download_url(UNSIGNED_URL)
 
 
 class TestOpenRouterVideoTimeout:
