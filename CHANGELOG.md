@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.70-rc.1] - 2026-04-20
+
+
+### Other
+
+- Security(deps): bump pytest to >=9.0.3 to fix CVE-2025-71176
+
+The project requires Python >=3.10 (see pyproject.toml), so the
+`python_version<'3.10'` constraints pinning pytest to 8.x were dead code
+that Dependabot still flagged as vulnerable. Drop them along with the
+other now-redundant Python <3.10 conditionals.
+
+Fixes GHSA-6w46-j5rx-g56g / CVE-2025-71176 (pytest tmpdir handling,
+vulnerable in <9.0.3).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (fbbd02f)
+
 ## [0.1.69] - 2026-04-20
 
 ## [0.1.69-rc.15] - 2026-04-20
