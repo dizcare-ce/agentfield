@@ -6,6 +6,179 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.70-rc.1] - 2026-04-20
+
+
+### Other
+
+- Security(deps): bump pytest to >=9.0.3 to fix CVE-2025-71176
+
+The project requires Python >=3.10 (see pyproject.toml), so the
+`python_version<'3.10'` constraints pinning pytest to 8.x were dead code
+that Dependabot still flagged as vulnerable. Drop them along with the
+other now-redundant Python <3.10 conditionals.
+
+Fixes GHSA-6w46-j5rx-g56g / CVE-2025-71176 (pytest tmpdir handling,
+vulnerable in <9.0.3).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (fbbd02f)
+
+## [0.1.69] - 2026-04-20
+
+## [0.1.69-rc.15] - 2026-04-20
+
+## [0.1.69-rc.14] - 2026-04-20
+
+## [0.1.69-rc.13] - 2026-04-20
+
+## [0.1.69-rc.12] - 2026-04-20
+
+
+### Fixed
+
+- Fix(control-plane): rescue nodes stuck in lifecycle_status=starting
+
+Agents that register and then send heartbeats indefinitely with
+status="starting" (notably the Python SDK, whose _current_status is
+initialized to STARTING and only ever transitions to OFFLINE on shutdown)
+were left wedged in lifecycle_status="starting" forever:
+
+- needsReconciliation() only fired for stuck-starting agents when their
+  heartbeat was ALSO stale, which never happens for a healthy agent
+  heartbeating every 2s.
+- reconcileAgentStatus() only promoted empty/offline → ready; it preserved
+  "starting" even when the heartbeat was fresh.
+- The UpdateAgentStatus auto-sync also only promoted offline/empty → ready
+  when state flipped to Active, so a successful HTTP health check couldn't
+  pull an agent out of "starting" either.
+- Every "starting" heartbeat from the SDK re-asserted lifecycle_status=
+  "starting" via UpdateFromHeartbeat, clobbering any promotion.
+
+This patch:
+
+- Adds a reconciliation rule for agents stuck in "starting" past
+  MaxTransitionTime since RegisteredAt with a FRESH heartbeat — the
+  fresh heartbeat proves liveness, registration age proves startup is done.
+- Promotes "starting" → "ready" in reconcileAgentStatus when the heartbeat
+  is fresh.
+- Promotes "starting" → "ready" in the UpdateAgentStatus auto-sync when
+  state transitions to Active (e.g. successful HTTP health check).
+- Guards UpdateFromHeartbeat so "starting" heartbeats don't regress an
+  already-promoted "ready"/"degraded" agent.
+
+Adds three tests covering the full scenario end-to-end: reconciliation
+rescues the stuck node, repeated "starting" heartbeats do not regress it,
+and health-check-driven Active state also promotes "starting" → "ready".
+
+Fixes #484 (c9c2242)
+
+## [0.1.69-rc.11] - 2026-04-20
+
+
+### Testing
+
+- Tests: improve coverage for process_logs.go (ring eviction, snapshot, NDJSON) (e4e7e96)
+
+## [0.1.69-rc.10] - 2026-04-20
+
+
+### Fixed
+
+- Fix(web-ui): clear sidebar-close timeout on unmount
+
+handleCloseSidebar scheduled a 300ms setTimeout to clear the selected
+node after the close animation, but never tracked the handle. If the
+component unmounted within that window — common in tests — the timer
+still fired, called setState on an unmounted component, and React's
+internals threw "ReferenceError: window is not defined" after the test
+environment was torn down. Track the handle in a ref, clear on
+re-invocation, and clear on unmount.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (cb0d5b4)
+
+
+
+### Testing
+
+- Test(web-ui): cover sidebar-close timer cancel + deferred run
+
+Adds a test that opens, closes, reopens, and recloses the sidebar to
+exercise the clearTimeout branch on a pending handle, then waits long
+enough for the deferred setSelectedNode(null) callback to actually
+execute. Brings patch coverage on this PR's touched lines from 76% to
+100%.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (9aa1b66)
+
+## [0.1.69-rc.9] - 2026-04-20
+
+
+### Testing
+
+- Test(sdk-go): fix flaky DurationMS assertion in runner test
+
+The stub opencode provider can return in under 1ms on fast CI runners,
+making int(time.Since(start).Milliseconds()) round to 0 and failing
+assert.Positive. Switch to GreaterOrEqual(0) — a non-negative duration
+is the real invariant; sub-ms timing is not.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (98aa568)
+
+## [0.1.69-rc.8] - 2026-04-20
+
+
+### Added
+
+- Feat/refactor tool-calling, add ToolCallResult, PromptConfig, and sanitization(#234) (911009a)
+
+
+
+### Other
+
+- Added more unit tests for coverage(#234) (a88d3f4)
+
+- Added more unit tests for coverage(#234) (b597071)
+
+## [0.1.69-rc.7] - 2026-04-20
+
+
+### Added
+
+- Feat: implement Agent.stop() in python sdk (a641558)
+
+## [Unreleased]
+
+### Added
+
+- Feat: implement Agent.stop() in python sdk
+
+Implements `Agent.stop()` method that performs a clean async shutdown of an agent instance:
+- Marks agent as shutting down and transitions status to OFFLINE
+- Stops heartbeat background worker
+- Notifies AgentField control plane of graceful shutdown (best effort)
+- Cleans up async execution resources, memory event clients, and connection managers
+- Idempotent: repeated calls have no additional effect after the first
+
+Useful for applications that manage agent lifecycle programmatically (e.g.,
+context managers, signal handlers, test teardown). Uses try/except around each
+cleanup step so failures in one subsystem don't prevent cleanup of others.
+
+### Testing
+
+- Test(sdk-python): strengthen Agent.stop() idempotency and branch coverage
+
+Expanded `test_agent_stop_is_idempotent` with mock assertions verifying that all
+cleanup side effects (heartbeat stop, shutdown notification, connection manager
+stop, memory client close, async resource cleanup) are invoked exactly once across
+two consecutive stop() calls.
+
+Added `test_agent_stop_skips_shutdown_notification_when_not_connected` to verify
+graceful degradation: when `agentfield_connected=False`, the shutdown notification
+is skipped but local cleanup still runs.
+
+Removed obsolete TODO and dead implementation guard (`pytest.skip`); Agent.stop()
+is now fully implemented.
+
 ## [0.1.69-rc.6] - 2026-04-17
 
 
