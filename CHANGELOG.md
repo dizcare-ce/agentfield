@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.71-rc.2] - 2026-04-21
+
+
+### Changed
+
+- Refactor(server): split server.go into focused routes_*.go files
+
+server.go grew into a 1,839-line god file. This extracts the HTTP route
+registration into nine concern-focused files, leaving server.go as a
+thin orchestrator that just composes the surface:
+
+- routes_middleware.go  — CORS, logger, timeout, API key + DID auth
+- routes_core.go        — /api/v1 node lifecycle, discovery, execute,
+                          approvals, notes, health
+- routes_memory.go      — /api/v1/memory key-value, vector, events
+- routes_did.go         — /.well-known/did.json and DID management
+- routes_ui.go          — UI static serving + /api/ui/v1,v2 tree + 404
+- routes_observability.go — /api/v1/settings/observability-webhook
+- routes_admin.go       — tag approval, access policy, config storage
+- routes_connector.go   — /api/v1/connector/* (token-gated)
+- routes_agentic.go     — /api/v1/agentic + public KB group
+
+Changes are pure code movement. No routes added, removed, or renamed;
+handler logic is untouched; order of registration preserved so Gin's
+middleware chain is identical. A DUMP_ROUTES snapshot diff confirms
+the 162-route table is byte-for-byte identical before and after.
+
+server.go drops from 1839 → 753 lines and now contains only:
+struct, NewAgentFieldServer, configReloadFn, initAPICatalog,
+initKnowledgeBase, Start/Stop/startAdminGRPCServer, ListReasoners,
+setupRoutes (30-line orchestrator), generateAgentFieldServerID.
+
+Closes #414. (29eb6fc)
+
 ## [0.1.71-rc.1] - 2026-04-21
 
 
