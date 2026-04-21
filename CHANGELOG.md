@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.71-rc.5] - 2026-04-21
+
+
+### Testing
+
+- Test(skillkit): cover slash-command error paths for patch gate (#497)
+
+Add three subtests exercising the mkdir/remove/symlink failure
+branches in claudeCodeTarget.Install so the patch-coverage gate
+clears 80% on the slash-command shipping change. (f95dbc7)
+
 ## [0.1.71-rc.4] - 2026-04-21
 
 
