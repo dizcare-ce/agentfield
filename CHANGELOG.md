@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.71-rc.1] - 2026-04-21
+
+
+### Changed
+
+- Refactor(vc): extract vc_chain.go from vc_service.go
+
+Move GetWorkflowVCChain and collectDIDResolutionBundle to a dedicated
+chain-assembly file. vc_service.go is now a slim 159-line file with
+the service struct, lifecycle methods, status summaries, and shared
+helpers (hashData, generateVCID, marshalDataOrNull).
+
+Pure file move: no symbol renames or logic changes.
+
+Refs #415 (99651cc)
+
+- Refactor(vc): extract vc_validation.go from vc_service.go
+
+Move VC verification methods and result types to a dedicated file.
+Pure file move: no symbol renames or logic changes.
+
+Refs #415 (fff0b39)
+
+- Refactor(vc): extract vc_resolution.go from vc_service.go
+
+Pure move of read-path query helpers into vc_resolution.go. Same
+services package, no behavior change.
+
+Moves: QueryExecutionVCs, GetExecutionVCByExecutionID, ListWorkflowVCs,
+ListAgentTagVCs.
+
+Refs #415 (44cf39e)
+
+- Refactor(vc): extract vc_issuance.go from vc_service.go
+
+Pure move of execution/workflow VC issuance + signing logic into its
+own file within the same services package. No behavior change.
+
+Moves: GenerateExecutionVC, CreateWorkflowVC, createVCDocument, signVC,
+SignAgentTagVC, generateWorkflowVCDocument, createWorkflowVCDocument,
+signWorkflowVC, determineWorkflowStatus, countCompletedSteps.
+
+Refs #415 (0becd27)
+
 ## [0.1.70] - 2026-04-20
 
 ## [0.1.70-rc.3] - 2026-04-20
