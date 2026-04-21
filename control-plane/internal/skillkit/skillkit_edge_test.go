@@ -598,6 +598,72 @@ func TestTargetSpecificEdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("claude install replaces a regular file at the slash-command destination", func(t *testing.T) {
+		home := withTempHome(t)
+		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755); err != nil {
+			t.Fatalf("mkdir claude root: %v", err)
+		}
+		cmdDst := filepath.Join(home, ".claude", "commands")
+		if err := os.MkdirAll(cmdDst, 0o755); err != nil {
+			t.Fatalf("mkdir commands: %v", err)
+		}
+		stale := filepath.Join(cmdDst, "agentfield.md")
+		if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+			t.Fatalf("write stale: %v", err)
+		}
+
+		current := filepath.Join(t.TempDir(), "current")
+		cmdDir := filepath.Join(current, "commands")
+		if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+			t.Fatalf("mkdir cmdDir: %v", err)
+		}
+		cmdSrc := filepath.Join(cmdDir, "agentfield.md")
+		if err := os.WriteFile(cmdSrc, []byte("fresh"), 0o644); err != nil {
+			t.Fatalf("write fresh: %v", err)
+		}
+
+		claude := claudeCodeTarget{}
+		if _, err := claude.Install(Catalog[0], current); err != nil {
+			t.Fatalf("Install: %v", err)
+		}
+		info, err := os.Lstat(stale)
+		if err != nil {
+			t.Fatalf("lstat after install: %v", err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("stale regular file was not replaced with a symlink (mode=%v)", info.Mode())
+		}
+		if dest, err := os.Readlink(stale); err != nil || dest != cmdSrc {
+			t.Fatalf("readlink = %q err=%v want %q", dest, err, cmdSrc)
+		}
+	})
+
+	t.Run("claude install fails when skill commands path is not a directory", func(t *testing.T) {
+		home := withTempHome(t)
+		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755); err != nil {
+			t.Fatalf("mkdir claude root: %v", err)
+		}
+		// current/ contains a regular file named "commands" — ReadDir on it
+		// returns a non-IsNotExist error, which installCommands must surface
+		// and Install must wrap.
+		current := filepath.Join(t.TempDir(), "current")
+		if err := os.MkdirAll(current, 0o755); err != nil {
+			t.Fatalf("mkdir current: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(current, "commands"), []byte("not-a-dir"), 0o644); err != nil {
+			t.Fatalf("write commands file: %v", err)
+		}
+
+		claude := claudeCodeTarget{}
+		_, err := claude.Install(Catalog[0], current)
+		if err == nil {
+			t.Fatalf("Install should fail when commands path is not a directory")
+		}
+		if !strings.Contains(err.Error(), "install commands") {
+			t.Fatalf("error should be wrapped as install commands error, got: %v", err)
+		}
+	})
+
 	t.Run("marker targets report empty status after plain file uninstall", func(t *testing.T) {
 		home := withTempHome(t)
 		type targetCase struct {
