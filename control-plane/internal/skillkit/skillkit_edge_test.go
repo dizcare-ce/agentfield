@@ -524,6 +524,80 @@ func TestTargetSpecificEdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("claude install exposes slash commands and uninstall removes them", func(t *testing.T) {
+		home := withTempHome(t)
+		if err := os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755); err != nil {
+			t.Fatalf("mkdir claude root: %v", err)
+		}
+
+		// Build a fake canonical current/ dir with a commands/ subdir.
+		current := filepath.Join(t.TempDir(), "current")
+		cmdDir := filepath.Join(current, "commands")
+		if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+			t.Fatalf("mkdir cmdDir: %v", err)
+		}
+		cmdSrc := filepath.Join(cmdDir, "agentfield.md")
+		if err := os.WriteFile(cmdSrc, []byte("---\ndescription: test\n---\n\nbody\n"), 0o644); err != nil {
+			t.Fatalf("write command: %v", err)
+		}
+		// A non-md sibling and a directory should be ignored by the installer.
+		if err := os.WriteFile(filepath.Join(cmdDir, "readme.txt"), []byte("skip"), 0o644); err != nil {
+			t.Fatalf("write non-md: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(cmdDir, "nested"), 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+
+		// Point canonical root at the fake current/ via symlink at
+		// <canonical>/<skill>/current so Uninstall() can find the commands.
+		root, err := CanonicalRoot()
+		if err != nil {
+			t.Fatalf("CanonicalRoot: %v", err)
+		}
+		skillDir := filepath.Join(root, Catalog[0].Name)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatalf("mkdir skillDir: %v", err)
+		}
+		if err := os.Symlink(current, filepath.Join(skillDir, "current")); err != nil {
+			t.Fatalf("symlink current: %v", err)
+		}
+
+		claude := claudeCodeTarget{}
+		if _, err := claude.Install(Catalog[0], current); err != nil {
+			t.Fatalf("Install: %v", err)
+		}
+
+		cmdLink := filepath.Join(home, ".claude", "commands", "agentfield.md")
+		info, err := os.Lstat(cmdLink)
+		if err != nil {
+			t.Fatalf("command link missing: %v", err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("expected symlink, got mode %v", info.Mode())
+		}
+		if dest, err := os.Readlink(cmdLink); err != nil || dest != cmdSrc {
+			t.Fatalf("readlink = %q err=%v want %q", dest, err, cmdSrc)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".claude", "commands", "readme.txt")); !os.IsNotExist(err) {
+			t.Fatalf("non-md sibling should be ignored, stat err=%v", err)
+		}
+
+		// Re-install is idempotent: replaces existing link.
+		if _, err := claude.Install(Catalog[0], current); err != nil {
+			t.Fatalf("re-Install: %v", err)
+		}
+		if dest, err := os.Readlink(cmdLink); err != nil || dest != cmdSrc {
+			t.Fatalf("re-install readlink = %q err=%v want %q", dest, err, cmdSrc)
+		}
+
+		if err := claude.Uninstall(); err != nil {
+			t.Fatalf("Uninstall: %v", err)
+		}
+		if _, err := os.Lstat(cmdLink); !os.IsNotExist(err) {
+			t.Fatalf("command link should be removed, stat err=%v", err)
+		}
+	})
+
 	t.Run("marker targets report empty status after plain file uninstall", func(t *testing.T) {
 		home := withTempHome(t)
 		type targetCase struct {

@@ -83,7 +83,13 @@ Works in Claude Code, Codex, Gemini CLI, OpenCode, Aider, Windsurf, and Cursor.
 curl -fsSL https://agentfield.ai/install.sh | bash
 ```
 
-Now paste any of these into your coding agent — no slash command:
+In Claude Code, fire it with the shipped slash command:
+
+```text
+/agentfield a claims processor with risk scoring and human approval
+```
+
+Or paste any of these directly — the skill auto-matches, no slash command needed:
 
 ```text
 Build a claims-processor agent with risk scoring, pattern detection,
@@ -95,6 +101,8 @@ into deeper sub-questions until the answer has citation-grade provenance.
 Build a compliance reviewer for support transcripts — extract claims,
 check each against policy, flag violations, emit a signed audit trail.
 ```
+
+You get a Docker Compose stack already wired up — the agent, the control plane, and a local `curl` you paste into a terminal to try it.
 
 [See it in action →](https://agentfield.ai/docs/learn/build-with-claude-code?utm_source=github-readme&utm_campaign=github-readme&utm_id=github-readme-prompt-to-production)
 
