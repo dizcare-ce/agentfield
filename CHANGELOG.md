@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.72-rc.1] - 2026-04-22
+
+
+### Added
+
+- Feat/added did client methods testing in e2e integration tests(#92) (f1b0c50)
+
+- Feat/added verifyCredential getWorkflowVcChain and createWorkflowVc and respective unit tests in Ts SDK (#92) (1bd05a1)
+
+
+
+### Changed
+
+- Refactor(typescript-sdk): drop misleading signature param from verifyCredential
+
+The control plane's VCVerificationRequest only binds vc_document, so
+the optional signature argument was silently dropped by the server.
+Align the TypeScript surface with the Python VCGenerator, which omits
+it as well.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (6f6029a)
+
 ## [0.1.71] - 2026-04-21
 
 ## [0.1.71-rc.5] - 2026-04-21
