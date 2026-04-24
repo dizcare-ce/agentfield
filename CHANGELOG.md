@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.72-rc.3] - 2026-04-24
+
+
+### Chores
+
+- Chore(deps): bump litellm
+
+Bumps the uv group with 1 update in the /sdk/python directory: [litellm](https://github.com/BerriAI/litellm).
+
+
+Updates `litellm` from 1.83.0 to 1.83.7
+- [Release notes](https://github.com/BerriAI/litellm/releases)
+- [Commits](https://github.com/BerriAI/litellm/commits)
+
+---
+updated-dependencies:
+- dependency-name: litellm
+  dependency-version: 1.83.7
+  dependency-type: direct:production
+  dependency-group: uv
+...
+
+Signed-off-by: dependabot[bot] <support@github.com> (8e78b5f)
+
 ## [0.1.72-rc.2] - 2026-04-23
 
 ## [0.1.72-rc.1] - 2026-04-22
