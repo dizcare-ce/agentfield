@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.72-rc.6] - 2026-04-27
+
+
+### Added
+
+- Feat(sdk-python): introduce domain-specific exception hierarchy (#502)
+
+* feat(sdk-python): introduce domain-specific exception hierarchy
+Replace generic RuntimeError/Exception raises with typed exceptions
+(AgentFieldClientError, ExecutionTimeoutError, etc.) across agent.py,
+async_execution_manager.py, http_connection_manager.py, router.py,
+and utils.py. Update tests to assert on the new exception types.
+Also fix a flaky timing issue in test_health_check_error_triggers_reconnection
+by increasing the sleep from 0.05s to 0.07s.
+
+* docs(sdk-python): describe actual 0.1.3 changes in CHANGELOG
+
+The 0.1.3 entry was copy-pasted from 0.1.2 and incorrectly claimed "no
+SDK behavior changes" — but this release introduces the typed exception
+hierarchy and changes which exception types are raised by several public
+APIs. Document the change and call out the backward-incompatible bits
+so users catching builtin RuntimeError/TimeoutError know to update.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* revert(sdk-python): drop CHANGELOG changes from this PR
+
+CHANGELOG flow needs to be addressed separately — keep this PR scoped
+to the exception hierarchy refactor.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (2d2692d)
+
 ## [0.1.72-rc.5] - 2026-04-25
 
 ## [0.1.72-rc.4] - 2026-04-25
