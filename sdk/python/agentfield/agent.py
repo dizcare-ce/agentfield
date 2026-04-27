@@ -86,6 +86,10 @@ class ReasonerEntry:
     output_type: type
     tags: List[str] = field(default_factory=list)
     vc_enabled: Optional[bool] = None
+    # Trigger bindings declared via @reasoner(triggers=[...]) or sugar
+    # decorators @on_event / @on_schedule. The control plane upserts a
+    # code-managed Trigger row per binding at registration.
+    triggers: List[Any] = field(default_factory=list)
     # Note: input_schema and output_schema are generated on-demand via _get_handler_schema()
 
 
@@ -790,6 +794,11 @@ class Agent(FastAPI):
             if entry.vc_enabled is not None
             else self._agent_vc_enabled,
         }
+        triggers = getattr(entry, "triggers", None)
+        if kind == "reasoner" and triggers:
+            from .triggers import trigger_to_payload  # local import to avoid cycle
+
+            metadata["triggers"] = [trigger_to_payload(t) for t in triggers]
         return metadata
 
     def _types_to_json_schema(self, input_types: Dict[str, tuple]) -> Dict:
@@ -1795,6 +1804,9 @@ class Agent(FastAPI):
             vc_setting = self._effective_component_vc_setting(
                 reasoner_id, self._reasoner_vc_overrides
             )
+            decorator_triggers = getattr(original_func, "_reasoner_triggers", None)
+            if not decorator_triggers:
+                decorator_triggers = getattr(tracked_func, "_reasoner_triggers", None)
             self._reasoner_registry[reasoner_id] = ReasonerEntry(
                 id=reasoner_id,
                 func=func,
@@ -1802,6 +1814,7 @@ class Agent(FastAPI):
                 output_type=return_type,
                 tags=resolved_tags,
                 vc_enabled=vc_setting,
+                triggers=list(decorator_triggers or []),
             )
 
             # NOTE: Legacy storage removed - reasoners property generates list on-demand

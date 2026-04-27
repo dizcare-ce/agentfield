@@ -126,6 +126,124 @@ type Reasoner struct {
 	// RequireRealtimeValidation forces control-plane verification for this
 	// reasoner, skipping local verification even when enabled.
 	RequireRealtimeValidation bool
+
+	// Triggers declares external Sources whose events should invoke this
+	// reasoner. Bindings are sent at registration time; the control plane
+	// upserts a code-managed Trigger per binding. The canonical form is
+	// WithTriggers(...); the WithEventTrigger / WithScheduleTrigger helpers
+	// are sugar that append to this slice.
+	Triggers []types.TriggerBinding
+}
+
+// EventTrigger describes an external event source binding for a reasoner.
+// Use it as a typed argument to WithTriggers — the control plane registers
+// the binding and minting of the public ingest URL happens server-side.
+type EventTrigger struct {
+	Source       string
+	Types        []string
+	SecretEnv    string
+	Config       map[string]any
+}
+
+// ScheduleTrigger describes a cron-style schedule binding for a reasoner.
+// Use it as a typed argument to WithTriggers; the control plane runs the
+// schedule and dispatches a synthetic "tick" event when it fires.
+type ScheduleTrigger struct {
+	Cron     string
+	Timezone string
+}
+
+// WithTriggers is the canonical decorator-equivalent for declaring trigger
+// bindings on a Go reasoner. Pass a mix of EventTrigger and ScheduleTrigger
+// values; unknown types are silently ignored so adding new kinds later is
+// backward compatible.
+func WithTriggers(triggers ...any) ReasonerOption {
+	return func(r *Reasoner) {
+		for _, t := range triggers {
+			binding, ok := triggerToBinding(t)
+			if !ok {
+				continue
+			}
+			r.Triggers = append(r.Triggers, binding)
+		}
+	}
+}
+
+// WithEventTrigger is sugar that appends a single EventTrigger to the
+// reasoner's bindings. It is equivalent to
+// WithTriggers(EventTrigger{Source: source, Types: types}).
+func WithEventTrigger(source string, eventTypes ...string) ReasonerOption {
+	return func(r *Reasoner) {
+		b, _ := triggerToBinding(EventTrigger{Source: source, Types: eventTypes})
+		r.Triggers = append(r.Triggers, b)
+	}
+}
+
+// WithScheduleTrigger is sugar for declaring a single cron schedule. The
+// expression follows the standard 5-field cron format.
+func WithScheduleTrigger(expression string) ReasonerOption {
+	return func(r *Reasoner) {
+		b, _ := triggerToBinding(ScheduleTrigger{Cron: expression})
+		r.Triggers = append(r.Triggers, b)
+	}
+}
+
+// WithTriggerSecretEnv attaches a secret env var name to the most recently
+// declared trigger binding on the reasoner. Use it after WithEventTrigger
+// when the source requires a secret (Stripe, GitHub, Slack, generic_hmac).
+func WithTriggerSecretEnv(envVar string) ReasonerOption {
+	return func(r *Reasoner) {
+		if len(r.Triggers) == 0 {
+			return
+		}
+		r.Triggers[len(r.Triggers)-1].SecretEnvVar = envVar
+	}
+}
+
+// WithTriggerConfig attaches a config blob to the most recently declared
+// trigger binding. Source impls validate the config server-side.
+func WithTriggerConfig(cfg map[string]any) ReasonerOption {
+	return func(r *Reasoner) {
+		if len(r.Triggers) == 0 {
+			return
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return
+		}
+		r.Triggers[len(r.Triggers)-1].Config = raw
+	}
+}
+
+// triggerToBinding normalizes typed trigger values into the wire payload.
+func triggerToBinding(t any) (types.TriggerBinding, bool) {
+	switch v := t.(type) {
+	case EventTrigger:
+		var cfg json.RawMessage
+		if len(v.Config) > 0 {
+			if raw, err := json.Marshal(v.Config); err == nil {
+				cfg = raw
+			}
+		}
+		return types.TriggerBinding{
+			Source:       v.Source,
+			EventTypes:   v.Types,
+			Config:       cfg,
+			SecretEnvVar: v.SecretEnv,
+		}, true
+	case ScheduleTrigger:
+		tz := v.Timezone
+		if tz == "" {
+			tz = "UTC"
+		}
+		cfg, _ := json.Marshal(map[string]any{
+			"expression": v.Cron,
+			"timezone":   tz,
+		})
+		return types.TriggerBinding{Source: "cron", Config: cfg}, true
+	default:
+		return types.TriggerBinding{}, false
+	}
 }
 
 // WithVCEnabled overrides VC generation for this specific reasoner.
@@ -674,6 +792,7 @@ func (a *Agent) registerNode(ctx context.Context) error {
 			OutputSchema: reasoner.OutputSchema,
 			Tags:         reasoner.Tags,
 			ProposedTags: reasoner.Tags,
+			Triggers:     reasoner.Triggers,
 		})
 	}
 

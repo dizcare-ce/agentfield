@@ -437,9 +437,13 @@ type ObservabilityWebhookModel struct {
 
 func (ObservabilityWebhookModel) TableName() string { return "observability_webhooks" }
 
-// ObservabilityDeadLetterQueueModel represents failed observability events for retry.
+// ObservabilityDeadLetterQueueModel represents failed events for retry. The
+// Kind discriminator distinguishes the original "observability" forwarder
+// queue from "inbound_dispatch" failures emitted by the trigger dispatcher,
+// so a single DLQ table serves both pipelines.
 type ObservabilityDeadLetterQueueModel struct {
 	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	Kind           string    `gorm:"column:kind;not null;default:'observability';index"`
 	EventType      string    `gorm:"column:event_type;not null"`
 	EventSource    string    `gorm:"column:event_source;not null"`
 	EventTimestamp time.Time `gorm:"column:event_timestamp;not null"`
@@ -450,6 +454,45 @@ type ObservabilityDeadLetterQueueModel struct {
 }
 
 func (ObservabilityDeadLetterQueueModel) TableName() string { return "observability_dead_letter_queue" }
+
+// TriggerModel persists a Trigger row. Each row is one binding from a Source
+// instance to a target reasoner; code-managed rows are upserted on agent
+// registration and cannot be deleted via the UI.
+type TriggerModel struct {
+	ID             string    `gorm:"column:id;primaryKey"`
+	SourceName     string    `gorm:"column:source_name;not null;index"`
+	ConfigJSON     string    `gorm:"column:config_json;not null;default:'{}'"`
+	SecretEnvVar   string    `gorm:"column:secret_env_var;not null;default:''"`
+	TargetNodeID   string    `gorm:"column:target_node_id;not null;index"`
+	TargetReasoner string    `gorm:"column:target_reasoner;not null"`
+	EventTypes     string    `gorm:"column:event_types;not null;default:'[]'"`
+	ManagedBy      string    `gorm:"column:managed_by;not null;default:'ui'"`
+	Enabled        bool      `gorm:"column:enabled;not null;default:true"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (TriggerModel) TableName() string { return "triggers" }
+
+// InboundEventModel persists one delivery from a Source. The unique index on
+// (source_name, idempotency_key) is enforced at the SQL level via the
+// migration; here we let GORM auto-create the indexes used for browsing.
+type InboundEventModel struct {
+	ID                string     `gorm:"column:id;primaryKey"`
+	TriggerID         string     `gorm:"column:trigger_id;not null;index"`
+	SourceName        string     `gorm:"column:source_name;not null;index:idx_inbound_events_idempotency,priority:1"`
+	EventType         string     `gorm:"column:event_type;not null;default:''"`
+	RawPayload        string     `gorm:"column:raw_payload;not null;default:''"`
+	NormalizedPayload string     `gorm:"column:normalized_payload;not null;default:''"`
+	IdempotencyKey    string     `gorm:"column:idempotency_key;not null;default:'';index:idx_inbound_events_idempotency,priority:2"`
+	VCID              string     `gorm:"column:vc_id;not null;default:''"`
+	Status            string     `gorm:"column:status;not null;default:'received'"`
+	ErrorMessage      string     `gorm:"column:error_message;not null;default:''"`
+	ReceivedAt        time.Time  `gorm:"column:received_at;not null;index"`
+	ProcessedAt       *time.Time `gorm:"column:processed_at"`
+}
+
+func (InboundEventModel) TableName() string { return "inbound_events" }
 
 // DIDDocumentModel represents a DID document record for did:web resolution.
 type DIDDocumentModel struct {

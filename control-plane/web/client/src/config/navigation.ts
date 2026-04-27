@@ -8,6 +8,7 @@ import {
   FileCheck2,
   BookOpen,
   Github,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ export const navigation: NavGroup[] = [
       { title: "Playground", icon: FlaskConical, path: "/playground" },
       { title: "Runs", icon: Play, path: "/runs" },
       { title: "Agent nodes", icon: Server, path: "/agents" },
+      { title: "Triggers", icon: Webhook, path: "/triggers" },
     ],
   },
   {

@@ -457,3 +457,16 @@ func TestTagApprovalHandlers_ApproveAndRevokeValidationBranches(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "already_revoked")
 	})
 }
+
+// Trigger plugin system stubs — interface fillers for the test mock; not exercised.
+func (m *adminStorageMock) CreateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *adminStorageMock) GetTrigger(context.Context, string) (*types.Trigger, error) { return nil, nil }
+func (m *adminStorageMock) ListTriggers(context.Context, string, string) ([]*types.Trigger, error) { return nil, nil }
+func (m *adminStorageMock) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *adminStorageMock) DeleteTrigger(context.Context, string) error { return nil }
+func (m *adminStorageMock) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *adminStorageMock) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
+func (m *adminStorageMock) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
+func (m *adminStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
+func (m *adminStorageMock) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
+func (m *adminStorageMock) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }

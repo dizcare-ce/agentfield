@@ -625,3 +625,16 @@ func TestConfigStorage_ReloadConfig_Error(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
+
+// Trigger plugin system stubs — interface fillers for the test mock; not exercised.
+func (m *configStorageMock) CreateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *configStorageMock) GetTrigger(context.Context, string) (*types.Trigger, error) { return nil, nil }
+func (m *configStorageMock) ListTriggers(context.Context, string, string) ([]*types.Trigger, error) { return nil, nil }
+func (m *configStorageMock) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *configStorageMock) DeleteTrigger(context.Context, string) error { return nil }
+func (m *configStorageMock) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *configStorageMock) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
+func (m *configStorageMock) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
+func (m *configStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
+func (m *configStorageMock) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
+func (m *configStorageMock) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }

@@ -583,3 +583,16 @@ func TestQueryHandler_ErrorPaths(t *testing.T) {
 		})
 	}
 }
+
+// Trigger plugin system stubs — interface fillers for the test mock; not exercised.
+func (s *handlerTestStorage) CreateTrigger(context.Context, *types.Trigger) error { return nil }
+func (s *handlerTestStorage) GetTrigger(context.Context, string) (*types.Trigger, error) { return nil, nil }
+func (s *handlerTestStorage) ListTriggers(context.Context, string, string) ([]*types.Trigger, error) { return nil, nil }
+func (s *handlerTestStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
+func (s *handlerTestStorage) DeleteTrigger(context.Context, string) error { return nil }
+func (s *handlerTestStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (s *handlerTestStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
+func (s *handlerTestStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
+func (s *handlerTestStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
+func (s *handlerTestStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
+func (s *handlerTestStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }

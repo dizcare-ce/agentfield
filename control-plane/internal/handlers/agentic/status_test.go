@@ -550,3 +550,16 @@ func TestBoolToStatus(t *testing.T) {
 	assert.Equal(t, "healthy", boolToStatus(true))
 	assert.Equal(t, "unhealthy", boolToStatus(false))
 }
+
+// Trigger plugin system stubs — interface fillers for the test mock; not exercised.
+func (m *mockStatusStorage) CreateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *mockStatusStorage) GetTrigger(context.Context, string) (*types.Trigger, error) { return nil, nil }
+func (m *mockStatusStorage) ListTriggers(context.Context, string, string) ([]*types.Trigger, error) { return nil, nil }
+func (m *mockStatusStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
+func (m *mockStatusStorage) DeleteTrigger(context.Context, string) error { return nil }
+func (m *mockStatusStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *mockStatusStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
+func (m *mockStatusStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
+func (m *mockStatusStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
+func (m *mockStatusStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
+func (m *mockStatusStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }

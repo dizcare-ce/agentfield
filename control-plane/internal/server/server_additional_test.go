@@ -598,3 +598,16 @@ func newTestDIDServices(t *testing.T) (*services.DIDService, *services.DIDWebSer
 
 	return didService, services.NewDIDWebService("example.com", didService, store), store
 }
+
+// Trigger plugin system stubs — interface fillers for the test mock; not exercised.
+func (s *listAgentsStorage) CreateTrigger(context.Context, *types.Trigger) error { return nil }
+func (s *listAgentsStorage) GetTrigger(context.Context, string) (*types.Trigger, error) { return nil, nil }
+func (s *listAgentsStorage) ListTriggers(context.Context, string, string) ([]*types.Trigger, error) { return nil, nil }
+func (s *listAgentsStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
+func (s *listAgentsStorage) DeleteTrigger(context.Context, string) error { return nil }
+func (s *listAgentsStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (s *listAgentsStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
+func (s *listAgentsStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
+func (s *listAgentsStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
+func (s *listAgentsStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
+func (s *listAgentsStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
