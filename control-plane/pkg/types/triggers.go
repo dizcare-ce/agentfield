@@ -69,6 +69,10 @@ type InboundEvent struct {
 	ErrorMessage      string          `json:"error_message,omitempty"`
 	ReceivedAt        time.Time       `json:"received_at"`
 	ProcessedAt       *time.Time      `json:"processed_at,omitempty"`
+	// DispatchedWorkflowID is the workflow ID the dispatcher generated for
+	// this delivery. Lets the runs-list / run-dag handlers correlate a run
+	// back to its trigger without traversing the DID/VC chain.
+	DispatchedWorkflowID string `json:"dispatched_workflow_id,omitempty"`
 }
 
 const (

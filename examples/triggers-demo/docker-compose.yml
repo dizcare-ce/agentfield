@@ -31,10 +31,12 @@ services:
       # signatures. The fire-events script signs with the same values.
       STRIPE_DEMO_SECRET: whsec_demo_stripe_secret_change_me_in_prod
       GITHUB_DEMO_SECRET: ghsecret_demo_github_secret_change_me
-      # DID is optional for the demo; leaving it disabled keeps the surface
-      # small. Re-enable if you want to see the trigger event VC chain in
-      # VerifyProvenancePage.
-      AGENTFIELD_FEATURES_DID_ENABLED: "false"
+      # DID enabled so the dispatcher mints a trigger event VC and chains
+      # it onto the resulting execution VC. The runs-list / run-dag trigger
+      # enrichment walks this chain to populate WorkflowSummary.trigger and
+      # dag.trigger; without DID there is no chain to traverse, so the
+      # operator surfaces would show "Not triggered by webhook" on every run.
+      AGENTFIELD_FEATURES_DID_ENABLED: "true"
     ports:
       - "8080:8080"
     restart: unless-stopped

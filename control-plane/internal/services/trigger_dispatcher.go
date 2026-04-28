@@ -140,9 +140,21 @@ func (d *TriggerDispatcher) DispatchEvent(ctx context.Context, trig *types.Trigg
 		d.markFailed(ctx, ev.ID, fmt.Sprintf("build request: %v", err))
 		return
 	}
+	dispatchWorkflowID := utils.GenerateWorkflowID()
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Workflow-ID", utils.GenerateWorkflowID())
+	req.Header.Set("X-Workflow-ID", dispatchWorkflowID)
 	req.Header.Set("X-Execution-ID", utils.GenerateExecutionID())
+	// Record the workflow ID against the inbound event so the runs-list
+	// and run-dag handlers can correlate a triggered run back to this
+	// event without walking the DID/VC chain (which only exists when DID
+	// is fully wired). Best-effort — failure here doesn't block dispatch.
+	if err := d.storage.SetInboundEventDispatchedWorkflow(ctx, ev.ID, dispatchWorkflowID); err != nil {
+		logger.Logger.Warn().
+			Err(err).
+			Str("event_id", ev.ID).
+			Str("workflow_id", dispatchWorkflowID).
+			Msg("failed to record dispatched workflow id on inbound event")
+	}
 	req.Header.Set("X-AgentField-Request-ID", utils.GenerateAgentFieldRequestID())
 	req.Header.Set("X-Trigger-ID", trig.ID)
 	req.Header.Set("X-Source-Name", trig.SourceName)

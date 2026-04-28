@@ -492,36 +492,73 @@ func modelToTrigger(m TriggerModel) (*types.Trigger, error) {
 
 func inboundEventToModel(e *types.InboundEvent) InboundEventModel {
 	return InboundEventModel{
-		ID:                e.ID,
-		TriggerID:         e.TriggerID,
-		SourceName:        e.SourceName,
-		EventType:         e.EventType,
-		RawPayload:        string(e.RawPayload),
-		NormalizedPayload: string(e.NormalizedPayload),
-		IdempotencyKey:    e.IdempotencyKey,
-		VCID:              e.VCID,
-		Status:            e.Status,
-		ErrorMessage:      e.ErrorMessage,
-		ReceivedAt:        e.ReceivedAt,
-		ProcessedAt:       e.ProcessedAt,
+		ID:                   e.ID,
+		TriggerID:            e.TriggerID,
+		SourceName:           e.SourceName,
+		EventType:            e.EventType,
+		RawPayload:           string(e.RawPayload),
+		NormalizedPayload:    string(e.NormalizedPayload),
+		IdempotencyKey:       e.IdempotencyKey,
+		VCID:                 e.VCID,
+		Status:               e.Status,
+		ErrorMessage:         e.ErrorMessage,
+		ReceivedAt:           e.ReceivedAt,
+		ProcessedAt:          e.ProcessedAt,
+		DispatchedWorkflowID: e.DispatchedWorkflowID,
 	}
 }
 
 func modelToInboundEvent(m InboundEventModel) types.InboundEvent {
 	return types.InboundEvent{
-		ID:                m.ID,
-		TriggerID:         m.TriggerID,
-		SourceName:        m.SourceName,
-		EventType:         m.EventType,
-		RawPayload:        json.RawMessage(m.RawPayload),
-		NormalizedPayload: json.RawMessage(m.NormalizedPayload),
-		IdempotencyKey:    m.IdempotencyKey,
-		VCID:              m.VCID,
-		Status:            m.Status,
-		ErrorMessage:      m.ErrorMessage,
-		ReceivedAt:        m.ReceivedAt,
-		ProcessedAt:       m.ProcessedAt,
+		ID:                   m.ID,
+		TriggerID:            m.TriggerID,
+		SourceName:           m.SourceName,
+		EventType:            m.EventType,
+		RawPayload:           json.RawMessage(m.RawPayload),
+		NormalizedPayload:    json.RawMessage(m.NormalizedPayload),
+		IdempotencyKey:       m.IdempotencyKey,
+		VCID:                 m.VCID,
+		Status:               m.Status,
+		ErrorMessage:         m.ErrorMessage,
+		ReceivedAt:           m.ReceivedAt,
+		ProcessedAt:           m.ProcessedAt,
+		DispatchedWorkflowID: m.DispatchedWorkflowID,
 	}
+}
+
+// SetInboundEventDispatchedWorkflow records the workflow ID the dispatcher
+// generated for this delivery. Called from the dispatcher right before the
+// outbound HTTP request so the runs-list and run-dag handlers can correlate
+// a run back to its triggering event without depending on the DID/VC chain
+// being fully wired.
+func (ls *LocalStorage) SetInboundEventDispatchedWorkflow(ctx context.Context, eventID, workflowID string) error {
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	return gormDB.Model(&InboundEventModel{}).
+		Where("id = ?", eventID).
+		Update("dispatched_workflow_id", workflowID).
+		Error
+}
+
+// GetInboundEventByWorkflowID returns the inbound event whose
+// dispatched_workflow_id matches workflowID. Used by trigger enrichment to
+// correlate runs back to their originating event without VC chain.
+func (ls *LocalStorage) GetInboundEventByWorkflowID(ctx context.Context, workflowID string) (*types.InboundEvent, error) {
+	if workflowID == "" {
+		return nil, nil
+	}
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var row InboundEventModel
+	if err := gormDB.Where("dispatched_workflow_id = ?", workflowID).First(&row).Error; err != nil {
+		return nil, err
+	}
+	ev := modelToInboundEvent(row)
+	return &ev, nil
 }
 
 // TriggerMetrics returns aggregate statistics across all triggers for the dashboard tile.

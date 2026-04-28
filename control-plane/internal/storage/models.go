@@ -502,6 +502,12 @@ type InboundEventModel struct {
 	ErrorMessage      string     `gorm:"column:error_message;not null;default:''"`
 	ReceivedAt        time.Time  `gorm:"column:received_at;not null;index"`
 	ProcessedAt       *time.Time `gorm:"column:processed_at"`
+	// DispatchedWorkflowID is the X-Workflow-ID the dispatcher generated for
+	// the outbound HTTP request. Recorded so the runs-list and run-dag
+	// handlers can correlate a run back to its triggering event without
+	// depending on the DID/VC chain being fully wired (which requires
+	// the agent SDK to relay X-Parent-VC-ID and emit signed execution VCs).
+	DispatchedWorkflowID string `gorm:"column:dispatched_workflow_id;not null;default:'';index"`
 }
 
 func (InboundEventModel) TableName() string { return "inbound_events" }

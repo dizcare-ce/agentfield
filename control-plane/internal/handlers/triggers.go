@@ -254,17 +254,95 @@ func (h *TriggerHandlers) CreateTrigger() gin.HandlerFunc {
 	}
 }
 
+// TriggerListItem wraps a Trigger with per-row 24h activity stats so the
+// Active triggers table can render a small "Activity" column without an
+// N+1 fetch storm from the client. The stats are computed by walking the
+// trigger's recent inbound events (capped at MaxEventsForStats) — cheap on
+// SQLite for typical operator deployments.
+type TriggerListItem struct {
+	*types.Trigger
+	EventCount24h      int        `json:"event_count_24h"`
+	DispatchSuccess24h int        `json:"dispatch_success_24h"`
+	DispatchFailed24h  int        `json:"dispatch_failed_24h"`
+	LastEventAt        *time.Time `json:"last_event_at,omitempty"`
+	// DispatchBuckets24h is a 24-element histogram. Index 0 = oldest hour
+	// (24h ago), index 23 = current hour. Lets the UI render a sparkline
+	// without a separate aggregation endpoint.
+	DispatchBuckets24h [24]int `json:"dispatch_buckets_24h"`
+}
+
+// MaxEventsForStats caps how many recent events we consider when computing
+// per-trigger 24h stats. 1000 events / 24h = 41 events/h average — well
+// above what an operator surface needs to display, and bounds the worst
+// case on busy triggers.
+const MaxEventsForStats = 1000
+
 // ListTriggers handles GET /api/v1/triggers.
+//
+// Returns each trigger with rolling 24h stats (event count, success /
+// failure split, last event timestamp, hourly histogram for sparkline)
+// so the operator surface can render activity without per-row fetches.
 func (h *TriggerHandlers) ListTriggers() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx := c.Request.Context()
 		nodeID := c.Query("target_node_id")
 		source := c.Query("source_name")
-		ts, err := h.storage.ListTriggers(c.Request.Context(), nodeID, source)
+		ts, err := h.storage.ListTriggers(ctx, nodeID, source)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"triggers": ts})
+
+		now := time.Now().UTC()
+		windowStart := now.Add(-24 * time.Hour)
+		items := make([]TriggerListItem, 0, len(ts))
+		for _, t := range ts {
+			item := TriggerListItem{Trigger: t}
+			events, err := h.storage.ListInboundEvents(ctx, t.ID, MaxEventsForStats)
+			if err == nil {
+				populateTriggerStats(&item, events, now, windowStart)
+			}
+			items = append(items, item)
+		}
+		c.JSON(http.StatusOK, gin.H{"triggers": items})
+	}
+}
+
+// populateTriggerStats fills the 24h stats fields on item from events.
+// Events older than windowStart are ignored. Bucket index 23 is the
+// current hour; index 0 is 23 hours before that.
+func populateTriggerStats(
+	item *TriggerListItem,
+	events []*types.InboundEvent,
+	now, windowStart time.Time,
+) {
+	for _, ev := range events {
+		if ev == nil {
+			continue
+		}
+		if item.LastEventAt == nil || ev.ReceivedAt.After(*item.LastEventAt) {
+			ts := ev.ReceivedAt
+			item.LastEventAt = &ts
+		}
+		if ev.ReceivedAt.Before(windowStart) {
+			continue
+		}
+		item.EventCount24h++
+		switch ev.Status {
+		case types.InboundEventStatusDispatched, types.InboundEventStatusReplayed:
+			item.DispatchSuccess24h++
+		case types.InboundEventStatusFailed:
+			item.DispatchFailed24h++
+		}
+		// Hour offset: 0 = oldest hour in window, 23 = current hour.
+		offset := int(ev.ReceivedAt.Sub(windowStart) / time.Hour)
+		if offset < 0 {
+			offset = 0
+		}
+		if offset > 23 {
+			offset = 23
+		}
+		item.DispatchBuckets24h[offset]++
 	}
 }
 

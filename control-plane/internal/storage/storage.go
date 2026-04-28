@@ -681,6 +681,14 @@ type StorageProvider interface {
 	ListInboundEvents(ctx context.Context, triggerID string, limit int) ([]*types.InboundEvent, error)
 	// MarkInboundEventProcessed updates an event's status after dispatch finishes.
 	MarkInboundEventProcessed(ctx context.Context, id, status, errorMessage, vcID string) error
+	// SetInboundEventDispatchedWorkflow records the dispatcher-generated
+	// workflow ID against the inbound event so runs-list / run-dag handlers
+	// can correlate a run to its triggering event without traversing the
+	// DID/VC chain.
+	SetInboundEventDispatchedWorkflow(ctx context.Context, eventID, workflowID string) error
+	// GetInboundEventByWorkflowID looks up an inbound event by the
+	// dispatcher-recorded workflow ID. Returns (nil, nil) when no row matches.
+	GetInboundEventByWorkflowID(ctx context.Context, workflowID string) (*types.InboundEvent, error)
 	// TriggerMetrics returns aggregate statistics for the dashboard tile
 	// (global across all triggers).
 	TriggerMetrics(ctx context.Context) (*types.TriggerMetrics, error)

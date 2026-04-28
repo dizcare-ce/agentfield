@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/agentfield/control-plane/internal/handlers"
 	"github.com/Agent-Field/agentfield/control-plane/internal/logger"
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
@@ -703,63 +704,16 @@ func (h *ExecutionHandler) toExecutionSummary(exec *types.Execution) ExecutionSu
 }
 
 // enrichExecutionWithTrigger resolves the parent trigger event VC and populates
-// the response with trigger metadata if available.
+// the response with trigger metadata if available. The traversal logic itself
+// lives in handlers.TriggerForExecution so the runs-list and run-dag handlers
+// can reuse it.
 func (h *ExecutionHandler) enrichExecutionWithTrigger(ctx context.Context, exec *types.Execution, resp *ExecutionDetailsResponse) error {
 	if h.storage == nil {
 		return nil
 	}
-
-	// Fetch the execution's VC to find parent_vc_id
-	execID := exec.ExecutionID
-	vcs, err := h.storage.ListExecutionVCs(ctx, types.VCFilters{ExecutionID: &execID, Limit: 1})
-	if err != nil || len(vcs) == 0 || vcs[0] == nil {
-		return nil
+	if meta := handlers.TriggerForExecution(ctx, h.storage, exec.ExecutionID); meta != nil {
+		resp.Trigger = meta
 	}
-
-	vc := vcs[0]
-	if vc.ParentVCID == nil || *vc.ParentVCID == "" {
-		return nil
-	}
-
-	// Fetch the parent VC directly by ID — VCFilters doesn't expose VCID,
-	// and a single-row lookup is the right shape anyway.
-	parentVCID := *vc.ParentVCID
-	parentVC, err := h.storage.GetExecutionVC(ctx, parentVCID)
-	if err != nil || parentVC == nil {
-		return nil
-	}
-
-	// Only proceed if parent is a trigger event VC
-	if parentVC.Kind != types.ExecutionVCKindTriggerEvent {
-		return nil
-	}
-
-	// Fetch the inbound event to get full trigger metadata
-	if parentVC.EventID == nil || *parentVC.EventID == "" {
-		return nil
-	}
-
-	inboundEvent, err := h.storage.GetInboundEvent(ctx, *parentVC.EventID)
-	if err != nil {
-		return nil
-	}
-
-	// Fetch trigger to get source info
-	trigger, err := h.storage.GetTrigger(ctx, inboundEvent.TriggerID)
-	if err != nil {
-		return nil
-	}
-
-	// Populate the trigger metadata
-	resp.Trigger = &types.TriggerEventMetadata{
-		TriggerID:      trigger.ID,
-		SourceName:     trigger.SourceName,
-		EventType:      inboundEvent.EventType,
-		EventID:        inboundEvent.ID,
-		ReceivedAt:     inboundEvent.ReceivedAt.Format(time.RFC3339),
-		IdempotencyKey: inboundEvent.IdempotencyKey,
-	}
-
 	return nil
 }
 

@@ -40,6 +40,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { CopyIdentifierChip } from "@/components/ui/copy-identifier-chip";
+import { Sparkline } from "@/components/ui/Sparkline";
+import { formatCompactRelativeTime } from "@/utils/dateFormat";
 import {
   ArrowRight,
   Copy,
@@ -75,6 +77,14 @@ export interface Trigger {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+  // Per-trigger 24h activity (populated by the backend on the list response).
+  // Optional so older API responses degrade gracefully — UI shows "—".
+  event_count_24h?: number;
+  dispatch_success_24h?: number;
+  dispatch_failed_24h?: number;
+  last_event_at?: string | null;
+  /** 24-element histogram, index 0 = oldest hour, index 23 = current hour. */
+  dispatch_buckets_24h?: number[];
 }
 
 const serverUrl =
@@ -115,6 +125,68 @@ function summarizeEventTypes(types: string[] | null | undefined): {
 
 function ownerLabel(managed: Trigger["managed_by"]): string {
   return managed === "code" ? "Code" : "UI";
+}
+
+/**
+ * Compact "Activity 24h" cell — raw counts + neutral sparkline + relative
+ * last fired. We deliberately show counts (total / failed) instead of a
+ * success-rate percentage so the operator sees the underlying numbers, and
+ * the sparkline uses the muted-foreground theme token so it doesn't carry
+ * a status-tone signal that could conflict with the failed-count color.
+ *
+ * Empty state shows a single em-dash so the column doesn't claim visual
+ * weight on triggers with zero deliveries in the window.
+ */
+function TriggerActivityCell({ trigger }: { trigger: Trigger }) {
+  const total = trigger.event_count_24h ?? 0;
+  const failed = trigger.dispatch_failed_24h ?? 0;
+  const buckets = trigger.dispatch_buckets_24h ?? [];
+  const lastEventAt = trigger.last_event_at ?? null;
+
+  if (total === 0 && !lastEventAt) {
+    return (
+      <span
+        className="text-xs text-muted-foreground/70"
+        aria-label="No activity in the last 24 hours"
+      >
+        —
+      </span>
+    );
+  }
+
+  const lastFired = lastEventAt
+    ? formatCompactRelativeTime(lastEventAt)
+    : null;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <span className="font-mono text-xs tabular-nums text-foreground">
+          {total}
+        </span>
+        <span className="text-muted-foreground/60">·</span>
+        <span
+          className={cn(
+            "font-mono text-xs tabular-nums",
+            failed > 0 ? "text-status-error" : "text-muted-foreground",
+          )}
+          title={`${total - failed} succeeded · ${failed} failed`}
+        >
+          {failed} failed
+        </span>
+        <Sparkline
+          data={buckets}
+          width={56}
+          height={16}
+          showArea
+          className="text-muted-foreground"
+        />
+      </div>
+      {lastFired ? (
+        <span className="text-micro text-muted-foreground">{lastFired}</span>
+      ) : null}
+    </div>
+  );
 }
 
 interface TriggerRowProps {
@@ -202,6 +274,11 @@ function TriggerRow({
             </Badge>
           ) : null}
         </div>
+      </TableCell>
+
+      {/* Activity (last 24h) */}
+      <TableCell className="w-44">
+        <TriggerActivityCell trigger={trigger} />
       </TableCell>
 
       {/* Owner */}
@@ -537,6 +614,9 @@ export function TriggersPage() {
                 <TableHead className="h-8 w-44 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
                   Events
                 </TableHead>
+                <TableHead className="h-8 w-44 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Activity 24h
+                </TableHead>
                 <TableHead className="h-8 w-20 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
                   Owner
                 </TableHead>
@@ -550,7 +630,7 @@ export function TriggersPage() {
               {loading ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="p-8 text-center text-xs text-muted-foreground"
                   >
                     Loading triggers…
@@ -558,7 +638,7 @@ export function TriggersPage() {
                 </TableRow>
               ) : visibleCount === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="p-8">
+                  <TableCell colSpan={7} className="p-8">
                     <div className="flex flex-col items-center justify-center gap-2 text-center">
                       <Webhook
                         className="size-8 text-muted-foreground"
