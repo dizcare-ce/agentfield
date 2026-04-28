@@ -186,6 +186,23 @@ func (s *nodeRESTStorageStub) RegisterAgent(ctx context.Context, agent *types.Ag
 	return nil
 }
 
+// Trigger stubs override the embedded nil StorageProvider interface so the
+// registration path's call to upsertCodeManagedTriggers + MarkOrphanedTriggers
+// doesn't deref nil. Tests in this file don't exercise trigger persistence
+// so empty no-ops are sufficient.
+func (s *nodeRESTStorageStub) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) {
+	return "", nil
+}
+func (s *nodeRESTStorageStub) MarkOrphanedTriggers(context.Context, string, []string) error {
+	return nil
+}
+func (s *nodeRESTStorageStub) SetTriggerOverride(context.Context, string, bool, bool) error {
+	return nil
+}
+func (s *nodeRESTStorageStub) ConvertTriggerToUIManaged(context.Context, string) error {
+	return nil
+}
+
 type didServiceStub struct{}
 
 func (didServiceStub) RegisterAgent(req *types.DIDRegistrationRequest) (*types.DIDRegistrationResponse, error) {

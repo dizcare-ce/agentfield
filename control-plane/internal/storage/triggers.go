@@ -113,6 +113,13 @@ func (ls *LocalStorage) DeleteTrigger(ctx context.Context, id string) error {
 // (target_node_id, target_reasoner, source_name). Called by the node-register
 // handler for each declared TriggerBinding so re-registrations are idempotent.
 // Returns the row's ID so the registration response can echo it back to the SDK.
+//
+// Sticky-pause rule (§5.3): when an existing row has manual_override_enabled
+// = true, the upsert PRESERVES the row's Enabled value rather than letting
+// the binding's value win. That's how operators can pause a misbehaving
+// code-managed trigger via the UI without a code deploy resurrecting it.
+//
+// Re-registration also clears the orphaned flag and stamps last_registered_at.
 func (ls *LocalStorage) UpsertCodeManagedTrigger(ctx context.Context, t *types.Trigger) (string, error) {
 	if t == nil {
 		return "", errors.New("nil trigger")
@@ -128,6 +135,10 @@ func (ls *LocalStorage) UpsertCodeManagedTrigger(ctx context.Context, t *types.T
 	model.ManagedBy = string(types.ManagedByCode)
 	now := time.Now().UTC()
 	model.UpdatedAt = now
+	model.LastRegisteredAt = &now
+	// A fresh registration always clears the orphan flag — the binding is
+	// declared again so the row is no longer a vestige.
+	model.Orphaned = false
 
 	// Look for an existing code-managed row for this (node, reasoner, source).
 	var existing TriggerModel
@@ -140,6 +151,13 @@ func (ls *LocalStorage) UpsertCodeManagedTrigger(ctx context.Context, t *types.T
 		// Preserve ID and creation time, refresh everything else.
 		model.ID = existing.ID
 		model.CreatedAt = existing.CreatedAt
+		// Sticky-pause: when the operator has explicitly overridden enabled
+		// via the /pause endpoint, do NOT let re-registration flip it back.
+		if existing.ManualOverrideEnabled {
+			model.ManualOverrideEnabled = true
+			model.ManualOverrideAt = existing.ManualOverrideAt
+			model.Enabled = existing.Enabled
+		}
 		if err := gormDB.Save(&model).Error; err != nil {
 			return "", err
 		}
@@ -156,6 +174,98 @@ func (ls *LocalStorage) UpsertCodeManagedTrigger(ctx context.Context, t *types.T
 	default:
 		return "", err
 	}
+}
+
+// MarkOrphanedTriggers flips orphaned=true on every code-managed trigger for
+// the given node whose (source_name, target_reasoner) tuple is NOT in
+// declaredKeys. Caller (the registration handler) builds declaredKeys from the
+// bindings the agent actually re-declared in this registration. Orphaned rows
+// stop dispatching but the row + event history are preserved so the operator
+// can decide to delete or convert-to-ui via the UI.
+//
+// declaredKeys items use the format "<source>:<reasoner>" — match what's used
+// throughout the registration flow so callers don't have to reinvent it.
+func (ls *LocalStorage) MarkOrphanedTriggers(ctx context.Context, nodeID string, declaredKeys []string) error {
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	declared := make(map[string]struct{}, len(declaredKeys))
+	for _, k := range declaredKeys {
+		declared[k] = struct{}{}
+	}
+	var rows []TriggerModel
+	if err := gormDB.Where(
+		"target_node_id = ? AND managed_by = ? AND orphaned = ?",
+		nodeID, string(types.ManagedByCode), false,
+	).Find(&rows).Error; err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, r := range rows {
+		key := r.SourceName + ":" + r.TargetReasoner
+		if _, kept := declared[key]; kept {
+			continue
+		}
+		// Decorator was removed in user code. Flip the flag; preserve
+		// everything else so the events page can still render history.
+		if err := gormDB.Model(&TriggerModel{}).
+			Where("id = ?", r.ID).
+			Updates(map[string]any{"orphaned": true, "updated_at": now}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetTriggerOverride flips the sticky-pause flag on a code-managed trigger
+// (operator pressed pause/resume in the UI). When enabled=true and override=true,
+// the row is paused and re-registration won't unpause it. Resume passes
+// override=false to clear the override; the row's enabled value resets to the
+// binding's last-declared value (caller is responsible for choosing the right
+// post-resume Enabled — typically true).
+func (ls *LocalStorage) SetTriggerOverride(ctx context.Context, triggerID string, override bool, enabled bool) error {
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	updates := map[string]any{
+		"manual_override_enabled": override,
+		"enabled":                 enabled,
+		"updated_at":              now,
+	}
+	if override {
+		updates["manual_override_at"] = now
+	} else {
+		updates["manual_override_at"] = nil
+	}
+	return gormDB.Model(&TriggerModel{}).Where("id = ?", triggerID).Updates(updates).Error
+}
+
+// ConvertTriggerToUIManaged flips an orphaned code-managed trigger to UI-managed
+// so the operator can edit/delete it via the UI without the next agent
+// registration recreating it. Returns ErrRecordNotFound if no such row exists.
+func (ls *LocalStorage) ConvertTriggerToUIManaged(ctx context.Context, triggerID string) error {
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	res := gormDB.Model(&TriggerModel{}).
+		Where("id = ? AND managed_by = ?", triggerID, string(types.ManagedByCode)).
+		Updates(map[string]any{
+			"managed_by": string(types.ManagedByUI),
+			"orphaned":   false,
+			"updated_at": now,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // InsertInboundEvent persists a received event. The unique index on
@@ -275,18 +385,28 @@ func triggerToModel(t *types.Trigger) (TriggerModel, error) {
 	if managed == "" {
 		managed = string(types.ManagedByUI)
 	}
+	var codeOrigin *string
+	if t.CodeOrigin != "" {
+		v := t.CodeOrigin
+		codeOrigin = &v
+	}
 	return TriggerModel{
-		ID:             t.ID,
-		SourceName:     t.SourceName,
-		ConfigJSON:     cfg,
-		SecretEnvVar:   t.SecretEnvVar,
-		TargetNodeID:   t.TargetNodeID,
-		TargetReasoner: t.TargetReasoner,
-		EventTypes:     string(typesJSON),
-		ManagedBy:      managed,
-		Enabled:        t.Enabled,
-		CreatedAt:      t.CreatedAt,
-		UpdatedAt:      t.UpdatedAt,
+		ID:                    t.ID,
+		SourceName:            t.SourceName,
+		ConfigJSON:            cfg,
+		SecretEnvVar:          t.SecretEnvVar,
+		TargetNodeID:          t.TargetNodeID,
+		TargetReasoner:        t.TargetReasoner,
+		EventTypes:            string(typesJSON),
+		ManagedBy:             managed,
+		Enabled:               t.Enabled,
+		CreatedAt:             t.CreatedAt,
+		UpdatedAt:              t.UpdatedAt,
+		ManualOverrideEnabled: t.ManualOverrideEnabled,
+		ManualOverrideAt:      t.ManualOverrideAt,
+		CodeOrigin:            codeOrigin,
+		LastRegisteredAt:      t.LastRegisteredAt,
+		Orphaned:              t.Orphaned,
 	}, nil
 }
 
@@ -301,18 +421,27 @@ func modelToTrigger(m TriggerModel) (*types.Trigger, error) {
 	if len(cfg) == 0 {
 		cfg = json.RawMessage("{}")
 	}
+	codeOrigin := ""
+	if m.CodeOrigin != nil {
+		codeOrigin = *m.CodeOrigin
+	}
 	return &types.Trigger{
-		ID:             m.ID,
-		SourceName:     m.SourceName,
-		Config:         cfg,
-		SecretEnvVar:   m.SecretEnvVar,
-		TargetNodeID:   m.TargetNodeID,
-		TargetReasoner: m.TargetReasoner,
-		EventTypes:     eventTypes,
-		ManagedBy:      types.ManagedBy(m.ManagedBy),
-		Enabled:        m.Enabled,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
+		ID:                    m.ID,
+		SourceName:            m.SourceName,
+		Config:                cfg,
+		SecretEnvVar:          m.SecretEnvVar,
+		TargetNodeID:          m.TargetNodeID,
+		TargetReasoner:        m.TargetReasoner,
+		EventTypes:            eventTypes,
+		ManagedBy:             types.ManagedBy(m.ManagedBy),
+		Enabled:               m.Enabled,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
+		ManualOverrideEnabled: m.ManualOverrideEnabled,
+		ManualOverrideAt:      m.ManualOverrideAt,
+		CodeOrigin:            codeOrigin,
+		LastRegisteredAt:      m.LastRegisteredAt,
+		Orphaned:              m.Orphaned,
 	}, nil
 }
 

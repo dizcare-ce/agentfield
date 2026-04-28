@@ -606,6 +606,9 @@ func (s *listAgentsStorage) ListTriggers(context.Context, string, string) ([]*ty
 func (s *listAgentsStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (s *listAgentsStorage) DeleteTrigger(context.Context, string) error { return nil }
 func (s *listAgentsStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (s *listAgentsStorage) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (s *listAgentsStorage) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (s *listAgentsStorage) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (s *listAgentsStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (s *listAgentsStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (s *listAgentsStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

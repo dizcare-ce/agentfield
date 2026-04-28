@@ -27,6 +27,10 @@ func (s *AgentFieldServer) registerTriggerRoutes(agentAPI *gin.RouterGroup) {
 	triggers.DELETE("/:trigger_id", s.triggerHandlers.DeleteTrigger())
 	triggers.GET("/:trigger_id/events", s.triggerHandlers.ListTriggerEvents())
 	triggers.POST("/:trigger_id/events/:event_id/replay", s.triggerHandlers.ReplayEvent())
+	// Source-of-truth controls for code-managed triggers (Phase 3 §5.3, §5.4).
+	triggers.POST("/:trigger_id/pause", s.triggerHandlers.PauseTrigger())
+	triggers.POST("/:trigger_id/resume", s.triggerHandlers.ResumeTrigger())
+	triggers.POST("/:trigger_id/convert-to-ui", s.triggerHandlers.ConvertTriggerToUI())
 
 	// Plugin catalog — UI uses this to render the "new trigger" form.
 	agentAPI.GET("/sources", handlers.ListSourcesHandler())

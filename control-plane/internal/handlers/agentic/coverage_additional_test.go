@@ -591,6 +591,9 @@ func (s *handlerTestStorage) ListTriggers(context.Context, string, string) ([]*t
 func (s *handlerTestStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (s *handlerTestStorage) DeleteTrigger(context.Context, string) error { return nil }
 func (s *handlerTestStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (s *handlerTestStorage) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (s *handlerTestStorage) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (s *handlerTestStorage) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (s *handlerTestStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (s *handlerTestStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (s *handlerTestStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

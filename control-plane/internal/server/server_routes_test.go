@@ -691,6 +691,9 @@ func (s *stubStorage) ListTriggers(context.Context, string, string) ([]*types.Tr
 func (s *stubStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (s *stubStorage) DeleteTrigger(context.Context, string) error { return nil }
 func (s *stubStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (s *stubStorage) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (s *stubStorage) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (s *stubStorage) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (s *stubStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (s *stubStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (s *stubStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

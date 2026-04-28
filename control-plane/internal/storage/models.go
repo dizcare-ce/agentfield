@@ -475,6 +475,13 @@ type TriggerModel struct {
 	Enabled        bool      `gorm:"column:enabled;not null;default:true"`
 	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
+
+	// Phase 3 source-of-truth columns. Defaults match migration 031.
+	ManualOverrideEnabled bool       `gorm:"column:manual_override_enabled;not null;default:false;index"`
+	ManualOverrideAt      *time.Time `gorm:"column:manual_override_at"`
+	CodeOrigin            *string    `gorm:"column:code_origin"`
+	LastRegisteredAt      *time.Time `gorm:"column:last_registered_at"`
+	Orphaned              bool       `gorm:"column:orphaned;not null;default:false;index"`
 }
 
 func (TriggerModel) TableName() string { return "triggers" }

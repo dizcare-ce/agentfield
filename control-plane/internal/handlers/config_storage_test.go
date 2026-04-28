@@ -636,6 +636,9 @@ func (m *configStorageMock) ListTriggers(context.Context, string, string) ([]*ty
 func (m *configStorageMock) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (m *configStorageMock) DeleteTrigger(context.Context, string) error { return nil }
 func (m *configStorageMock) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *configStorageMock) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (m *configStorageMock) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (m *configStorageMock) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (m *configStorageMock) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (m *configStorageMock) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (m *configStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

@@ -465,6 +465,9 @@ func (m *adminStorageMock) ListTriggers(context.Context, string, string) ([]*typ
 func (m *adminStorageMock) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (m *adminStorageMock) DeleteTrigger(context.Context, string) error { return nil }
 func (m *adminStorageMock) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *adminStorageMock) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (m *adminStorageMock) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (m *adminStorageMock) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (m *adminStorageMock) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (m *adminStorageMock) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (m *adminStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

@@ -659,6 +659,17 @@ type StorageProvider interface {
 	// trigger keyed by (target_node_id, target_reasoner, source_name) and
 	// returns the row's ID.
 	UpsertCodeManagedTrigger(ctx context.Context, t *types.Trigger) (string, error)
+	// MarkOrphanedTriggers flips orphaned=true on code-managed triggers for
+	// the given node whose (source, target_reasoner) tuple is missing from
+	// declaredKeys. Used by the registration handler after upserting all
+	// declared bindings to surface decorators removed from user code.
+	MarkOrphanedTriggers(ctx context.Context, nodeID string, declaredKeys []string) error
+	// SetTriggerOverride sets/clears the sticky-pause flag and updates
+	// enabled atomically. Used by the /pause and /resume endpoints.
+	SetTriggerOverride(ctx context.Context, triggerID string, override bool, enabled bool) error
+	// ConvertTriggerToUIManaged flips an orphaned code-managed trigger to
+	// UI-managed so the operator can edit/delete it via the UI.
+	ConvertTriggerToUIManaged(ctx context.Context, triggerID string) error
 	// InsertInboundEvent persists a received event before dispatch.
 	InsertInboundEvent(ctx context.Context, e *types.InboundEvent) error
 	// InboundEventExistsByIdempotency reports whether an event with the given

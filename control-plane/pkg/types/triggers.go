@@ -31,6 +31,26 @@ type Trigger struct {
 	Enabled        bool            `json:"enabled"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
+
+	// Source-of-truth fields (Phase 3). All optional; populated on code-
+	// managed rows by the registration upsert.
+	//
+	// ManualOverrideEnabled is the sticky-pause flag: when true, agent
+	// re-registration must NOT overwrite Enabled. Set by the
+	// /triggers/:id/pause endpoint, cleared by /resume.
+	ManualOverrideEnabled bool       `json:"manual_override_enabled"`
+	ManualOverrideAt      *time.Time `json:"manual_override_at,omitempty"`
+	// CodeOrigin is the SDK-supplied "path/to/file.py:42" — surfaced in the
+	// UI Drift Card so operators can find where a trigger is declared.
+	CodeOrigin string `json:"code_origin,omitempty"`
+	// LastRegisteredAt is the most recent time an agent re-declared this
+	// binding via RegisterNode. Used to detect orphaned rows.
+	LastRegisteredAt *time.Time `json:"last_registered_at,omitempty"`
+	// Orphaned is set to true when a code-managed binding is missing from a
+	// fresh registration (decorator removed in user code). Events stop
+	// dispatching but the row is preserved for history; the UI offers
+	// "convert to UI-managed" or "delete".
+	Orphaned bool `json:"orphaned"`
 }
 
 // InboundEvent is one persisted event delivery. The control plane stores every
@@ -67,4 +87,8 @@ type TriggerBinding struct {
 	EventTypes   []string        `json:"event_types,omitempty"`
 	Config       json.RawMessage `json:"config,omitempty"`
 	SecretEnvVar string          `json:"secret_env_var,omitempty"`
+	// CodeOrigin is the optional "path/to/file.py:42" the SDK captures at
+	// decoration time. Stamped on the corresponding Trigger row at upsert
+	// so the UI's Drift Card can render the source location.
+	CodeOrigin string `json:"code_origin,omitempty"`
 }

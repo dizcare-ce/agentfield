@@ -345,6 +345,90 @@ func (h *TriggerHandlers) DeleteTrigger() gin.HandlerFunc {
 	}
 }
 
+// PauseTrigger handles POST /api/v1/triggers/:trigger_id/pause. Sets the
+// sticky-pause override and disables the trigger atomically. For code-managed
+// rows this means the next agent re-registration will NOT silently re-enable
+// it (see plan-webhook-checklist.md §5.3).
+func (h *TriggerHandlers) PauseTrigger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		id := c.Param("trigger_id")
+		if _, err := h.storage.GetTrigger(ctx, id); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
+			return
+		}
+		if err := h.storage.SetTriggerOverride(ctx, id, true, false); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// If the trigger is a loop source, stop its goroutine immediately —
+		// pause should be operationally instant, not "wait for next registration".
+		if h.sourceManager != nil {
+			h.sourceManager.Stop(id)
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "paused"})
+	}
+}
+
+// ResumeTrigger handles POST /api/v1/triggers/:trigger_id/resume. Clears the
+// sticky-pause override and re-enables the trigger so the row tracks code
+// again. For loop sources, restarts the goroutine.
+func (h *TriggerHandlers) ResumeTrigger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		id := c.Param("trigger_id")
+		trig, err := h.storage.GetTrigger(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
+			return
+		}
+		if err := h.storage.SetTriggerOverride(ctx, id, false, true); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Restart loop source if applicable. Re-fetch so the goroutine sees
+		// enabled=true and the cleared override.
+		if h.sourceManager != nil {
+			if src, ok := sources.Get(trig.SourceName); ok && src.Kind() == sources.KindLoop {
+				updated, _ := h.storage.GetTrigger(ctx, id)
+				if updated != nil {
+					_ = h.sourceManager.Start(updated)
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "resumed"})
+	}
+}
+
+// ConvertTriggerToUI handles POST /api/v1/triggers/:trigger_id/convert-to-ui.
+// Flips an orphaned code-managed trigger to UI-managed so the operator can
+// edit/delete it via the UI without the next agent registration recreating
+// it. Only valid on rows where managed_by='code' AND orphaned=true.
+func (h *TriggerHandlers) ConvertTriggerToUI() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		id := c.Param("trigger_id")
+		trig, err := h.storage.GetTrigger(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
+			return
+		}
+		if trig.ManagedBy != types.ManagedByCode {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trigger is already UI-managed"})
+			return
+		}
+		if !trig.Orphaned {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trigger is not orphaned; only orphaned code-managed rows can be converted"})
+			return
+		}
+		if err := h.storage.ConvertTriggerToUIManaged(ctx, id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "converted", "managed_by": string(types.ManagedByUI)})
+	}
+}
+
 // ListTriggerEvents handles GET /api/v1/triggers/:trigger_id/events.
 func (h *TriggerHandlers) ListTriggerEvents() gin.HandlerFunc {
 	return func(c *gin.Context) {

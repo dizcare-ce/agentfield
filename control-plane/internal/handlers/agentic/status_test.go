@@ -561,6 +561,9 @@ func (m *mockStatusStorage) ListTriggers(context.Context, string, string) ([]*ty
 func (m *mockStatusStorage) UpdateTrigger(context.Context, *types.Trigger) error { return nil }
 func (m *mockStatusStorage) DeleteTrigger(context.Context, string) error { return nil }
 func (m *mockStatusStorage) UpsertCodeManagedTrigger(context.Context, *types.Trigger) (string, error) { return "", nil }
+func (m *mockStatusStorage) MarkOrphanedTriggers(context.Context, string, []string) error { return nil }
+func (m *mockStatusStorage) SetTriggerOverride(context.Context, string, bool, bool) error { return nil }
+func (m *mockStatusStorage) ConvertTriggerToUIManaged(context.Context, string) error { return nil }
 func (m *mockStatusStorage) InsertInboundEvent(context.Context, *types.InboundEvent) error { return nil }
 func (m *mockStatusStorage) InboundEventExistsByIdempotency(context.Context, string, string) (bool, error) { return false, nil }
 func (m *mockStatusStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }

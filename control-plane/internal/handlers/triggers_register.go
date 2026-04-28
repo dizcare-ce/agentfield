@@ -49,11 +49,17 @@ type triggerSummaryEntry struct {
 // idempotently writes a code-managed Trigger row. Validation failures are
 // logged and skipped — registration must not fail because of a single bad
 // trigger declaration. Returns one entry per successfully upserted binding.
+//
+// After upserting all bindings, this also calls MarkOrphanedTriggers so any
+// previously-declared trigger whose decorator was removed in user code gets
+// flagged orphaned (events stop dispatching but row + history are preserved
+// for the operator to convert-to-ui or delete via the UI).
 func upsertCodeManagedTriggers(ctx context.Context, store storage.StorageProvider, node *types.AgentNode) []triggerSummaryEntry {
 	if node == nil || len(node.Reasoners) == 0 {
 		return nil
 	}
 	out := make([]triggerSummaryEntry, 0)
+	declaredKeys := make([]string, 0)
 	for _, reasoner := range node.Reasoners {
 		for _, binding := range reasoner.Triggers {
 			src, ok := sources.Get(binding.Source)
@@ -88,6 +94,7 @@ func upsertCodeManagedTriggers(ctx context.Context, store storage.StorageProvide
 				EventTypes:     binding.EventTypes,
 				ManagedBy:      types.ManagedByCode,
 				Enabled:        true,
+				CodeOrigin:     binding.CodeOrigin,
 			}
 			id, err := store.UpsertCodeManagedTrigger(ctx, t)
 			if err != nil {
@@ -99,6 +106,7 @@ func upsertCodeManagedTriggers(ctx context.Context, store storage.StorageProvide
 				continue
 			}
 			t.ID = id
+			declaredKeys = append(declaredKeys, binding.Source+":"+reasoner.ID)
 			// Start loop-kind triggers right away so cron schedules begin
 			// firing on first registration, not on the next server restart.
 			if mgr := getTriggerSourceManager(); mgr != nil && src.Kind() == sources.KindLoop {
@@ -115,6 +123,15 @@ func upsertCodeManagedTriggers(ctx context.Context, store storage.StorageProvide
 				TriggerID:  id,
 			})
 		}
+	}
+	// Flag previously-declared bindings now missing from this registration
+	// as orphaned. Best-effort — a failure here doesn't block registration
+	// (the agent can still run; the operator just won't see drift signal).
+	if err := store.MarkOrphanedTriggers(ctx, node.ID, declaredKeys); err != nil {
+		logger.Logger.Warn().
+			Err(err).
+			Str("node_id", node.ID).
+			Msg("trigger registration: orphan-mark failed")
 	}
 	return out
 }
