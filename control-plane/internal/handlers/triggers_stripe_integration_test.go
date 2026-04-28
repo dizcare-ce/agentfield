@@ -20,6 +20,7 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
+	_ "github.com/Agent-Field/agentfield/control-plane/internal/sources/stripe"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -159,7 +160,7 @@ func TestStripeIngest_HappyPath(t *testing.T) {
 	require.NotNil(t, storedEvent, "inbound event must be persisted")
 	assert.Equal(t, "evt_test_001", storedEvent.IdempotencyKey)
 	assert.Equal(t, "payment_intent.succeeded", storedEvent.EventType)
-	assert.Equal(t, body, storedEvent.RawPayload)
+	assert.Equal(t, json.RawMessage(body), storedEvent.RawPayload)
 
 	// Poll dispatcher (async, so give it time).
 	deadline = time.Now().Add(2 * time.Second)
