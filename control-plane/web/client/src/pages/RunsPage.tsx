@@ -1458,6 +1458,23 @@ function BulkActionBar({
 
 // ─── row sub-component ────────────────────────────────────────────────────────
 
+
+/**
+ * TriggerBadge renders source name from trigger if present
+ */
+function TriggerBadge({ run }: { run: WorkflowSummary }) {
+  if (!run.trigger) {
+    return null;
+  }
+  const sourceName = run.trigger.source_name.charAt(0).toUpperCase() + run.trigger.source_name.slice(1);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted/50 border border-border/50 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      ↪ {sourceName}
+    </span>
+  );
+}
+
+
 interface RunRowProps {
   run: WorkflowSummary;
   isSelected: boolean;
@@ -1579,6 +1596,7 @@ function RunRow({
               <Copy className="size-3 shrink-0 opacity-60" aria-hidden />
             )}
           </button>
+          <TriggerBadge run={run} />
         </div>
       </TableCell>
       {/* Steps */}

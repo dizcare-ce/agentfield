@@ -65,6 +65,7 @@ import { ExecutionObservabilityPanel } from "@/components/execution";
 import { normalizeExecutionStatus, isTerminalStatus } from "@/utils/status";
 import { StatusPill } from "@/components/ui/status-pill";
 import type {
+  TriggerInfo,
   WebhookFailurePreview,
   WebhookRunSummary,
   WorkflowDAGLightweightNode,
@@ -154,6 +155,82 @@ function deriveRunParticipants(dag: WorkflowDAGLightweightResponse): {
     if (id) reasoners.add(id);
   }
   return { ids: [...reasoners].sort(), source: "reasoner" };
+}
+
+
+
+/**
+ * TriggerCard displays webhook trigger information if present
+ */
+function RunContextTriggerCard({ trigger }: { trigger?: TriggerInfo }) {
+  if (!trigger) {
+    return null;
+  }
+  
+  const sourceName = trigger.source_name.charAt(0).toUpperCase() + trigger.source_name.slice(1);
+  const receivedAt = new Date(trigger.received_at).toLocaleString();
+  
+  return (
+    <Card className="min-w-0 border-border/80 shadow-none">
+      <CardContent className="p-3">
+        <div className="mb-2 flex items-center gap-0.5">
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
+            Trigger
+          </p>
+        </div>
+        <div className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
+              ↪ {sourceName}
+            </span>
+            <span className="text-xs text-muted-foreground font-mono">{trigger.event_type}</span>
+          </div>
+          <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span>Event ID:</span>
+              <code className="font-mono text-micro text-foreground/80">{trigger.event_id.substring(0, 16)}…</code>
+            </div>
+            {trigger.idempotency_key && (
+              <div className="flex items-center justify-between">
+                <span>Idempotency Key:</span>
+                <code className="font-mono text-micro text-foreground/80">{trigger.idempotency_key.substring(0, 16)}…</code>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span>Received:</span>
+              <span className="text-foreground/70">{receivedAt}</span>
+            </div>
+          </div>
+          {trigger.payload && (
+            <div className="border-t border-border/40 pt-2">
+              <details className="text-micro">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
+                  Webhook input
+                </summary>
+                <div className="mt-1.5 max-h-48 overflow-auto rounded bg-muted/30 p-1.5">
+                  <pre className="text-nano font-mono whitespace-pre-wrap break-words text-muted-foreground">
+                    {JSON.stringify(trigger.payload, null, 2)}
+                  </pre>
+                </div>
+              </details>
+            </div>
+          )}
+          {dag.root_workflow_id && trigger.trigger_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 text-xs w-full"
+              onClick={() => {
+                window.location.href = `/triggers?trigger=${trigger.trigger_id}&event=${trigger.event_id}`;
+              }}
+            >
+              View this trigger →
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function RunContextNodesCard({
@@ -1027,8 +1104,13 @@ export function RunDetailPage() {
         );
       })()}
 
-      {/* Nodes + webhooks — always show run-level strip (empty states explicit) */}
+      {/* Nodes + webhooks + trigger — always show run-level strip (empty states explicit) */}
       <TooltipProvider delayDuration={280}>
+        {dag.trigger && (
+          <div className="mb-3">
+            <RunContextTriggerCard trigger={dag.trigger} />
+          </div>
+        )}
         <div className="mb-3 grid min-w-0 gap-3 sm:grid-cols-2">
           <RunContextNodesCard
             participantIds={participants.ids}
