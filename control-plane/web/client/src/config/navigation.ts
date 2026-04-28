@@ -1,4 +1,5 @@
 import {
+  Activity,
   LayoutDashboard,
   Play,
   Server,
@@ -56,7 +57,7 @@ export const navigation: NavGroup[] = [
         icon: Webhook,
         children: [
           { title: "Integrations", icon: Plug, path: "/integrations" },
-          { title: "Active", icon: Webhook, path: "/triggers" },
+          { title: "Active", icon: Activity, path: "/triggers" },
         ],
       },
     ],

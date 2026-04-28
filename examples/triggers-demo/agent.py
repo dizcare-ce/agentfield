@@ -134,6 +134,80 @@ async def handle_pr(event: dict, trigger: TriggerContext | None = None):
 
 
 # ---------------------------------------------------------------------------
+# GitHub issues — LLM-powered summary
+#
+# Same source as handle_pr (single signed GitHub webhook can carry multiple
+# event types), but matches on the `issues` event. Calls OpenRouter via
+# app.ai() to produce a short summary, then writes it to per-agent memory
+# so the result shows up in the trigger event row + run detail surfaces.
+# ---------------------------------------------------------------------------
+
+
+@app.reasoner()
+@on_event(
+    source="github",
+    types=["issues"],
+    secret_env="GITHUB_DEMO_SECRET",
+)
+async def summarize_issue(event: dict, trigger: TriggerContext | None = None):
+    """Summarises a GitHub issue via OpenRouter on `issues.opened`."""
+    issue = event.get("issue") or {}
+    action = event.get("action", "")
+    repo = (event.get("repository") or {}).get("full_name", "")
+    number = issue.get("number")
+
+    # Skip non-content actions (labeled, assigned, etc.). We only summarise
+    # when the issue is first opened or its body materially changes.
+    if action not in {"opened", "edited", "reopened"}:
+        record = {
+            "kind": "issue_skipped",
+            "repo": repo,
+            "number": number,
+            "action": action,
+        }
+        print(f"[summarize_issue] skipped action={action}", flush=True)
+        return record
+
+    title = issue.get("title", "(no title)")
+    body = issue.get("body") or "(no body provided)"
+    author = (issue.get("user") or {}).get("login", "unknown")
+    html_url = issue.get("html_url", "")
+
+    summary = await app.ai(
+        system=(
+            "You are a triage assistant. Given a GitHub issue, write a 2-3 "
+            "sentence summary that captures (a) the core problem, (b) any "
+            "reproduction steps, and (c) what the reporter expects. Plain "
+            "prose, no headers."
+        ),
+        user=(
+            f"Repo: {repo}\n"
+            f"Author: {author}\n"
+            f"Title: {title}\n\n"
+            f"Body:\n{body}"
+        ),
+        model="openrouter/anthropic/claude-haiku-4-5",
+        max_tokens=300,
+    )
+
+    record = {
+        "kind": "issue_summary",
+        "repo": repo,
+        "number": number,
+        "title": title,
+        "url": html_url,
+        "author": author,
+        "summary": str(summary),
+        "received_via": trigger.source if trigger else "direct_call",
+        "trigger_event_id": trigger.event_id if trigger else None,
+    }
+    if repo and number:
+        await app.memory.set(key=f"issue:{repo}#{number}", data=record)
+    print(f"[summarize_issue] saved {repo}#{number} — {record['summary'][:120]}…", flush=True)
+    return record
+
+
+# ---------------------------------------------------------------------------
 # Cron — periodic tick
 #
 # The cron source runs as a LoopSource inside the CP, emitting a "tick" event
@@ -183,7 +257,7 @@ if __name__ == "__main__":
         f"  node_id            = {app.node_id}\n"
         f"  agentfield_server  = {os.getenv('AGENTFIELD_URL', 'http://localhost:8080')}\n"
         f"  callback url       = {os.getenv('AGENT_CALLBACK_URL', f'http://localhost:{port}')}\n"
-        "  reasoners          = handle_payment (stripe), handle_pr (github), handle_tick (cron)",
+        "  reasoners          = handle_payment (stripe), handle_pr (github), summarize_issue (github), handle_tick (cron)",
         flush=True,
         file=sys.stderr,
     )

@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { RunTrace, buildTraceTree, formatDuration } from "@/components/RunTrace";
+import { SourceIcon } from "@/components/triggers/SourceIcon";
+import { ArrowUpRight } from "@/components/ui/icon-bridge";
 import { StepDetail } from "@/components/StepDetail";
 import { WorkflowDAGViewer } from "@/components/WorkflowDAG";
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -159,80 +161,6 @@ function deriveRunParticipants(dag: WorkflowDAGLightweightResponse): {
 
 
 
-/**
- * TriggerCard displays webhook trigger information if present
- */
-function RunContextTriggerCard({ trigger }: { trigger?: TriggerInfo }) {
-  if (!trigger) {
-    return null;
-  }
-  
-  const sourceName = trigger.source_name.charAt(0).toUpperCase() + trigger.source_name.slice(1);
-  const receivedAt = new Date(trigger.received_at).toLocaleString();
-  
-  return (
-    <Card className="min-w-0 border-border/80 shadow-none">
-      <CardContent className="p-3">
-        <div className="mb-2 flex items-center gap-0.5">
-          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
-            Trigger
-          </p>
-        </div>
-        <div className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
-              ↪ {sourceName}
-            </span>
-            <span className="text-xs text-muted-foreground font-mono">{trigger.event_type}</span>
-          </div>
-          <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between">
-              <span>Event ID:</span>
-              <code className="font-mono text-micro text-foreground/80">{trigger.event_id.substring(0, 16)}…</code>
-            </div>
-            {trigger.idempotency_key && (
-              <div className="flex items-center justify-between">
-                <span>Idempotency Key:</span>
-                <code className="font-mono text-micro text-foreground/80">{trigger.idempotency_key.substring(0, 16)}…</code>
-              </div>
-            )}
-            <div className="flex items-center justify-between">
-              <span>Received:</span>
-              <span className="text-foreground/70">{receivedAt}</span>
-            </div>
-          </div>
-          {trigger.payload && (
-            <div className="border-t border-border/40 pt-2">
-              <details className="text-micro">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
-                  Webhook input
-                </summary>
-                <div className="mt-1.5 max-h-48 overflow-auto rounded bg-muted/30 p-1.5">
-                  <pre className="text-nano font-mono whitespace-pre-wrap break-words text-muted-foreground">
-                    {JSON.stringify(trigger.payload, null, 2)}
-                  </pre>
-                </div>
-              </details>
-            </div>
-          )}
-          {trigger.trigger_id && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-1 h-7 text-xs w-full"
-              onClick={() => {
-                window.location.href = `/triggers?trigger=${trigger.trigger_id}&event=${trigger.event_id}`;
-              }}
-            >
-              View this trigger →
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function RunContextNodesCard({
   participantIds,
   source,
@@ -287,18 +215,30 @@ function RunContextNodesCard({
   );
 }
 
-/** Run-level webhook roll-up + failed rows with retry (like legacy workflow webhooks tab). */
+/**
+ * Run-level webhook roll-up.
+ *
+ * One card, two sections:
+ *   - Inbound: did a webhook (or schedule) trigger this run?
+ *   - Outbound: did this run register HTTP callbacks, and did any fail?
+ *
+ * Operators care about both directions — separating them into two cards
+ * created visual noise when one side was always empty for a given run.
+ */
 function RunContextWebhooksCard({
+  trigger,
   summary,
   failures,
   onSelectStep,
   onRefetchDag,
 }: {
+  trigger?: TriggerInfo;
   summary: WebhookRunSummary;
   failures: WebhookFailurePreview[];
   onSelectStep: (executionId: string) => void;
   onRefetchDag: () => void;
 }) {
+  const navigate = useNavigate();
   const [retrying, setRetrying] = useState<Record<string, boolean>>({});
   const [retryAllBusy, setRetryAllBusy] = useState(false);
   const [retryErr, setRetryErr] = useState<string | null>(null);
@@ -307,7 +247,9 @@ function RunContextWebhooksCard({
   const total = summary.total_deliveries;
   const failed = summary.failed_deliveries;
   const succeeded = Math.max(0, total - failed);
-  const empty = steps === 0 && total === 0;
+  const outboundEmpty = steps === 0 && total === 0;
+  const inboundEmpty = !trigger;
+  const empty = outboundEmpty && inboundEmpty;
   const pendingRegistrations = steps > 0 && total === 0;
 
   const runRetry = async (executionId: string) => {
@@ -351,34 +293,82 @@ function RunContextWebhooksCard({
       )}
     >
       <CardContent className={cn("p-3", empty && "py-2.5")}>
-        <div className={cn("flex items-center gap-0.5", empty ? "mb-0.5" : "mb-1")}>
+        <div className={cn("flex items-center gap-0.5", empty ? "mb-0.5" : "mb-2")}>
           <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             Webhooks
           </p>
           <RunContextHint label="About run-level webhook summary">
-            Counts outbound HTTP callbacks registered on steps in this run and delivery
-            attempts recorded by the control plane. Failed deliveries listed below can be
-            retried here; full attempt history stays in the selected step panel.
+            Inbound: the trigger that dispatched this run, if any. Outbound:
+            HTTP callbacks registered on steps in this run and delivery
+            attempts recorded by the control plane. Failed deliveries listed
+            below can be retried here.
           </RunContextHint>
         </div>
 
-        {empty ? (
-          <p className="text-micro-plus leading-tight text-muted-foreground">
-            No outbound webhooks—register a webhook URL on the reasoner to receive callbacks.
+        {/* INBOUND */}
+        <div className="mb-2">
+          <p className="mb-1 text-micro uppercase tracking-wider text-muted-foreground/75">
+            Inbound
           </p>
-        ) : pendingRegistrations ? (
-          <p className="text-xs text-foreground">
-            {steps} step{steps === 1 ? "" : "s"} registered for callbacks — no delivery
-            attempts recorded yet.
+          {trigger ? (
+            <button
+              type="button"
+              onClick={() => {
+                navigate(
+                  `/triggers?trigger=${encodeURIComponent(trigger.trigger_id)}` +
+                    (trigger.event_id
+                      ? `&event=${encodeURIComponent(trigger.event_id)}`
+                      : ""),
+                );
+              }}
+              className="group flex w-full items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={`View this trigger — ${trigger.event_type || "all events"}`}
+            >
+              <SourceIcon source={trigger.source_name} size="compact" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium lowercase">
+                  {trigger.source_name}
+                </p>
+                <p className="truncate font-mono text-micro text-muted-foreground">
+                  {trigger.event_type || "all events"}
+                </p>
+              </div>
+              <ArrowUpRight
+                className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                aria-hidden
+              />
+            </button>
+          ) : (
+            <p className="text-micro-plus leading-tight text-muted-foreground">
+              Not triggered by a webhook — invoked directly or by another reasoner.
+            </p>
+          )}
+        </div>
+
+        {/* OUTBOUND */}
+        <div className={cn("border-t border-border/40 pt-2", outboundEmpty && "border-dashed")}>
+          <p className="mb-1 text-micro uppercase tracking-wider text-muted-foreground/75">
+            Outbound
           </p>
-        ) : (
-          <p className="text-xs text-foreground">
-            {steps} step{steps === 1 ? "" : "s"} with callbacks · {total} delivery
-            {total === 1 ? "" : "ies"}
-            {succeeded > 0 ? ` · ${succeeded} succeeded` : ""}
-            {failed > 0 ? ` · ${failed} failed` : ""}
-          </p>
-        )}
+          {outboundEmpty ? (
+            <p className="text-micro-plus leading-tight text-muted-foreground">
+              No outbound webhooks — register a webhook URL on the reasoner to
+              receive callbacks.
+            </p>
+          ) : pendingRegistrations ? (
+            <p className="text-xs text-foreground">
+              {steps} step{steps === 1 ? "" : "s"} registered for callbacks — no
+              delivery attempts recorded yet.
+            </p>
+          ) : (
+            <p className="text-xs text-foreground">
+              {steps} step{steps === 1 ? "" : "s"} with callbacks · {total} delivery
+              {total === 1 ? "" : "ies"}
+              {succeeded > 0 ? ` · ${succeeded} succeeded` : ""}
+              {failed > 0 ? ` · ${failed} failed` : ""}
+            </p>
+          )}
+        </div>
 
         {failures.length > 0 ? (
           <div className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
@@ -462,7 +452,7 @@ function RunContextWebhooksCard({
           <p className="mt-1.5 text-micro text-destructive">{retryErr}</p>
         ) : null}
 
-        {!empty ? (
+        {!outboundEmpty ? (
           <p
             className={cn(
               "mt-1.5 text-micro leading-snug text-muted-foreground",
@@ -1104,19 +1094,15 @@ export function RunDetailPage() {
         );
       })()}
 
-      {/* Nodes + webhooks + trigger — always show run-level strip (empty states explicit) */}
+      {/* Nodes + webhooks — run-level strip with empty states */}
       <TooltipProvider delayDuration={280}>
-        {dag.trigger && (
-          <div className="mb-3">
-            <RunContextTriggerCard trigger={dag.trigger} />
-          </div>
-        )}
         <div className="mb-3 grid min-w-0 gap-3 sm:grid-cols-2">
           <RunContextNodesCard
             participantIds={participants.ids}
             source={participants.source}
           />
           <RunContextWebhooksCard
+            trigger={dag.trigger}
             summary={dag.webhook_summary ?? ZERO_WEBHOOK_SUMMARY}
             failures={dag.webhook_failures ?? []}
             onSelectStep={setSelectedStepId}

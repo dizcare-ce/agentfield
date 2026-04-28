@@ -50,6 +50,11 @@ services:
       AGENT_NODE_ID: triggers-demo-agent
       AGENT_CALLBACK_URL: http://triggers-demo-agent:8001
       PORT: "8001"
+      # OpenRouter API key is read from the host shell when compose starts.
+      # The summarize_issue reasoner uses litellm under the hood, which
+      # routes "openrouter/<model>" prefixed model strings to OpenRouter
+      # using this env var.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     ports:
       - "8001:8001"
     restart: unless-stopped

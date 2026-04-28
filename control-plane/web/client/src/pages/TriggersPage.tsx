@@ -440,7 +440,7 @@ export function TriggersPage() {
     search.trim() !== "";
 
   return (
-    <div className="flex flex-1 flex-col gap-6 bg-background p-6 text-foreground">
+    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden">
       <PageHeader
         title="Active triggers"
         description="Inbound wirings dispatching provider events, schedules, and webhooks into reasoners."

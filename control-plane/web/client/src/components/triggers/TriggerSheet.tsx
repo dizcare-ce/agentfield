@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import {
 import {
   Activity,
   ArrowLeftRight,
+  ArrowUpRight,
   Lock,
   PauseFilled,
   SlidersHorizontal,
@@ -94,6 +96,7 @@ export function TriggerSheet({
   onEnabledChange,
   onDelete,
 }: TriggerSheetProps) {
+  const navigate = useNavigate();
   const [events, setEvents] = useState<InboundEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [eventError, setEventError] = useState<string | null>(null);
@@ -367,19 +370,52 @@ export function TriggerSheet({
                     className="mt-0 space-y-5"
                   >
                     <DetailSection title="Dispatch target">
-                      <RowList
-                        rows={[
-                          [
-                            "Target",
-                            `${trigger.target_node_id}.${trigger.target_reasoner}`,
-                          ],
-                          ["Last update", formatDate(trigger.updated_at)],
-                        ]}
-                      />
+                      <dl className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-1">
+                          <dt className="text-xs text-muted-foreground">
+                            Target
+                          </dt>
+                          <dd>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigate(
+                                  `/runs?search=${encodeURIComponent(trigger.target_reasoner)}`,
+                                );
+                              }}
+                              className="group inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/30 px-2 py-1 font-mono text-xs transition-colors hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              title={`View runs for ${trigger.target_reasoner}`}
+                            >
+                              <span className="min-w-0 truncate">
+                                <span className="text-muted-foreground">
+                                  {trigger.target_node_id}
+                                </span>
+                                <span className="text-muted-foreground/60">.</span>
+                                <span className="font-medium text-foreground">
+                                  {trigger.target_reasoner}
+                                </span>
+                              </span>
+                              <ArrowUpRight
+                                className="size-3 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                                aria-hidden
+                              />
+                            </button>
+                          </dd>
+                        </div>
+                        <div className="grid gap-1">
+                          <dt className="text-xs text-muted-foreground">
+                            Last update
+                          </dt>
+                          <dd className="font-mono text-xs text-foreground">
+                            {formatDate(trigger.updated_at)}
+                          </dd>
+                        </div>
+                      </dl>
                     </DetailSection>
                     <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-                      Dispatch log rows appear here once the API surfaces
-                      per-trigger dispatch history.
+                      Click the target above to jump to runs originating from
+                      this reasoner. Per-trigger dispatch log rows appear here
+                      once the API surfaces them.
                     </div>
                   </AnimatedTabsContent>
                 </div>

@@ -208,7 +208,7 @@ export function IntegrationsPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 bg-background p-6 text-foreground">
+    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden">
       <PageHeader
         title="Integrations"
         description="Connect external services, schedules, and webhooks to your reasoners."
