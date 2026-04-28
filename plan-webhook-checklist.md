@@ -273,7 +273,15 @@ Plan items:
 
 ---
 
-## 5. Source of truth — code-managed vs UI-managed (drives §6 UI design)
+## 5. Source of truth — code-managed vs UI-managed ✅ SHIPPED (Phase 3)
+
+Backend in commit `754c6954`. Python SDK in `919419b7`. Go SDK in `0e9d222d`.
+
+Sticky-pause + orphan flow + code_origin drift card all working end-to-end. 3 integration tests cover the headline scenarios. Endpoints `POST /api/v1/triggers/:id/{pause,resume,convert-to-ui}` are mounted and tested.
+
+Below is the design reference; the boxes are now retroactive.
+
+
 
 Both code-declared and UI-created triggers exist as separate rows. Conflicts get resolved by these rules. The rules below dictate what the UI exposes (§6) and what the registration upsert does on the backend.
 
