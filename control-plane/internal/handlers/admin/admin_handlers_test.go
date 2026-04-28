@@ -574,4 +574,6 @@ func (m *mockTagStorage) InboundEventExistsByIdempotency(context.Context, string
 func (m *mockTagStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *mockTagStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (m *mockTagStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (m *mockTagStorage) SetInboundEventDispatchedWorkflow(context.Context, string, string) error { return nil }
+func (m *mockTagStorage) GetInboundEventByWorkflowID(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *mockTagStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

@@ -231,11 +231,11 @@ class TestTransformMatching:
     @pytest.mark.unit
     def test_transform_matching_event_type_prefix(self):
         """Verify event_type matching uses prefix logic."""
-        binding = EventTrigger(
+        _binding = EventTrigger(
             source="github",
             types=["pull_request"],  # prefix
         )
-        
+
         # "pull_request.opened" starts with "pull_request"
         assert "pull_request.opened".startswith("pull_request")
         assert "pull_request.synchronize".startswith("pull_request")
@@ -285,7 +285,7 @@ class TestTriggerContextIntegration:
             return {"ok": True}
         
         # Simulate envelope POST
-        envelope = {
+        _envelope = {
             "event": {"id": "pi_123"},
             "_meta": {
                 "trigger_id": "trg_1",
@@ -296,7 +296,7 @@ class TestTriggerContextIntegration:
                 "received_at": "2026-04-28T12:00:00Z",
             },
         }
-        
+
         # Note: Real integration test would POST to agent endpoint
         # This is a placeholder showing the expected behavior
 

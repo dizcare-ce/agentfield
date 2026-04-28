@@ -2,8 +2,8 @@
 
 import pytest
 from agentfield import Agent
-from agentfield.decorators import reasoner, on_event, on_schedule
-from agentfield.triggers import EventTrigger, ScheduleTrigger
+from agentfield.decorators import reasoner, on_schedule
+from agentfield.triggers import EventTrigger
 
 
 @pytest.mark.unit

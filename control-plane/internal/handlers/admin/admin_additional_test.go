@@ -473,4 +473,6 @@ func (m *adminStorageMock) InboundEventExistsByIdempotency(context.Context, stri
 func (m *adminStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *adminStorageMock) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (m *adminStorageMock) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (m *adminStorageMock) SetInboundEventDispatchedWorkflow(context.Context, string, string) error { return nil }
+func (m *adminStorageMock) GetInboundEventByWorkflowID(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *adminStorageMock) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

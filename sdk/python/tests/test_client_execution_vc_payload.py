@@ -4,7 +4,7 @@ Tests that the SDK includes parent_vc_id in the execution_context when posting t
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from agentfield.vc_generator import VCGenerator
 from agentfield.execution_context import ExecutionContext
 from datetime import datetime, timezone
@@ -59,7 +59,7 @@ def test_vc_generator_includes_parent_vc_id_in_payload():
         }
         mock_post.return_value = mock_response
 
-        result = vc_gen.generate_execution_vc(
+        vc_gen.generate_execution_vc(
             execution_context=exec_context,
             input_data=input_data,
             output_data=output_data,
@@ -128,7 +128,7 @@ def test_vc_generator_omits_parent_vc_id_when_none():
         }
         mock_post.return_value = mock_response
 
-        result = vc_gen.generate_execution_vc(
+        vc_gen.generate_execution_vc(
             execution_context=exec_context,
             input_data=input_data,
             output_data=output_data,
