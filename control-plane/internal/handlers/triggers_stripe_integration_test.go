@@ -20,7 +20,6 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
-	_ "github.com/Agent-Field/agentfield/control-plane/internal/sources/stripe"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -111,7 +110,6 @@ func TestStripeIngest_HappyPath(t *testing.T) {
 		TargetReasoner: "handle_payment",
 		ManagedBy:      types.ManagedByCode,
 		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
 		SecretEnvVar:   "STRIPE_TEST_SECRET",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
@@ -222,7 +220,6 @@ func TestStripeIngest_IdempotencyDedup(t *testing.T) {
 		TargetReasoner: "process_charge",
 		ManagedBy:      types.ManagedByCode,
 		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
 		SecretEnvVar:   "STRIPE_IDEM_SECRET",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
@@ -316,7 +313,6 @@ func TestStripeIngest_BadSignature(t *testing.T) {
 		TargetReasoner: "reject_charge",
 		ManagedBy:      types.ManagedByCode,
 		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
 		SecretEnvVar:   "STRIPE_BAD_SECRET",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
@@ -382,7 +378,6 @@ func TestStripeIngest_ExpiredTimestamp(t *testing.T) {
 		TargetReasoner: "handle_invoice",
 		ManagedBy:      types.ManagedByCode,
 		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
 		SecretEnvVar:   "STRIPE_EXPIRED_SECRET",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
@@ -446,7 +441,6 @@ func TestStripeIngest_DispatchedEventStatusUpdate(t *testing.T) {
 		TargetReasoner: "update_payment",
 		ManagedBy:      types.ManagedByCode,
 		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
 		SecretEnvVar:   "STRIPE_STATUS_SECRET",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),

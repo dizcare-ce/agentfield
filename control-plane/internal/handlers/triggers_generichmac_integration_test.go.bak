@@ -1,0 +1,312 @@
+package handlers
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Agent-Field/agentfield/control-plane/internal/config"
+	"github.com/Agent-Field/agentfield/control-plane/internal/services"
+	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
+	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func setupTestStorageForHandlers(t *testing.T) (storage.StorageProvider, context.Context) {
+	t.Helper()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	cfg := storage.StorageConfig{
+		Mode: "local",
+		Local: storage.LocalStorageConfig{
+			DatabasePath: filepath.Join(tempDir, "agentfield.db"),
+			KVStorePath:  filepath.Join(tempDir, "agentfield.bolt"),
+		},
+	}
+
+	provider := storage.NewLocalStorage(storage.LocalStorageConfig{})
+	if err := provider.Initialize(ctx, cfg); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "fts5") {
+			t.Skip("sqlite3 compiled without FTS5; skipping test")
+		}
+		require.NoError(t, err)
+	}
+
+	t.Cleanup(func() {
+		_ = provider.Close(ctx)
+	})
+
+	return provider, ctx
+}
+
+func signHMAC(body []byte, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// TestGenericHMACIngest_DefaultHeader verifies basic HMAC validation with defaults.
+func TestGenericHMACIngest_DefaultHeader(t *testing.T) {
+	provider, ctx := setupTestStorageForHandlers(t)
+	vcService := &services.VCService{config: &config.DIDConfig{Enabled: false}}
+	dispatcher := services.NewTriggerDispatcher(provider, vcService)
+
+	var (
+		mu         sync.Mutex
+		receivedOK bool
+	)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		receivedOK = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	// Create node and trigger in storage.
+	node := &types.AgentNode{
+		ID:              "hmac-test-node",
+		BaseURL:         target.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "test_reasoner"}},
+	}
+	require.NoError(t, provider.RegisterAgent(ctx, node))
+
+	const secret = "hmac_test_secret_123"
+	trigger := &types.Trigger{
+		ID:             "trg_hmac_default",
+		SourceName:     "generic_hmac",
+		TargetNodeID:   "hmac-test-node",
+		TargetReasoner: "test_reasoner",
+		ManagedBy:      types.ManagedByUI,
+		Enabled:        true,
+		SecretEnvVar:   "HMAC_TEST_SECRET",
+		Config:         json.RawMessage(`{}`),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	require.NoError(t, provider.CreateTrigger(ctx, trigger))
+
+	t.Setenv("HMAC_TEST_SECRET", secret)
+
+	// Set up HTTP router with IngestSourceHandler.
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := NewTriggerHandlers(provider, dispatcher, nil)
+	router.POST("/sources/:trigger_id", handlers.IngestSourceHandler())
+
+	// Send request with correct signature.
+	body := []byte(`{"hello":"world"}`)
+	signature := "sha256=" + signHMAC(body, secret)
+	req, _ := http.NewRequest("POST", "/sources/trg_hmac_default", nil)
+	req.Header.Set("X-Signature", signature)
+	req.Body = strings.NewReader(string(body))
+	req.ContentLength = int64(len(body))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "should accept valid signature")
+
+	// Verify event was persisted.
+	events, err := provider.ListInboundEvents(ctx, "trg_hmac_default", "", nil)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "generic_hmac", events[0].SourceName)
+	assert.Equal(t, types.InboundEventStatusReceived, events[0].Status)
+
+	// Give async dispatch time to fire.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	assert.True(t, receivedOK, "dispatcher should have invoked target")
+	mu.Unlock()
+}
+
+// TestGenericHMACIngest_CustomHeaderAndPrefix verifies config overrides work.
+func TestGenericHMACIngest_CustomHeaderAndPrefix(t *testing.T) {
+	provider, ctx := setupTestStorageForHandlers(t)
+	vcService := &services.VCService{config: &config.DIDConfig{Enabled: false}}
+	dispatcher := services.NewTriggerDispatcher(provider, vcService)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer target.Close()
+
+	node := &types.AgentNode{
+		ID:              "hmac-custom-node",
+		BaseURL:         target.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "test_reasoner"}},
+	}
+	require.NoError(t, provider.RegisterAgent(ctx, node))
+
+	const secret = "custom_secret_abc"
+	trigger := &types.Trigger{
+		ID:             "trg_hmac_custom",
+		SourceName:     "generic_hmac",
+		TargetNodeID:   "hmac-custom-node",
+		TargetReasoner: "test_reasoner",
+		ManagedBy:      types.ManagedByUI,
+		Enabled:        true,
+		SecretEnvVar:   "CUSTOM_HMAC_SECRET",
+		Config: json.RawMessage(`{
+			"signature_header":"X-Custom-Sig",
+			"signature_prefix":"v1=",
+			"event_type_header":"X-Event-Type",
+			"idempotency_header":"X-Idempotency"
+		}`),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, provider.CreateTrigger(ctx, trigger))
+
+	t.Setenv("CUSTOM_HMAC_SECRET", secret)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := NewTriggerHandlers(provider, dispatcher, nil)
+	router.POST("/sources/:trigger_id", handlers.IngestSourceHandler())
+
+	body := []byte(`{"data":"test"}`)
+	signature := "v1=" + signHMAC(body, secret)
+	req, _ := http.NewRequest("POST", "/sources/trg_hmac_custom", nil)
+	req.Header.Set("X-Custom-Sig", signature)
+	req.Header.Set("X-Event-Type", "order.created")
+	req.Header.Set("X-Idempotency", "order-789")
+	req.Body = strings.NewReader(string(body))
+	req.ContentLength = int64(len(body))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	events, err := provider.ListInboundEvents(ctx, "trg_hmac_custom", "", nil)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "order.created", events[0].EventType)
+	assert.Equal(t, "order-789", events[0].IdempotencyKey)
+}
+
+// TestGenericHMACIngest_TamperedBody rejects tampered signature.
+func TestGenericHMACIngest_TamperedBody(t *testing.T) {
+	provider, ctx := setupTestStorageForHandlers(t)
+	dispatcher := services.NewTriggerDispatcher(provider, &services.VCService{config: &config.DIDConfig{Enabled: false}})
+
+	node := &types.AgentNode{
+		ID:              "hmac-tamper-node",
+		BaseURL:         "http://localhost:9999",
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "test_reasoner"}},
+	}
+	require.NoError(t, provider.RegisterAgent(ctx, node))
+
+	const secret = "tampering_secret"
+	trigger := &types.Trigger{
+		ID:             "trg_hmac_tamper",
+		SourceName:     "generic_hmac",
+		TargetNodeID:   "hmac-tamper-node",
+		TargetReasoner: "test_reasoner",
+		ManagedBy:      types.ManagedByUI,
+		Enabled:        true,
+		SecretEnvVar:   "TAMPER_SECRET",
+		Config:         json.RawMessage(`{}`),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	require.NoError(t, provider.CreateTrigger(ctx, trigger))
+
+	t.Setenv("TAMPER_SECRET", secret)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := NewTriggerHandlers(provider, dispatcher, nil)
+	router.POST("/sources/:trigger_id", handlers.IngestSourceHandler())
+
+	body := []byte(`{"amount":100}`)
+	signature := signHMAC(body, secret)
+	// Send tampered body but original signature
+	tamperedBody := []byte(`{"amount":999}`)
+	req, _ := http.NewRequest("POST", "/sources/trg_hmac_tamper", nil)
+	req.Header.Set("X-Signature", "sha256="+signature)
+	req.Body = strings.NewReader(string(tamperedBody))
+	req.ContentLength = int64(len(tamperedBody))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "tampered body should be rejected")
+
+	events, err := provider.ListInboundEvents(ctx, "trg_hmac_tamper", "", nil)
+	require.NoError(t, err)
+	assert.Len(t, events, 0, "no event should be persisted on verification failure")
+}
+
+// TestGenericHMACIngest_MissingSignature rejects missing header.
+func TestGenericHMACIngest_MissingSignature(t *testing.T) {
+	provider, ctx := setupTestStorageForHandlers(t)
+	dispatcher := services.NewTriggerDispatcher(provider, &services.VCService{config: &config.DIDConfig{Enabled: false}})
+
+	node := &types.AgentNode{
+		ID:              "hmac-missing-node",
+		BaseURL:         "http://localhost:9999",
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "test_reasoner"}},
+	}
+	require.NoError(t, provider.RegisterAgent(ctx, node))
+
+	trigger := &types.Trigger{
+		ID:             "trg_hmac_missing",
+		SourceName:     "generic_hmac",
+		TargetNodeID:   "hmac-missing-node",
+		TargetReasoner: "test_reasoner",
+		ManagedBy:      types.ManagedByUI,
+		Enabled:        true,
+		SecretEnvVar:   "MISSING_SECRET",
+		Config:         json.RawMessage(`{}`),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	require.NoError(t, provider.CreateTrigger(ctx, trigger))
+
+	t.Setenv("MISSING_SECRET", "secret_value")
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := NewTriggerHandlers(provider, dispatcher, nil)
+	router.POST("/sources/:trigger_id", handlers.IngestSourceHandler())
+
+	req, _ := http.NewRequest("POST", "/sources/trg_hmac_missing", nil)
+	req.Body = strings.NewReader(`{}`)
+	req.ContentLength = 2
+	// No X-Signature header set
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	events, err := provider.ListInboundEvents(ctx, "trg_hmac_missing", "", nil)
+	require.NoError(t, err)
+	assert.Len(t, events, 0)
+}

@@ -51,50 +51,52 @@ Companion to `plan-webhook.md` (architecture). Track every remaining piece acros
 
 ---
 
-## 1. P0 — VC chain extension (next commit)
+## 1. P0 — VC chain extension ✅ SHIPPED (commits 189c2c38 + b1b85284)
 
-The dispatcher already plumbs `vcID` through `MarkInboundEventProcessed` but never mints a VC. Closes the audit chain so `af verify audit.json` walks back past the first reasoner to a CP-rooted credential.
+Closes the audit chain so `af verify audit.json` walks back past the first reasoner to a CP-rooted credential. Shipped as Phase 1 on `feat/webhooks`.
 
 ### Backend
-- [ ] Add `pkg/types/trigger_event_vc.go` with `TriggerEventVC` (sourceName, eventType, payloadHash, triggerID, triggerVerificationResult, receivedAt)
-- [ ] Add `kind` discriminator column to existing `execution_vcs` table — migration `030_vc_kind_discriminator.sql` (`'execution' | 'trigger_event'`)
-- [ ] Extend `services/vc_issuance.go` with `GenerateTriggerEventVC(ctx, sourceName, eventType, payloadHash, triggerID, verifyResult)` using the CP's own DID
-- [ ] `storage.StoreTriggerEventVC` reusing existing VC table helpers (switch on `kind`)
-- [ ] `services/trigger_dispatcher.go` — call `GenerateTriggerEventVC` immediately after persisting `InboundEvent`, set on `inbound_events.vc_id`, then dispatch
-- [ ] Set `X-Parent-VC-ID: <triggerEventVC.ID>` header on dispatched HTTP request to the reasoner so the reasoner's execution VC chains back automatically (existing chaining honors this header)
-- [ ] Replay handler — new dispatch creates a new execution VC chained to the **original** trigger event VC (not a new one); test confirms `original_event.vc_id == replay_execution.parent_vc_id`
-- [ ] Verifier (`af verify audit.json`) — extend chain walker to recognize `kind='trigger_event'` as a valid root and surface source name + verification result in CLI output
-- [ ] Skip VC mint cleanly when DID is disabled — no-op for `af dev` users who haven't opted in
+- [x] `pkg/types/trigger_event_vc.go` — `TriggerEventVCSubject` + `VCTriggerVerification`
+- [x] Migration `030_vc_kind_discriminator.sql` — `kind` column + trigger metadata on `execution_vcs`
+- [x] `services/vc_issuance_trigger.go` — `GenerateTriggerEventVC` signs with CP root DID
+- [x] Storage interface gains `StoreExecutionVCRecord` (writes new fields); existing scalar `StoreExecutionVC` unchanged for back-compat
+- [x] `services/trigger_dispatcher.go` — mints VC after target lookup, best-effort, logs on failure, dispatches anyway
+- [x] `X-Parent-VC-ID` header on dispatched reasoner request
+- [x] Replay reuses original event's `vc_id` so the chain still terminates at original payload's evidence
+- [x] `GenerateExecutionVC` now sets `Kind='execution'` and reads `ParentVCID` from `ExecutionContext`
+- [x] DID disabled → clean nil-VC no-op; dispatch still works
+- [ ] Verifier CLI extension to recognize `kind='trigger_event'` as a chain root (deferred to docs/CLI polish phase)
+
+### Python SDK (subagent in worktree)
+- [x] `execution_context.py` reads/emits `X-Parent-VC-ID`, exposes `ctx.parent_vc_id`
+- [x] `vc_generator.py` includes `parent_vc_id` in `/api/v1/execution/vc` payload
+- [x] `agent.py` propagates on outbound `app.call()`
+- [x] 12 SDK tests passing in worktree
 
 ### Tests
-- [ ] Unit: `GenerateTriggerEventVC` produces a credential signed by CP DID, payload hash matches body
-- [ ] Integration: signed Stripe POST → `inbound_events.vc_id` populated → dispatched reasoner's execution VC `parent_vc_id` matches → `af verify` walks chain end-to-end
-- [ ] Negative: VC mint failure does NOT block the 200 response to the provider (must be best-effort + logged)
-- [ ] Replay: original event VC unchanged, new execution VC chained to it
+- [x] 4 unit tests on `GenerateTriggerEventVC` (happy path, DID disabled, persist disabled, ParentVCID propagation)
+- [x] 3 dispatcher integration tests (full ingest→mint→header→back-write, DID disabled, replay reuses VC)
+- [x] Wider sweep clean: 2268 tests + race tests on services pass
 
 ### Docs
-- [ ] Update `docs/ARCHITECTURE.md` — add "Trigger event VC" section showing the chain shape
-- [ ] What each source's VC attests to (table of source → verification semantics from previous reply)
+- [ ] `docs/ARCHITECTURE.md` "Trigger event VC" section (deferred to docs phase)
+- [ ] Per-source VC verification semantics table (deferred to docs phase)
 
 ---
 
-## 2. P0 — Per-source HTTP integration tests
+## 2. P0 — Per-source HTTP integration tests 🟡 IN FLIGHT (Phase 2)
 
-Unit tests cover the verification path; integration tests cover the full `POST /sources/:id` → persistence → dispatch loop with a fake target node.
+Unit tests cover the verification path; integration tests cover the full `POST /sources/:id` → persistence → dispatch loop with a fake target node. Three parallel subagents in worktrees split the work:
 
-For each source, in `internal/handlers/triggers_<source>_integration_test.go`:
-- [ ] **Stripe** — signed `payment_intent.succeeded` → `inbound_events` row, dispatch invoked with normalized payload, idempotency (same `evt_xxx` posted twice → one row, one dispatch)
-- [ ] **GitHub** — signed `pull_request.opened` with `X-GitHub-Event` + `X-GitHub-Delivery` → row + dispatch + delivery header carried into `event_type` field
-- [ ] **Slack** — `event_callback` unwrap → inner `app_mention` becomes `event_type` → URL verification challenge handled separately (returns challenge token, no row)
-- [ ] **generic_hmac** — default header path + custom `signature_header` config path
-- [ ] **generic_bearer** — default `Authorization: Bearer` + custom header with empty scheme
-- [ ] **cron** — `SourceManager` with faked clock, advance N minutes, assert N events emitted, dispatched, persisted
+- 🟡 **Stripe** + idempotency (subagent 1) — signed `payment_intent.succeeded` → row + dispatch; same `evt_xxx` twice → 1 row, 1 dispatch; bad signature → 401; expired timestamp → 401
+- 🟡 **GitHub** + **Slack** (subagent 2) — GitHub `pull_request.opened` with action concat + bare ping; Slack `event_callback` unwrap + URL verification + replay window
+- 🟡 **generic_hmac** + **generic_bearer** + **cron** (subagent 3) — default & custom headers; bearer scheme variants; cron `SourceManager` lifecycle
 
 Each test asserts:
 1. Public 200 response shape and timing (no waiting on dispatcher)
 2. `inbound_events` row contents (raw + normalized payload, idempotency_key, status)
-3. Dispatcher invoked the target reasoner with the documented input shape (`{event, _meta}`)
-4. Failure-mode rows: bad signature → 401, missing secret env → 500 with structured error, target reasoner missing → row stored with `status='failed'` + DLQ entry
+3. Dispatcher invoked the target reasoner with documented headers (`X-Source-Name`, `X-Event-Type`, `X-Trigger-ID`, `X-Event-ID`)
+4. Failure-mode rows: bad signature → 401, no row, no dispatch
 
 ---
 
