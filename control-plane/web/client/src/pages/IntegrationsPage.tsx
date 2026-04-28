@@ -331,7 +331,7 @@ export function IntegrationsPage() {
                         className={cn(
                           "size-2 rounded-full",
                           activeCount > 0
-                            ? "bg-emerald-500"
+                            ? "bg-status-success"
                             : "bg-muted-foreground/40",
                         )}
                         aria-hidden

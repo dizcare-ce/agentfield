@@ -33,6 +33,63 @@ interface NewTriggerDialogProps {
   onCreated: () => void;
 }
 
+interface SourceHints {
+  reasoner: string;
+  eventTypes: string;
+  secretEnv: string;
+  configJson: string;
+}
+
+const DEFAULT_HINTS: SourceHints = {
+  reasoner: "handle_event",
+  eventTypes: "",
+  secretEnv: "MY_SECRET",
+  configJson: "{}",
+};
+
+const SOURCE_HINTS: Record<string, SourceHints> = {
+  stripe: {
+    reasoner: "handle_payment",
+    eventTypes: "payment_intent.succeeded, invoice.paid",
+    secretEnv: "STRIPE_WEBHOOK_SECRET",
+    configJson: "{}",
+  },
+  github: {
+    reasoner: "handle_pr",
+    eventTypes: "pull_request, push",
+    secretEnv: "GITHUB_WEBHOOK_SECRET",
+    configJson: "{}",
+  },
+  slack: {
+    reasoner: "handle_message",
+    eventTypes: "event_callback",
+    secretEnv: "SLACK_SIGNING_SECRET",
+    configJson: "{}",
+  },
+  cron: {
+    reasoner: "handle_tick",
+    eventTypes: "",
+    secretEnv: "",
+    configJson: '{"expression": "* * * * *", "timezone": "UTC"}',
+  },
+  generic_hmac: {
+    reasoner: "handle_event",
+    eventTypes: "",
+    secretEnv: "MY_HMAC_SECRET",
+    configJson: "{}",
+  },
+  generic_bearer: {
+    reasoner: "handle_event",
+    eventTypes: "",
+    secretEnv: "MY_BEARER_TOKEN",
+    configJson: "{}",
+  },
+};
+
+function hintsFor(sourceName: string): SourceHints {
+  return SOURCE_HINTS[sourceName] ?? DEFAULT_HINTS;
+}
+
 const serverUrl =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
     "/api/ui/v1",
@@ -73,12 +130,15 @@ export function NewTriggerDialog({
     () => sources.find((s) => s.name === sourceName),
     [sources, sourceName],
   );
+  const hints = useMemo(() => hintsFor(sourceName), [sourceName]);
   const requiresSecret = selectedSource?.secret_required ?? false;
+  const isLoopSource = selectedSource?.kind === "loop";
+  const showEventTypes = !isLoopSource;
 
   // Sync source selection when the dialog is reopened with a different
-  // defaultSourceName (e.g. user clicked Connect on a specific Integrations card).
-  // Without this, the internal `sourceName` state stays at its initial value from
-  // first mount and ignores subsequent prop changes.
+  // defaultSourceName (e.g. user clicked Connect on a specific Integrations
+  // card). Without this, the internal `sourceName` state stays at its initial
+  // value from first mount and ignores subsequent prop changes.
   useEffect(() => {
     if (!open) return;
     if (defaultSourceName) {
@@ -87,6 +147,27 @@ export function NewTriggerDialog({
       setSourceName(sources[0].name);
     }
   }, [open, defaultSourceName, sources, sourceName]);
+
+  // When the source changes (or the dialog opens), preload the config JSON
+  // textarea with that source's recommended starter — empty `{}` for
+  // signed webhooks, a real cron expression for loop sources, etc. We only
+  // overwrite when the user hasn't typed a custom value yet (configJson is
+  // still the default "{}" or the previous source's hint).
+  useEffect(() => {
+    if (!open) return;
+    if (!selectedSource) return;
+    setConfigJson((current) => {
+      // Don't trample a user-entered config — only refresh if current value is
+      // a known starter (the previous source's default or empty).
+      const knownStarters = new Set(
+        Object.values(SOURCE_HINTS).map((h) => h.configJson),
+      );
+      knownStarters.add("{}");
+      knownStarters.add("");
+      if (knownStarters.has(current.trim())) return hints.configJson;
+      return current;
+    });
+  }, [open, selectedSource, hints.configJson]);
 
   const handleOpenChange = (newOpen: boolean) => {
     if (newOpen === false) {
@@ -142,8 +223,9 @@ export function NewTriggerDialog({
         <DialogHeader>
           <DialogTitle>New trigger</DialogTitle>
           <DialogDescription>
-            Bind an inbound event source to a reasoner. The control plane will
-            verify provider signatures using the env-var-named secret.
+            {isLoopSource
+              ? "Bind a recurring schedule to a reasoner. The control plane fires the trigger on the schedule defined in the config below."
+              : "Bind an inbound event source to a reasoner. The control plane verifies provider signatures using the env-var-named secret before dispatching."}
           </DialogDescription>
         </DialogHeader>
 
@@ -178,58 +260,58 @@ export function NewTriggerDialog({
               <Input
                 value={targetReasoner}
                 onChange={(e) => setTargetReasoner(e.target.value)}
-                placeholder="handle_payment"
+                placeholder={hints.reasoner}
               />
             </div>
           </div>
 
-          <div className="grid gap-1.5">
-            <Label>Event types (comma-separated, blank = all)</Label>
-            <Input
-              value={eventTypes}
-              onChange={(e) => setEventTypes(e.target.value)}
-              placeholder="payment_intent.succeeded, invoice.paid"
-            />
-          </div>
+          {showEventTypes ? (
+            <div className="grid gap-1.5">
+              <Label>Event types (comma-separated, blank = all)</Label>
+              <Input
+                value={eventTypes}
+                onChange={(e) => setEventTypes(e.target.value)}
+                placeholder={hints.eventTypes || "(blank for all events)"}
+              />
+            </div>
+          ) : null}
 
-          {requiresSecret && (
+          {requiresSecret ? (
             <div className="grid gap-1.5">
               <Label>Secret env var</Label>
               <Input
                 value={secretEnv}
                 onChange={(e) => setSecretEnv(e.target.value)}
-                placeholder="STRIPE_WEBHOOK_SECRET"
+                placeholder={hints.secretEnv}
               />
               <p className="text-xs text-muted-foreground">
                 The control plane reads this env var at request time — the
                 secret value never leaves the server.
               </p>
             </div>
-          )}
+          ) : null}
 
           <div className="grid gap-1.5">
             <Label>Config (JSON, source-specific)</Label>
             <textarea
               value={configJson}
               onChange={(e) => setConfigJson(e.target.value)}
-              rows={4}
+              rows={isLoopSource ? 3 : 4}
               className="rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
             />
-            {selectedSource && (
+            {selectedSource ? (
               <p className="text-xs text-muted-foreground">
                 Schema:{" "}
-                <code>
-                  {JSON.stringify(selectedSource.config_schema)}
-                </code>
+                <code>{JSON.stringify(selectedSource.config_schema)}</code>
               </p>
-            )}
+            ) : null}
           </div>
 
-          {error && (
+          {error ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
             </div>
-          )}
+          ) : null}
         </div>
 
         <DialogFooter>
