@@ -13,7 +13,6 @@ import { TechnicalSection } from "./sections/TechnicalSection";
 import { TimingSection } from "./sections/TimingSection";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "../ui/badge";
-import { Empty } from "../ui/empty";
 
 interface WorkflowNodeData {
   workflow_id: string;
@@ -308,10 +307,10 @@ function TriggersSection({ nodeId }: { nodeId: string }) {
           </p>
         </CardHeader>
         <CardContent>
-          <Empty
-            title="No triggers"
-            description="This node has no bound triggers. Triggers route inbound events to this node."
-          />
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            No triggers bound to this node yet. Triggers route inbound
+            webhook events into this node's reasoners.
+          </div>
         </CardContent>
       </Card>
     );

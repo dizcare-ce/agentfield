@@ -81,7 +81,7 @@ def _stripe_to_payment(event: dict) -> Dict[str, Any]:
         ),
     ],
 )
-async def handle_payment(payment: dict, ctx, trigger: TriggerContext | None = None):
+async def handle_payment(payment: dict, trigger: TriggerContext | None = None):
     """Records a Stripe payment, deterministically."""
     record = {
         "kind": "payment",
@@ -92,7 +92,7 @@ async def handle_payment(payment: dict, ctx, trigger: TriggerContext | None = No
         "received_via": trigger.source if trigger else "direct_call",
         "trigger_event_id": trigger.event_id if trigger else None,
     }
-    await app.memory.set(scope="agent", key=f"payment:{record['stripe_id']}", value=record)
+    await app.memory.set(key=f"payment:{record['stripe_id']}", data=record)
     print(f"[handle_payment] saved {record}", flush=True)
     return record
 
@@ -112,7 +112,7 @@ async def handle_payment(payment: dict, ctx, trigger: TriggerContext | None = No
     types=["pull_request"],
     secret_env="GITHUB_DEMO_SECRET",
 )
-async def handle_pr(event: dict, ctx, trigger: TriggerContext | None = None):
+async def handle_pr(event: dict, trigger: TriggerContext | None = None):
     """Records a GitHub pull_request action."""
     pr = event.get("pull_request", {})
     record = {
@@ -128,7 +128,7 @@ async def handle_pr(event: dict, ctx, trigger: TriggerContext | None = None):
     }
     if record["repo"] and record["number"]:
         key = f"pr:{record['repo']}#{record['number']}"
-        await app.memory.set(scope="agent", key=key, value=record)
+        await app.memory.set(key=key, data=record)
     print(f"[handle_pr] saved {record}", flush=True)
     return record
 
@@ -144,16 +144,16 @@ async def handle_pr(event: dict, ctx, trigger: TriggerContext | None = None):
 
 @app.reasoner()
 @on_schedule("* * * * *")
-async def handle_tick(_input, ctx, trigger: TriggerContext | None = None):
+async def handle_tick(_input, trigger: TriggerContext | None = None):
     """Increments a cron-fire counter and records the wall-clock time."""
     counter_key = "cron:tick:count"
-    current = (await app.memory.get(scope="agent", key=counter_key)) or {"count": 0}
+    current = (await app.memory.get(key=counter_key)) or {"count": 0}
     record = {
         "count": (current.get("count") or 0) + 1,
         "last_fired_at": trigger.received_at.isoformat() if trigger else None,
         "received_via": trigger.source if trigger else "direct_call",
     }
-    await app.memory.set(scope="agent", key=counter_key, value=record)
+    await app.memory.set(key=counter_key, data=record)
     print(f"[handle_tick] {record}", flush=True)
     return record
 

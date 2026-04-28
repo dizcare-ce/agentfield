@@ -799,11 +799,16 @@ class Agent(FastAPI):
         triggers = getattr(entry, "triggers", None)
         accepts_webhook = getattr(entry, "accepts_webhook", "warn")
         if kind == "reasoner":
-            if accepts_webhook not in ("warn", None):
-                # Only include if not the default
+            # Normalize the 3-state value to one of "true" / "false" / "warn"
+            # before serialization. The control plane's ReasonerDefinition
+            # types AcceptsWebhook as *string and rejects bool literals.
+            if accepts_webhook is True:
+                metadata["accepts_webhook"] = "true"
+            elif accepts_webhook is False:
+                metadata["accepts_webhook"] = "false"
+            elif isinstance(accepts_webhook, str) and accepts_webhook in ("true", "false", "warn"):
                 metadata["accepts_webhook"] = accepts_webhook
-            elif accepts_webhook == "warn" or accepts_webhook is None:
-                # Explicitly set to "warn" if it's the default
+            else:
                 metadata["accepts_webhook"] = "warn"
         if kind == "reasoner" and triggers:
             from .triggers import trigger_to_payload  # local import to avoid cycle
@@ -1639,6 +1644,8 @@ class Agent(FastAPI):
         *,
         vc_enabled: Optional[bool] = None,
         require_realtime_validation: bool = False,
+        triggers: Optional[List[Any]] = None,
+        accepts_webhook: Optional[Any] = None,
     ):
         """
         Decorator to register a reasoner function.
@@ -1652,12 +1659,17 @@ class Agent(FastAPI):
             tags (List[str] | None, optional): Organizational tags that travel with the reasoner metadata.
             vc_enabled (bool | None, optional): Override VC generation for this reasoner. True forces VC creation,
                 False disables it, and None inherits the agent-level policy.
+            triggers (list, optional): EventTrigger / ScheduleTrigger declarations. Same shape as the
+                module-level @reasoner kwarg. Stamps each as a code-managed trigger at registration time.
+            accepts_webhook (bool | "warn" | None, optional): 3-state UI guardrail flag.
         """
 
         direct_registration: Optional[Callable] = None
         decorator_path = path
         decorator_name = name
         decorator_tags = tags
+        kwarg_triggers = list(triggers) if triggers else None
+        kwarg_accepts_webhook = accepts_webhook
 
         if decorator_path and (
             inspect.isfunction(decorator_path) or inspect.ismethod(decorator_path)
@@ -1666,6 +1678,28 @@ class Agent(FastAPI):
             decorator_path = None
 
         def decorator(func: Callable) -> Callable:
+            # Merge any sugar-staged triggers (from @on_event / @on_schedule)
+            # with the explicit `triggers=[...]` kwarg passed to @app.reasoner.
+            # Mirrors the module-level @reasoner contract so the same syntax
+            # works under either decorator entry point.
+            staged = getattr(func, "_pending_triggers", None) or []
+            merged_triggers = list(kwarg_triggers or []) + list(staged)
+            if staged:
+                try:
+                    delattr(func, "_pending_triggers")
+                except AttributeError:
+                    pass
+            if merged_triggers:
+                setattr(func, "_reasoner_triggers", merged_triggers)
+                # Auto-set accepts_webhook=True when the dev declared triggers,
+                # unless they explicitly passed something else.
+                if kwarg_accepts_webhook is None:
+                    setattr(func, "_accepts_webhook", True)
+                else:
+                    setattr(func, "_accepts_webhook", kwarg_accepts_webhook)
+            elif kwarg_accepts_webhook is not None:
+                setattr(func, "_accepts_webhook", kwarg_accepts_webhook)
+
             # Extract function metadata
             func_name = func.__name__
             reasoner_id = decorator_name or func_name
@@ -1720,16 +1754,30 @@ class Agent(FastAPI):
                         content={"detail": "Invalid JSON body"},
                     )
 
-                # Validate input at runtime (replaces Pydantic validation)
-                try:
-                    validated_input = self._validate_handler_input(
-                        body, handler_input_fields
-                    )
-                except ValueError as e:
-                    return JSONResponse(
-                        status_code=422,
-                        content={"detail": str(e)},
-                    )
+                # Validate input at runtime (replaces Pydantic validation).
+                # When the body is the dispatcher's webhook envelope shape
+                # ({"event": ..., "_meta": ...}), skip field-level validation
+                # — the envelope is unwrapped further down and the reasoner's
+                # first positional gets the unwrapped (or transformed) value
+                # by way of _execute_reasoner_endpoint.
+                is_trigger_envelope = (
+                    isinstance(body, dict)
+                    and "event" in body
+                    and "_meta" in body
+                    and isinstance(body.get("_meta"), dict)
+                )
+                if is_trigger_envelope:
+                    validated_input = body
+                else:
+                    try:
+                        validated_input = self._validate_handler_input(
+                            body, handler_input_fields
+                        )
+                    except ValueError as e:
+                        return JSONResponse(
+                            status_code=422,
+                            content={"detail": str(e)},
+                        )
 
                 async def run_reasoner() -> Any:
                     return await self._execute_reasoner_endpoint(
@@ -2019,26 +2067,33 @@ class Agent(FastAPI):
                     payload_dict
                 )
 
-            try:
-                if should_convert_args(func):
-                    converted_args, converted_kwargs = convert_function_args(
-                        func, (), payload_dict
-                    )
-                    args = converted_args
-                    kwargs = converted_kwargs
-                else:
+            # When invoked via an inbound trigger, the (possibly transformed)
+            # payload IS the first positional argument — it's the provider's
+            # event itself, not a dict of named kwargs. Direct app.call()
+            # invocations keep the historical kwargs-from-dict shape.
+            if execution_context.trigger is not None:
+                args, kwargs = (payload_dict,), {}
+            else:
+                try:
+                    if should_convert_args(func):
+                        converted_args, converted_kwargs = convert_function_args(
+                            func, (), payload_dict
+                        )
+                        args = converted_args
+                        kwargs = converted_kwargs
+                    else:
+                        args, kwargs = (), payload_dict
+                except ValidationError as exc:
+                    raise ValidationError(
+                        f"Pydantic validation failed for reasoner '{reasoner_id}': {exc}",
+                        model=getattr(exc, "model", None),
+                    ) from exc
+                except Exception as exc:  # pragma: no cover - best effort log
+                    if self.dev_mode:
+                        log_debug(
+                            f"⚠️ Warning: Failed to convert arguments for {reasoner_id}: {exc}"
+                        )
                     args, kwargs = (), payload_dict
-            except ValidationError as exc:
-                raise ValidationError(
-                    f"Pydantic validation failed for reasoner '{reasoner_id}': {exc}",
-                    model=getattr(exc, "model", None),
-                ) from exc
-            except Exception as exc:  # pragma: no cover - best effort log
-                if self.dev_mode:
-                    log_debug(
-                        f"⚠️ Warning: Failed to convert arguments for {reasoner_id}: {exc}"
-                    )
-                args, kwargs = (), payload_dict
 
             if "execution_context" in signature.parameters:
                 kwargs["execution_context"] = execution_context
@@ -2489,16 +2544,30 @@ class Agent(FastAPI):
                         content={"detail": "Invalid JSON body"},
                     )
 
-                # Validate input at runtime (replaces Pydantic validation)
-                try:
-                    validated_input = self._validate_handler_input(
-                        body, handler_input_fields
-                    )
-                except ValueError as e:
-                    return JSONResponse(
-                        status_code=422,
-                        content={"detail": str(e)},
-                    )
+                # Validate input at runtime (replaces Pydantic validation).
+                # When the body is the dispatcher's webhook envelope shape
+                # ({"event": ..., "_meta": ...}), skip field-level validation
+                # — the envelope is unwrapped further down and the reasoner's
+                # first positional gets the unwrapped (or transformed) value
+                # by way of _execute_reasoner_endpoint.
+                is_trigger_envelope = (
+                    isinstance(body, dict)
+                    and "event" in body
+                    and "_meta" in body
+                    and isinstance(body.get("_meta"), dict)
+                )
+                if is_trigger_envelope:
+                    validated_input = body
+                else:
+                    try:
+                        validated_input = self._validate_handler_input(
+                            body, handler_input_fields
+                        )
+                    except ValueError as e:
+                        return JSONResponse(
+                            status_code=422,
+                            content={"detail": str(e)},
+                        )
 
                 # Extract execution context from request headers
                 execution_context = ExecutionContext.from_request(request, self.node_id)

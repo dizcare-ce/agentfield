@@ -215,7 +215,7 @@ function RunContextTriggerCard({ trigger }: { trigger?: TriggerInfo }) {
               </details>
             </div>
           )}
-          {dag.root_workflow_id && trigger.trigger_id && (
+          {trigger.trigger_id && (
             <Button
               variant="outline"
               size="sm"

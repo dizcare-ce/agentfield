@@ -31,7 +31,7 @@ import { shortRunIdForDashboard as shortRunId } from "@/components/dashboard/das
 import { useRuns } from "@/hooks/queries";
 import { useLLMHealth, useQueueStatus } from "@/hooks/queries";
 import { useAgents } from "@/hooks/queries";
-import { getDashboardSummary, getTriggerMetrics, type TriggerMetrics } from "@/services/dashboardService";
+import { getDashboardSummary, getTriggerMetrics } from "@/services/dashboardService";
 import { formatRelativeTime } from "@/utils/dateFormat";
 import {
   getStatusTheme,

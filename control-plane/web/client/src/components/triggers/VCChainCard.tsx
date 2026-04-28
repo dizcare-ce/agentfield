@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ArrowDown } from "@/components/ui/icon-bridge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
