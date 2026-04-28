@@ -502,6 +502,13 @@ type StorageProvider interface {
 	// The ctx scopes the write, and the identifiers, hashes, document, signature, and storage fields describe the VC record.
 	// Returns an error if the execution VC cannot be saved.
 	StoreExecutionVC(ctx context.Context, vcID, executionID, workflowID, sessionID, issuerDID, targetDID, callerDID, inputHash, outputHash, status string, vcDocument []byte, signature string, storageURI string, documentSizeBytes int64) error
+	// StoreExecutionVCRecord persists a full ExecutionVC including the new
+	// kind discriminator, parent_vc_id chain pointer, and trigger-event
+	// metadata. Use this for any new VC write — the older scalar-parameter
+	// StoreExecutionVC stays for backward compatibility but cannot express
+	// kind='trigger_event' or chain pointers. Returns an error if the row
+	// cannot be saved.
+	StoreExecutionVCRecord(ctx context.Context, vc *types.ExecutionVC) error
 	// GetExecutionVC retrieves execution verifiable credential data by VC identifier.
 	// The ctx scopes the read, and vcID identifies the execution VC record to load.
 	// Returns the execution VC info or an error if it is missing or unreadable.

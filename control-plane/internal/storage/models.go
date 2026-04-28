@@ -361,6 +361,11 @@ type ExecutionVCModel struct {
 	Status            string    `gorm:"column:status;not null;default:'pending';index"`
 	ParentVCID        *string   `gorm:"column:parent_vc_id;index"`
 	ChildVCIDs        string    `gorm:"column:child_vc_ids;default:'[]'"`
+	Kind              string    `gorm:"column:kind;not null;default:'execution';index"`
+	TriggerID         *string   `gorm:"column:trigger_id;index"`
+	SourceName        *string   `gorm:"column:source_name"`
+	EventType         *string   `gorm:"column:event_type"`
+	EventID           *string   `gorm:"column:event_id;index"`
 	CreatedAt         time.Time `gorm:"column:created_at;autoCreateTime;index"`
 	UpdatedAt         time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }

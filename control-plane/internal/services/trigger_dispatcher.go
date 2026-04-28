@@ -20,15 +20,25 @@ import (
 // invoked from non-HTTP code paths (the public ingest handler and the cron
 // loop runner) so it must be safe to call concurrently and must not assume
 // access to a gin.Context.
+//
+// When vcService is set and DID is enabled, the dispatcher mints a trigger
+// event VC immediately before dispatch and propagates its ID via the
+// X-Parent-VC-ID header so the resulting execution VC chains back. VC
+// failures are best-effort — they're logged but never block the 200 response
+// already returned to the provider.
 type TriggerDispatcher struct {
 	storage    storage.StorageProvider
+	vcService  *VCService
 	httpClient *http.Client
 }
 
 // NewTriggerDispatcher returns a dispatcher with sensible defaults.
-func NewTriggerDispatcher(storage storage.StorageProvider) *TriggerDispatcher {
+// vcService may be nil when DID isn't configured — dispatch still works,
+// just without VC chain extension.
+func NewTriggerDispatcher(storage storage.StorageProvider, vcService *VCService) *TriggerDispatcher {
 	return &TriggerDispatcher{
-		storage: storage,
+		storage:   storage,
+		vcService: vcService,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -70,6 +80,37 @@ func (d *TriggerDispatcher) DispatchEvent(ctx context.Context, trig *types.Trigg
 		return
 	}
 
+	// Mint or reuse a trigger event VC so the resulting execution VC chains
+	// back to a CP-rooted credential. For replays, ev.VCID is already set
+	// from the original event — reuse it so the chain still terminates at
+	// the original signed inbound payload's evidence.
+	parentVCID := ev.VCID
+	if parentVCID == "" && d.vcService != nil {
+		triggerVC, err := d.vcService.GenerateTriggerEventVC(ctx, TriggerEventInput{
+			TriggerID:   trig.ID,
+			SourceName:  trig.SourceName,
+			EventType:   ev.EventType,
+			EventID:     ev.ID,
+			Payload:     ev.RawPayload,
+			ReceivedAt:  ev.ReceivedAt,
+			Verification: types.VCTriggerVerification{
+				Passed:    true,
+				Algorithm: trig.SourceName,
+				Detail:    "verified at ingest",
+			},
+		})
+		if err != nil {
+			logger.Logger.Warn().
+				Err(err).
+				Str("event_id", ev.ID).
+				Str("trigger_id", trig.ID).
+				Msg("trigger event VC mint failed; dispatching without parent chain")
+		} else if triggerVC != nil {
+			parentVCID = triggerVC.VCID
+			ev.VCID = triggerVC.VCID
+		}
+	}
+
 	// Build the reasoner input. We hand off the normalized event as `event` and
 	// keep `_meta` for trigger context — handlers can ignore the meta when they
 	// only care about payload.
@@ -107,6 +148,9 @@ func (d *TriggerDispatcher) DispatchEvent(ctx context.Context, trig *types.Trigg
 	req.Header.Set("X-Source-Name", trig.SourceName)
 	req.Header.Set("X-Event-Type", ev.EventType)
 	req.Header.Set("X-Event-ID", ev.ID)
+	if parentVCID != "" {
+		req.Header.Set("X-Parent-VC-ID", parentVCID)
+	}
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
@@ -121,7 +165,7 @@ func (d *TriggerDispatcher) DispatchEvent(ctx context.Context, trig *types.Trigg
 		return
 	}
 
-	if err := d.storage.MarkInboundEventProcessed(ctx, ev.ID, types.InboundEventStatusDispatched, "", ""); err != nil {
+	if err := d.storage.MarkInboundEventProcessed(ctx, ev.ID, types.InboundEventStatusDispatched, "", parentVCID); err != nil {
 		logger.Logger.Warn().
 			Err(err).
 			Str("event_id", ev.ID).

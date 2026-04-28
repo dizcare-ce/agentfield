@@ -1207,6 +1207,9 @@ func (ls *LocalStorage) ensureSQLiteIndexes() error {
 		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_status ON execution_vcs(status)",
 		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_parent_vc_id ON execution_vcs(parent_vc_id)",
 		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_created_at ON execution_vcs(created_at)",
+		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_kind ON execution_vcs(kind)",
+		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_trigger_id ON execution_vcs(trigger_id)",
+		"CREATE INDEX IF NOT EXISTS idx_execution_vcs_event_id ON execution_vcs(event_id)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_vcs_execution_unique ON execution_vcs(execution_id, issuer_did, target_did)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_vcs_workflow_id ON workflow_vcs(workflow_id)",
 		"CREATE INDEX IF NOT EXISTS idx_workflow_vcs_session_id ON workflow_vcs(session_id)",
@@ -1369,6 +1372,11 @@ func buildExecutionVCTableSQL(tableName string, includeIfNotExists bool) string 
 		status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('unknown', 'pending', 'queued', 'running', 'waiting', 'paused', 'succeeded', 'failed', 'cancelled', 'timeout', 'revoked')),
 		parent_vc_id TEXT,
 		child_vc_ids TEXT DEFAULT '[]',
+		kind TEXT NOT NULL DEFAULT 'execution',
+		trigger_id TEXT,
+		source_name TEXT,
+		event_type TEXT,
+		event_id TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (parent_vc_id) REFERENCES %s(vc_id) ON DELETE SET NULL
@@ -7150,6 +7158,58 @@ func (ls *LocalStorage) StoreExecutionVC(ctx context.Context, vcID, executionID,
 		callerDID, vcDocument, signature, storageURI, documentSizeBytes, inputHash, outputHash, status, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to store execution VC: %w", err)
+	}
+	return nil
+}
+
+// StoreExecutionVCRecord persists an ExecutionVC including the kind
+// discriminator, parent_vc_id chain pointer, and trigger-event metadata.
+// Used by all new VC writers — the older scalar StoreExecutionVC stays for
+// backward compatibility with existing call sites.
+func (ls *LocalStorage) StoreExecutionVCRecord(ctx context.Context, vc *types.ExecutionVC) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled during store execution VC: %w", err)
+	}
+	if vc == nil {
+		return fmt.Errorf("execution VC is nil")
+	}
+	kind := vc.Kind
+	if kind == "" {
+		kind = types.ExecutionVCKindExecution
+	}
+	created := vc.CreatedAt
+	if created.IsZero() {
+		created = time.Now()
+	}
+
+	query := `
+		INSERT INTO execution_vcs (
+			vc_id, execution_id, workflow_id, session_id, issuer_did, target_did,
+			caller_did, vc_document, signature, storage_uri, document_size_bytes,
+			input_hash, output_hash, status, parent_vc_id, kind,
+			trigger_id, source_name, event_type, event_id, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(vc_id) DO UPDATE SET
+			status = excluded.status,
+			vc_document = excluded.vc_document,
+			signature = excluded.signature,
+			storage_uri = excluded.storage_uri,
+			document_size_bytes = excluded.document_size_bytes,
+			parent_vc_id = excluded.parent_vc_id,
+			kind = excluded.kind,
+			trigger_id = excluded.trigger_id,
+			source_name = excluded.source_name,
+			event_type = excluded.event_type,
+			event_id = excluded.event_id;`
+
+	_, err := ls.db.ExecContext(ctx, query,
+		vc.VCID, vc.ExecutionID, vc.WorkflowID, vc.SessionID, vc.IssuerDID, vc.TargetDID,
+		vc.CallerDID, []byte(vc.VCDocument), vc.Signature, vc.StorageURI, vc.DocumentSize,
+		vc.InputHash, vc.OutputHash, vc.Status, vc.ParentVCID, kind,
+		vc.TriggerID, vc.SourceName, vc.EventType, vc.EventID, created,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to store execution VC record: %w", err)
 	}
 	return nil
 }

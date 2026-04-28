@@ -448,7 +448,7 @@ func NewAgentFieldServer(cfg *config.Config) (*AgentFieldServer, error) {
 		}
 	}
 
-	triggerDispatcher := services.NewTriggerDispatcher(storageProvider)
+	triggerDispatcher := services.NewTriggerDispatcher(storageProvider, vcService)
 	sourceManager := services.NewSourceManager(storageProvider, triggerDispatcher)
 	triggerHandlers := handlers.NewTriggerHandlers(storageProvider, triggerDispatcher, sourceManager)
 	handlers.SetTriggerSourceManager(sourceManager)
