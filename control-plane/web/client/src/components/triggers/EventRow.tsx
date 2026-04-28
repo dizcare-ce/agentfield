@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight } from "@/components/ui/icon-bridge";
 import { Badge } from "@/components/ui/badge";
 import { CopyIdentifierChip } from "@/components/ui/copy-identifier-chip";
 import { TimestampDisplay } from "@/components/ui/data-formatters";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EventDetailPanel } from "./EventDetailPanel";
 
@@ -14,8 +13,8 @@ export interface InboundEvent {
   trigger_id: string;
   source_name: string;
   event_type: string;
-  raw_payload: Record<string, any>;
-  normalized_payload?: Record<string, any>;
+  raw_payload: Record<string, unknown>;
+  normalized_payload?: Record<string, unknown>;
   idempotency_key: string;
   vc_id?: string;
   status: "received" | "dispatched" | "failed" | "replayed";
@@ -89,7 +88,7 @@ export function EventRow({
 
         {/* Status badge */}
         <div className="flex-shrink-0">
-          <Badge variant={statusBadgeVariant[event.status] as any}>
+          <Badge variant={statusBadgeVariant[event.status] as unknown as "default"}>
             {event.status}
           </Badge>
         </div>

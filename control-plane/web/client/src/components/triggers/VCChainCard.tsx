@@ -14,7 +14,7 @@ interface VCChainCardProps {
   triggerID: string;
 }
 
-export function VCChainCard({ event, triggerID }: VCChainCardProps) {
+export function VCChainCard({ event }: VCChainCardProps) {
   const navigate = useNavigate();
 
   if (!event.vc_id) {

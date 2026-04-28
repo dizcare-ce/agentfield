@@ -3,7 +3,6 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { CopyButton } from "@/components/ui/copy-button";
 import { VerificationCard } from "./VerificationCard";
 import { PayloadViewer } from "./PayloadViewer";
 import { VCChainCard } from "./VCChainCard";

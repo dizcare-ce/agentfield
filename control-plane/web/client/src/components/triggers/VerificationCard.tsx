@@ -38,7 +38,7 @@ export function VerificationCard({ event }: VerificationCardProps) {
         {/* Status badge */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Status</span>
-          <Badge variant={statusVariant as any}>
+          <Badge variant={statusVariant as unknown as "default"}>
             {event.status === "failed" ? "Failed" : 
              event.status === "replayed" ? "Replayed" : 
              "Verified"}
