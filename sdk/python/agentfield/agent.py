@@ -3437,6 +3437,8 @@ class Agent(FastAPI):
         # Ensure the current execution is the parent for sub-calls (not the inherited parent)
         # This fixes workflow graph attribution for local skill calls
         headers["X-Parent-Execution-ID"] = current_context.execution_id
+        if current_context.parent_vc_id:
+            headers["X-Parent-VC-ID"] = current_context.parent_vc_id
 
         # DISABLED: Same-agent call detection - Force all calls through AgentField server
         # This ensures all app.call() requests go through the AgentField server for proper
@@ -3453,6 +3455,7 @@ class Agent(FastAPI):
                 f"AgentField server unavailable - cannot make cross-agent call to {target}"
             )
             from agentfield.exceptions import AgentFieldClientError
+
             raise AgentFieldClientError(
                 f"Cross-agent call to {target} failed: AgentField server unavailable. Agent is running in local mode."
             )
@@ -3589,6 +3592,7 @@ class Agent(FastAPI):
                     f"Execute call timed out after {elapsed_time:.2f} seconds (limit {execution_timeout:.0f}s)"
                 )
                 from agentfield.exceptions import ExecutionTimeoutError
+
                 raise ExecutionTimeoutError(
                     f"Cross-agent call to {target} timed out after {int(execution_timeout)} seconds"
                 )
@@ -4342,6 +4346,7 @@ class Agent(FastAPI):
 
         if not self.client:
             from agentfield.exceptions import AgentFieldClientError
+
             raise AgentFieldClientError("AgentField client is not configured")
 
         return self.client.discover_capabilities(
