@@ -18,6 +18,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	// Import sources to register them
+	_ "github.com/Agent-Field/agentfield/control-plane/internal/sources/cron"
 )
 
 // setupCronTestEnv creates storage, dispatcher, and source manager for cron tests.

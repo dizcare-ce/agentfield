@@ -22,6 +22,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	// Import sources to register them
+	_ "github.com/Agent-Field/agentfield/control-plane/internal/sources/generichmac"
 )
 
 // hmacSign creates a HMAC-SHA256 signature over the body.

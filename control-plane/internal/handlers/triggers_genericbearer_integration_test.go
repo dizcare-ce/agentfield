@@ -19,6 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	// Import sources to register them
+	_ "github.com/Agent-Field/agentfield/control-plane/internal/sources/genericbearer"
 )
 
 // setupGenericBearerTestEnv creates storage and dispatcher for generic_bearer webhook tests.
