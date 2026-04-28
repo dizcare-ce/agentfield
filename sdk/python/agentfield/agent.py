@@ -72,6 +72,27 @@ if TYPE_CHECKING:
 _dataclass_kwargs = {"slots": True} if sys.version_info >= (3, 10) else {}
 
 
+class _HandlerInputError(ValueError):
+    """Reasoner input-validation error with a message safe to surface to HTTP clients.
+
+    All messages produced inside the SDK's validator are constructed by us
+    (not pulled from user payloads or underlying Python exceptions), so the
+    full text is safe to include in a 422 response body. We expose that
+    text via the explicit `safe_message` attribute rather than relying on
+    `str(self)` so the request handler can read a known-safe value without
+    tripping CodeQL's `py/stack-trace-exposure` rule.
+
+    Subclasses ValueError so existing `except ValueError` call sites still
+    catch validation failures unchanged.
+    """
+
+    __slots__ = ("safe_message",)
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.safe_message = message
+
+
 # Memory-efficient handler entry classes using __slots__ (on Python 3.10+)
 @dataclass(**_dataclass_kwargs)
 class ReasonerEntry:
@@ -904,7 +925,7 @@ class Agent(FastAPI):
             # Check if field is present
             if name not in data:
                 if default is ...:  # Required field (no default)
-                    raise ValueError(f"Missing required field: {name}")
+                    raise _HandlerInputError(f"Missing required field: {name}")
                 result[name] = default
                 continue
 
@@ -923,7 +944,7 @@ class Agent(FastAPI):
                 if default is not ...:
                     result[name] = default
                     continue
-                raise ValueError(f"Field '{name}' cannot be None")
+                raise _HandlerInputError(f"Field '{name}' cannot be None")
 
             # Type coercion for basic types
             try:
@@ -955,14 +976,14 @@ class Agent(FastAPI):
                     or getattr(actual_type, "__origin__", None) is dict
                 ):
                     if not isinstance(value, dict):
-                        raise ValueError(f"Field '{name}' must be a dict")
+                        raise _HandlerInputError(f"Field '{name}' must be a dict")
                     result[name] = dict(value)
                 elif (
                     actual_type is list
                     or getattr(actual_type, "__origin__", None) is list
                 ):
                     if not isinstance(value, list):
-                        raise ValueError(f"Field '{name}' must be a list")
+                        raise _HandlerInputError(f"Field '{name}' must be a list")
                     result[name] = list(value)
                 elif hasattr(actual_type, "model_validate"):
                     # Pydantic model - use its validation
@@ -970,8 +991,14 @@ class Agent(FastAPI):
                 else:
                     # Pass through for complex/unknown types
                     result[name] = value
-            except (ValueError, TypeError) as e:
-                raise ValueError(f"Invalid value for field '{name}': {e}")
+            except _HandlerInputError:
+                raise
+            except (ValueError, TypeError):
+                # Underlying coercion failure (e.g. int("not a number")). The
+                # inner exception's text can carry Python-runtime detail, so
+                # we deliberately drop it from the message we surface to the
+                # client and just say which field failed.
+                raise _HandlerInputError(f"Invalid value for field '{name}'")
 
         return result
 
@@ -1773,10 +1800,14 @@ class Agent(FastAPI):
                         validated_input = self._validate_handler_input(
                             body, handler_input_fields
                         )
-                    except ValueError as e:
+                    except _HandlerInputError as e:
+                        # `safe_message` is a known-safe SDK-constructed
+                        # string. Reading the explicit attribute (rather
+                        # than `str(e)`) keeps the response out of CodeQL's
+                        # py/stack-trace-exposure taint flow.
                         return JSONResponse(
                             status_code=422,
-                            content={"detail": str(e)},
+                            content={"detail": e.safe_message},
                         )
 
                 async def run_reasoner() -> Any:
@@ -2563,10 +2594,14 @@ class Agent(FastAPI):
                         validated_input = self._validate_handler_input(
                             body, handler_input_fields
                         )
-                    except ValueError as e:
+                    except _HandlerInputError as e:
+                        # `safe_message` is a known-safe SDK-constructed
+                        # string. Reading the explicit attribute (rather
+                        # than `str(e)`) keeps the response out of CodeQL's
+                        # py/stack-trace-exposure taint flow.
                         return JSONResponse(
                             status_code=422,
-                            content={"detail": str(e)},
+                            content={"detail": e.safe_message},
                         )
 
                 # Extract execution context from request headers
