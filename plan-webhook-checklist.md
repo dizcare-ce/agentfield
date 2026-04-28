@@ -179,7 +179,19 @@ Three parallel subagents in worktrees + cleanup pass. 25 integration tests cover
 
 ---
 
-## 4. P1 — Developer experience
+## 4. P1 — Developer experience ✅ SHIPPED (Phase 5, commits `9d26e619` + `69dbd23e` + `be07c857`)
+
+DX core is live end-to-end:
+- `TriggerContext` typed dataclass on `ExecutionContext.trigger` (None on direct calls)
+- SDK auto-unwraps the dispatcher's `{event, _meta}` envelope so reasoners see the raw provider payload as `input`
+- Signature-based parameter injection: `trigger:` and `webhook:` aliases auto-fill from the request context (same mechanism as `execution_context`)
+- `transform=` kwarg on `EventTrigger` runs a sync function from raw provider event → reasoner input; matching rule mirrors the runtime (same source + prefix-matched event_type, most-specific wins). Async transforms rejected with actionable error at decoration time.
+- `accepts_webhook` 3-state flag (`True` | `False` | `"warn"`) on `@reasoner`: auto-`True` when triggers declared, otherwise `"warn"`; CP rejects `POST /api/v1/triggers` with 400 when target reasoner has `accepts_webhook=False`
+- `simulate_trigger()` + fixture library (`agentfield.testing` + `agentfield/fixtures/triggers/*.json`) for in-process unit tests — no CP, no HTTP, no spinning fixtures
+
+Below is the design reference; the boxes are now retroactive.
+
+
 
 ### Python SDK (priority — this is the primary DX surface)
 
