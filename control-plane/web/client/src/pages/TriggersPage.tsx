@@ -128,14 +128,17 @@ function ownerLabel(managed: Trigger["managed_by"]): string {
 }
 
 /**
- * Compact "Activity 24h" cell — raw counts + neutral sparkline + relative
- * last fired. We deliberately show counts (total / failed) instead of a
- * success-rate percentage so the operator sees the underlying numbers, and
- * the sparkline uses the muted-foreground theme token so it doesn't carry
- * a status-tone signal that could conflict with the failed-count color.
+ * "Last 24h" cell — failure-first, single-line.
  *
- * Empty state shows a single em-dash so the column doesn't claim visual
- * weight on triggers with zero deliveries in the window.
+ * Operator's daily question is "did anything fail?" so we lead with the
+ * failed count when > 0 (status-error tone) and stay quiet otherwise:
+ *   - never fired: em-dash
+ *   - clean: "2m ago" + tiny muted sparkline
+ *   - failures: "N failed · 2m ago" + tiny muted sparkline
+ *
+ * The sparkline never carries status tone — it stays muted-foreground via
+ * currentColor regardless of failures. The single status signal is the
+ * "N failed" text.
  */
 function TriggerActivityCell({ trigger }: { trigger: Trigger }) {
   const total = trigger.event_count_24h ?? 0;
@@ -159,32 +162,34 @@ function TriggerActivityCell({ trigger }: { trigger: Trigger }) {
     : null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <span className="font-mono text-xs tabular-nums text-foreground">
-          {total}
-        </span>
-        <span className="text-muted-foreground/60">·</span>
-        <span
-          className={cn(
-            "font-mono text-xs tabular-nums",
-            failed > 0 ? "text-status-error" : "text-muted-foreground",
-          )}
-          title={`${total - failed} succeeded · ${failed} failed`}
-        >
-          {failed} failed
-        </span>
-        <Sparkline
-          data={buckets}
-          width={56}
-          height={16}
-          showArea
-          className="text-muted-foreground"
-        />
-      </div>
-      {lastFired ? (
-        <span className="text-micro text-muted-foreground">{lastFired}</span>
-      ) : null}
+    <div
+      className="flex min-w-0 items-center gap-2"
+      title={`${total} events · ${failed} failed in the last 24h`}
+    >
+      {failed > 0 ? (
+        <>
+          <span className="font-mono text-xs tabular-nums text-status-error">
+            {failed} failed
+          </span>
+          {lastFired ? (
+            <>
+              <span className="text-muted-foreground/60">·</span>
+              <span className="text-xs text-muted-foreground">{lastFired}</span>
+            </>
+          ) : null}
+        </>
+      ) : (
+        lastFired ? (
+          <span className="text-xs text-muted-foreground">{lastFired}</span>
+        ) : null
+      )}
+      <Sparkline
+        data={buckets}
+        width={48}
+        height={14}
+        showArea
+        className="text-muted-foreground/60"
+      />
     </div>
   );
 }
@@ -276,8 +281,8 @@ function TriggerRow({
         </div>
       </TableCell>
 
-      {/* Activity (last 24h) */}
-      <TableCell className="w-44">
+      {/* Last 24h */}
+      <TableCell className="w-40">
         <TriggerActivityCell trigger={trigger} />
       </TableCell>
 
@@ -614,8 +619,8 @@ export function TriggersPage() {
                 <TableHead className="h-8 w-44 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
                   Events
                 </TableHead>
-                <TableHead className="h-8 w-44 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
-                  Activity 24h
+                <TableHead className="h-8 w-40 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Last 24h
                 </TableHead>
                 <TableHead className="h-8 w-20 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
                   Owner
