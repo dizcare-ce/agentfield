@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"runtime"
 	"sync"
 
 	"syscall"
@@ -153,16 +154,31 @@ type ScheduleTrigger struct {
 	Timezone string
 }
 
+// captureCodeOrigin captures the file and line number of the caller using runtime.Caller.
+// skip=1 walks past captureCodeOrigin to the immediate caller (e.g., WithEventTrigger).
+// skip=2 walks past captureCodeOrigin and WithEventTrigger to the user's call site.
+func captureCodeOrigin(skip int) string {
+	_, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
 // WithTriggers is the canonical decorator-equivalent for declaring trigger
 // bindings on a Go reasoner. Pass a mix of EventTrigger and ScheduleTrigger
 // values; unknown types are silently ignored so adding new kinds later is
 // backward compatible.
 func WithTriggers(triggers ...any) ReasonerOption {
+	codeOrigin := captureCodeOrigin(2)
 	return func(r *Reasoner) {
 		for _, t := range triggers {
 			binding, ok := triggerToBinding(t)
 			if !ok {
 				continue
+			}
+			if binding.CodeOrigin == "" {
+				binding.CodeOrigin = codeOrigin
 			}
 			r.Triggers = append(r.Triggers, binding)
 		}
@@ -173,8 +189,10 @@ func WithTriggers(triggers ...any) ReasonerOption {
 // reasoner's bindings. It is equivalent to
 // WithTriggers(EventTrigger{Source: source, Types: types}).
 func WithEventTrigger(source string, eventTypes ...string) ReasonerOption {
+	codeOrigin := captureCodeOrigin(2)
 	return func(r *Reasoner) {
 		b, _ := triggerToBinding(EventTrigger{Source: source, Types: eventTypes})
+		b.CodeOrigin = codeOrigin
 		r.Triggers = append(r.Triggers, b)
 	}
 }
@@ -182,8 +200,10 @@ func WithEventTrigger(source string, eventTypes ...string) ReasonerOption {
 // WithScheduleTrigger is sugar for declaring a single cron schedule. The
 // expression follows the standard 5-field cron format.
 func WithScheduleTrigger(expression string) ReasonerOption {
+	codeOrigin := captureCodeOrigin(2)
 	return func(r *Reasoner) {
 		b, _ := triggerToBinding(ScheduleTrigger{Cron: expression})
+		b.CodeOrigin = codeOrigin
 		r.Triggers = append(r.Triggers, b)
 	}
 }
