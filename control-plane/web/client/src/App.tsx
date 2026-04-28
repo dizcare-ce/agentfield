@@ -14,6 +14,7 @@ import { ComparisonPage } from "./pages/ComparisonPage";
 import { PlaygroundPage } from "./pages/PlaygroundPage";
 import { AccessManagementPage } from "./pages/AccessManagementPage";
 import { TriggersPage } from "./pages/TriggersPage";
+import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
@@ -42,6 +43,7 @@ function AppContent() {
         <Route path="/playground/:reasonerId" element={<PlaygroundPage />} />
         <Route path="/access" element={<AccessManagementPage />} />
         <Route path="/triggers" element={<TriggersPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
 
         {/* Old → New redirects */}
         <Route path="/executions" element={<Navigate to="/runs" replace />} />

@@ -3,14 +3,58 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CompactTable } from "@/components/ui/CompactTable";
-import { CopyButton } from "@/components/ui/copy-button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Plus, RadioTower } from "@/components/ui/icon-bridge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { CopyIdentifierChip } from "@/components/ui/copy-identifier-chip";
+import {
+  ArrowRight,
+  Copy,
+  MoreHorizontal,
+  Plug,
+  Plus,
+  Search,
+  Trash,
+  Webhook,
+} from "@/components/ui/icon-bridge";
+import { PageHeader } from "@/components/PageHeader";
 import { NewTriggerDialog } from "@/components/triggers/NewTriggerDialog";
-import { SourcesStrip } from "@/components/triggers/SourcesStrip";
+import { SourceIcon } from "@/components/triggers/SourceIcon";
 import { TriggerSheet } from "@/components/triggers/TriggerSheet";
+import { cn } from "@/lib/utils";
 
 export interface SourceCatalogEntry {
   name: string;
@@ -55,26 +99,221 @@ function publicIngestUrl(triggerId: string): string {
   return `${serverUrl}/sources/${triggerId}`;
 }
 
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
+function shortTriggerId(id: string): string {
+  if (id.length <= 8) return id;
+  // Pull the last 6 chars — same shape as RunsPage's run_id chip.
+  return `…${id.slice(-6)}`;
+}
+
+function summarizeEventTypes(types: string[] | null | undefined): {
+  primary: string;
+  overflow: number;
+} {
+  if (!types || types.length === 0) return { primary: "All events", overflow: 0 };
+  return { primary: types[0], overflow: Math.max(0, types.length - 1) };
+}
+
+function ownerLabel(managed: Trigger["managed_by"]): string {
+  return managed === "code" ? "Code" : "UI";
+}
+
+interface TriggerRowProps {
+  trigger: Trigger;
+  selected: boolean;
+  busy: boolean;
+  onOpen: (trigger: Trigger) => void;
+  onToggleEnabled: (trigger: Trigger, enabled: boolean) => void;
+  onCopyUrl: (trigger: Trigger) => void;
+  onDelete: (trigger: Trigger) => void;
+}
+
+function TriggerRow({
+  trigger,
+  selected,
+  busy,
+  onOpen,
+  onToggleEnabled,
+  onCopyUrl,
+  onDelete,
+}: TriggerRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const events = summarizeEventTypes(trigger.event_types);
+  const isCodeManaged = trigger.managed_by === "code";
+
+  return (
+    <TableRow
+      className="group/trigger-row cursor-pointer"
+      data-state={selected ? "selected" : undefined}
+      tabIndex={0}
+      onClick={() => onOpen(trigger)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(trigger);
+        }
+      }}
+    >
+      {/* Source */}
+      <TableCell className="w-40">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <SourceIcon source={trigger.source_name} size="compact" />
+          <span className="truncate text-xs font-medium lowercase">
+            {trigger.source_name}
+          </span>
+        </div>
+      </TableCell>
+
+      {/* Target — agent.reasoner muted/bold + trigger short-id chip */}
+      <TableCell className="min-w-0 max-w-[min(36rem,60vw)]">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="inline-block min-w-0 max-w-[min(100%,22rem)] truncate font-mono text-xs">
+            <span className="text-muted-foreground">
+              {trigger.target_node_id}
+            </span>
+            <span className="text-muted-foreground/60">.</span>
+            <span className="font-medium text-foreground">
+              {trigger.target_reasoner}
+            </span>
+          </span>
+          <div onClick={(event) => event.stopPropagation()}>
+            <CopyIdentifierChip
+              value={trigger.id}
+              tooltip="Copy trigger ID"
+              idTailVisible={6}
+            />
+          </div>
+        </div>
+      </TableCell>
+
+      {/* Events */}
+      <TableCell className="w-44">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-mono text-xs text-foreground/90">
+            {events.primary}
+          </span>
+          {events.overflow > 0 ? (
+            <Badge
+              variant="secondary"
+              size="sm"
+              showIcon={false}
+              className="shrink-0"
+            >
+              +{events.overflow}
+            </Badge>
+          ) : null}
+        </div>
+      </TableCell>
+
+      {/* Owner */}
+      <TableCell className="w-20">
+        <Badge variant="outline" size="sm" showIcon={false}>
+          {ownerLabel(trigger.managed_by)}
+        </Badge>
+      </TableCell>
+
+      {/* Enabled */}
+      <TableCell
+        className="w-20"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Switch
+          checked={trigger.enabled}
+          disabled={busy}
+          onCheckedChange={(enabled) => onToggleEnabled(trigger, enabled)}
+        />
+      </TableCell>
+
+      {/* Kebab */}
+      <TableCell
+        className="w-10 px-2 text-right"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-8 shrink-0 text-muted-foreground/70 transition-colors",
+                "group-hover/trigger-row:text-foreground",
+                "hover:bg-muted hover:text-foreground",
+                "data-[state=open]:bg-muted data-[state=open]:text-foreground",
+              )}
+              aria-label={`Trigger actions for ${trigger.id}`}
+            >
+              <MoreHorizontal className="size-3.5" aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            side="bottom"
+            className="w-44"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              Trigger
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2 text-xs"
+              onClick={() => {
+                setMenuOpen(false);
+                onCopyUrl(trigger);
+              }}
+            >
+              <Copy className="size-3.5" aria-hidden />
+              Copy public URL
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2 text-xs"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpen(trigger);
+              }}
+            >
+              <ArrowRight className="size-3.5" aria-hidden />
+              View events
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className={cn(
+                "gap-2 text-xs",
+                isCodeManaged
+                  ? "pointer-events-none text-muted-foreground/60"
+                  : "text-destructive focus:text-destructive",
+              )}
+              disabled={isCodeManaged}
+              onClick={() => {
+                setMenuOpen(false);
+                if (!isCodeManaged) onDelete(trigger);
+              }}
+            >
+              <Trash className="size-3.5" aria-hidden />
+              {isCodeManaged ? "Delete (in code)" : "Delete trigger"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
 }
 
 export function TriggersPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedTriggerId = searchParams.get("trigger");
+  const sourceFilter = searchParams.get("source") ?? "all";
+  const ownerFilter = searchParams.get("owner") ?? "all";
+  const enabledFilter = searchParams.get("enabled") ?? "all";
+
   const [sources, setSources] = useState<SourceCatalogEntry[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [busyTriggerId, setBusyTriggerId] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState("updated_at");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [search, setSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<Trigger | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -104,26 +343,57 @@ export function TriggersPage() {
     [selectedTriggerId, triggers],
   );
 
-  const sortedTriggers = useMemo(() => {
-    return [...triggers].sort((a, b) => {
-      const left = String(a[sortBy as keyof Trigger] ?? "");
-      const right = String(b[sortBy as keyof Trigger] ?? "");
-      return sortOrder === "asc"
-        ? left.localeCompare(right)
-        : right.localeCompare(left);
-    });
-  }, [sortBy, sortOrder, triggers]);
+  const sourceOptions = useMemo(() => {
+    const names = new Set<string>(sources.map((s) => s.name));
+    for (const t of triggers) names.add(t.source_name);
+    return Array.from(names).sort();
+  }, [sources, triggers]);
 
-  const openTrigger = useCallback(
-    (trigger: Trigger) => {
-      navigate(`/triggers?trigger=${encodeURIComponent(trigger.id)}`);
-    },
-    [navigate],
-  );
+  const visibleTriggers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return triggers
+      .filter((trigger) => {
+        if (sourceFilter !== "all" && trigger.source_name !== sourceFilter)
+          return false;
+        if (ownerFilter !== "all" && trigger.managed_by !== ownerFilter)
+          return false;
+        if (enabledFilter === "enabled" && !trigger.enabled) return false;
+        if (enabledFilter === "paused" && trigger.enabled) return false;
+        if (!query) return true;
+        return (
+          trigger.id.toLowerCase().includes(query) ||
+          trigger.source_name.toLowerCase().includes(query) ||
+          trigger.target_node_id.toLowerCase().includes(query) ||
+          trigger.target_reasoner.toLowerCase().includes(query) ||
+          (trigger.event_types ?? []).some((evt) =>
+            evt.toLowerCase().includes(query),
+          )
+        );
+      })
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [enabledFilter, ownerFilter, search, sourceFilter, triggers]);
 
-  const closeTrigger = useCallback(() => {
-    navigate("/triggers");
-  }, [navigate]);
+  function setQuery(key: string, value: string) {
+    const next = new URLSearchParams(searchParams);
+    if (value === "all" || value === "") {
+      next.delete(key);
+    } else {
+      next.set(key, value);
+    }
+    setSearchParams(next, { replace: true });
+  }
+
+  function openTrigger(trigger: Trigger) {
+    const next = new URLSearchParams(searchParams);
+    next.set("trigger", trigger.id);
+    setSearchParams(next, { replace: false });
+  }
+
+  function closeTrigger() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("trigger");
+    setSearchParams(next, { replace: false });
+  }
 
   async function updateTrigger(triggerId: string, patch: Partial<Trigger>) {
     try {
@@ -141,12 +411,7 @@ export function TriggersPage() {
   }
 
   async function deleteTrigger(trigger: Trigger) {
-    if (trigger.managed_by === "code") {
-      return;
-    }
-    if (!window.confirm(`Delete trigger ${trigger.id}?`)) {
-      return;
-    }
+    if (trigger.managed_by === "code") return;
     try {
       setBusyTriggerId(trigger.id);
       await fetchJson(`${serverUrl}/api/v1/triggers/${trigger.id}`, {
@@ -158,29 +423,36 @@ export function TriggersPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyTriggerId(null);
+      setConfirmDelete(null);
     }
   }
 
+  function copyTriggerUrl(trigger: Trigger) {
+    void navigator.clipboard.writeText(publicIngestUrl(trigger.id));
+  }
+
+  const totalCount = triggers.length;
+  const visibleCount = visibleTriggers.length;
+  const hasFilters =
+    sourceFilter !== "all" ||
+    ownerFilter !== "all" ||
+    enabledFilter !== "all" ||
+    search.trim() !== "";
+
   return (
     <div className="flex flex-1 flex-col gap-6 bg-background p-6 text-foreground">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <RadioTower className="h-5 w-5 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Triggers
-            </h1>
-          </div>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            Inbound sources that dispatch provider events, schedules, and
-            generic webhooks into reasoners.
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          New trigger
-        </Button>
-      </div>
+      <PageHeader
+        title="Active triggers"
+        description="Inbound wirings dispatching provider events, schedules, and webhooks into reasoners."
+        actions={[
+          {
+            label: "New trigger",
+            onClick: () => setCreateOpen(true),
+            variant: "default",
+            icon: <Plus className="size-4" />,
+          },
+        ]}
+      />
 
       {error ? (
         <Alert variant="destructive">
@@ -188,144 +460,166 @@ export function TriggersPage() {
         </Alert>
       ) : null}
 
-      <SourcesStrip
-        sources={sources}
-        triggers={triggers}
-        loading={loading}
-        onCreate={() => setCreateOpen(true)}
-      />
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <Select
+            value={sourceFilter}
+            onValueChange={(v) => setQuery("source", v)}
+          >
+            <SelectTrigger className="h-9 w-44 text-xs">
+              <SelectValue placeholder="All sources" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sources</SelectItem>
+              {sourceOptions.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={ownerFilter}
+            onValueChange={(v) => setQuery("owner", v)}
+          >
+            <SelectTrigger className="h-9 w-36 text-xs">
+              <SelectValue placeholder="All owners" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All owners</SelectItem>
+              <SelectItem value="code">code</SelectItem>
+              <SelectItem value="ui">ui</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={enabledFilter}
+            onValueChange={(v) => setQuery("enabled", v)}
+          >
+            <SelectTrigger className="h-9 w-36 text-xs">
+              <SelectValue placeholder="All states" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All states</SelectItem>
+              <SelectItem value="enabled">Enabled</SelectItem>
+              <SelectItem value="paused">Paused</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {hasFilters
+              ? `${visibleCount} of ${totalCount}`
+              : `${totalCount} total`}
+          </span>
+          <div className="relative w-full md:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search triggers…"
+              className="pl-8"
+            />
+          </div>
+        </div>
+      </div>
 
       <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <CardTitle>Active triggers</CardTitle>
-              <CardDescription>
-                Select a trigger to inspect events, configuration, secrets, and
-                dispatch activity.
-              </CardDescription>
-            </div>
-            <Badge variant="secondary" className="w-fit">
-              {triggers.length} total
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <CompactTable
-            data={sortedTriggers}
-            loading={loading}
-            hasMore={false}
-            isFetchingMore={false}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onSortChange={(field, order) => {
-              setSortBy(field);
-              setSortOrder(order ?? (sortBy === field && sortOrder === "asc" ? "desc" : "asc"));
-            }}
-            onRowClick={openTrigger}
-            getRowKey={(trigger) => trigger.id}
-            gridTemplate="minmax(0,1.2fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,0.6fr) minmax(0,0.9fr)"
-            rowHeight={48}
-            emptyState={{
-              title: "No triggers yet",
-              description: "Create a UI-managed trigger or declare one in agent code.",
-              action: {
-                label: "New trigger",
-                onClick: () => setCreateOpen(true),
-                icon: <Plus className="h-4 w-4" />,
-              },
-            }}
-            columns={[
-              {
-                key: "source_name",
-                header: "Source",
-                sortable: true,
-                render: (trigger) => (
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <span className="truncate text-sm font-medium">
-                      {trigger.source_name}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {trigger.id}
-                    </span>
-                  </div>
-                ),
-              },
-              {
-                key: "target_node_id",
-                header: "Target",
-                sortable: true,
-                render: (trigger) => (
-                  <div className="min-w-0 truncate font-mono text-xs">
-                    {trigger.target_node_id}.{trigger.target_reasoner}
-                  </div>
-                ),
-              },
-              {
-                key: "id",
-                header: "Public URL",
-                render: (trigger) => (
-                  <div
-                    className="flex min-w-0 items-center gap-2"
-                    onClick={(event) => event.stopPropagation()}
+        <CardContent className="p-0">
+          <Table className="text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="h-8 w-40 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Source
+                </TableHead>
+                <TableHead className="h-8 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Target
+                </TableHead>
+                <TableHead className="h-8 w-44 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Events
+                </TableHead>
+                <TableHead className="h-8 w-20 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Owner
+                </TableHead>
+                <TableHead className="h-8 w-20 px-3 text-micro-plus font-medium uppercase tracking-wider text-muted-foreground/85">
+                  Enabled
+                </TableHead>
+                <TableHead className="h-8 w-10 px-2" aria-label="Actions" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="p-8 text-center text-xs text-muted-foreground"
                   >
-                    <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                      {publicIngestUrl(trigger.id)}
-                    </span>
-                    <CopyButton
-                      value={publicIngestUrl(trigger.id)}
-                      size="icon-sm"
-                      tooltip="Copy public URL"
-                    />
-                  </div>
-                ),
-              },
-              {
-                key: "managed_by",
-                header: "Owner",
-                sortable: true,
-                render: (trigger) => (
-                  <Badge variant={trigger.managed_by === "code" ? "secondary" : "outline"}>
-                    {trigger.managed_by}
-                  </Badge>
-                ),
-              },
-              {
-                key: "enabled",
-                header: "Enabled",
-                sortable: true,
-                align: "center",
-                render: (trigger) => (
-                  <div onClick={(event) => event.stopPropagation()}>
-                    <Switch
-                      checked={trigger.enabled}
-                      disabled={busyTriggerId === trigger.id}
-                      onCheckedChange={(enabled) =>
-                        void updateTrigger(trigger.id, { enabled })
-                      }
-                    />
-                  </div>
-                ),
-              },
-              {
-                key: "updated_at",
-                header: "Updated",
-                sortable: true,
-                render: (trigger) => (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {formatDate(trigger.updated_at)}
-                  </span>
-                ),
-              },
-            ]}
-          />
+                    Loading triggers…
+                  </TableCell>
+                </TableRow>
+              ) : visibleCount === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="p-8">
+                    <div className="flex flex-col items-center justify-center gap-2 text-center">
+                      <Webhook
+                        className="size-8 text-muted-foreground"
+                        aria-hidden
+                      />
+                      <p className="text-sm font-medium">
+                        {hasFilters
+                          ? "No triggers match your filters"
+                          : "No triggers yet"}
+                      </p>
+                      <p className="max-w-md text-xs text-muted-foreground">
+                        {hasFilters
+                          ? "Clear the filter or search to see all triggers."
+                          : "Connect an external service from Integrations, or declare a trigger in agent code."}
+                      </p>
+                      {!hasFilters ? (
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => navigate("/integrations")}
+                          >
+                            <Plug className="size-3.5" aria-hidden />
+                            Browse integrations
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCreateOpen(true)}
+                          >
+                            <Plus className="size-3.5" aria-hidden />
+                            New trigger
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                visibleTriggers.map((trigger) => (
+                  <TriggerRow
+                    key={trigger.id}
+                    trigger={trigger}
+                    selected={selectedTriggerId === trigger.id}
+                    busy={busyTriggerId === trigger.id}
+                    onOpen={openTrigger}
+                    onToggleEnabled={(t, enabled) =>
+                      void updateTrigger(t.id, { enabled })
+                    }
+                    onCopyUrl={copyTriggerUrl}
+                    onDelete={(t) => setConfirmDelete(t)}
+                  />
+                ))
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
       <NewTriggerDialog
         open={createOpen}
         sources={sources}
-        serverUrl={serverUrl}
         onOpenChange={setCreateOpen}
         onCreated={() => {
           setCreateOpen(false);
@@ -340,21 +634,47 @@ export function TriggersPage() {
         publicUrl={selectedTrigger ? publicIngestUrl(selectedTrigger.id) : ""}
         busy={selectedTrigger ? busyTriggerId === selectedTrigger.id : false}
         onOpenChange={(open) => {
-          if (!open) {
-            closeTrigger();
-          }
+          if (!open) closeTrigger();
         }}
         onEnabledChange={(enabled) => {
-          if (selectedTrigger) {
+          if (selectedTrigger)
             void updateTrigger(selectedTrigger.id, { enabled });
-          }
         }}
         onDelete={() => {
-          if (selectedTrigger) {
-            void deleteTrigger(selectedTrigger);
-          }
+          if (selectedTrigger) setConfirmDelete(selectedTrigger);
         }}
       />
+
+      <AlertDialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete trigger {shortTriggerId(confirmDelete?.id ?? "")}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The public ingest URL will stop accepting events immediately. Any
+              in-flight dispatches will finish, then the trigger row is removed.
+              Code-managed triggers must be deleted from agent source.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (confirmDelete) void deleteTrigger(confirmDelete);
+              }}
+            >
+              Delete trigger
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
+import { CopyIdentifierChip } from "@/components/ui/copy-identifier-chip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -13,16 +14,25 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Clock,
+  AnimatedTabs,
+  AnimatedTabsContent,
+  AnimatedTabsList,
+  AnimatedTabsTrigger,
+} from "@/components/ui/animated-tabs";
+import {
+  Activity,
+  ArrowLeftRight,
   Lock,
   PauseFilled,
-  RadioTower,
-  Settings,
+  SlidersHorizontal,
   Trash,
 } from "@/components/ui/icon-bridge";
-import { EventRow, type InboundEvent as EventRowInboundEvent } from "@/components/triggers/EventRow";
+import { SourceIcon } from "@/components/triggers/SourceIcon";
+import {
+  EventRow,
+  type InboundEvent as EventRowInboundEvent,
+} from "@/components/triggers/EventRow";
 
 interface Trigger {
   id: string;
@@ -49,8 +59,6 @@ interface TriggerSheetProps {
   onDelete: () => void;
 }
 
-// Sheet-local alias for the trigger event-list state. Mirrors the type the
-// underlying EventRow component ships so type-flow stays aligned end-to-end.
 type InboundEvent = EventRowInboundEvent;
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -67,16 +75,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 function formatDate(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
+  if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
 }
 
 function formatConfig(config: Trigger["config"]): string {
-  if (typeof config === "string") {
-    return config;
-  }
+  if (typeof config === "string") return config;
   return JSON.stringify(config ?? {}, null, 2);
 }
 
@@ -97,17 +101,14 @@ export function TriggerSheet({
   const triggerId = trigger?.id;
   const isCodeManaged = trigger?.managed_by === "code";
 
-  const eventTypes = useMemo(() => {
-    if (!trigger?.event_types?.length) {
-      return "All event types";
-    }
+  const eventTypeLabel = useMemo(() => {
+    if (!trigger) return "";
+    if (!trigger.event_types?.length) return "All events";
     return trigger.event_types.join(", ");
   }, [trigger]);
 
   const refreshEvents = useCallback(async () => {
-    if (!triggerId) {
-      return;
-    }
+    if (!triggerId) return;
     try {
       setLoadingEvents(true);
       const res = await fetchJson<{ events: InboundEvent[] }>(
@@ -123,44 +124,39 @@ export function TriggerSheet({
   }, [serverUrl, triggerId]);
 
   useEffect(() => {
-    if (open && triggerId) {
-      void refreshEvents();
-    }
+    if (open && triggerId) void refreshEvents();
   }, [open, refreshEvents, triggerId]);
-
-  async function replay(eventId: string) {
-    if (!triggerId) {
-      return;
-    }
-    try {
-      await fetchJson(
-        `${serverUrl}/api/v1/triggers/${triggerId}/events/${eventId}/replay`,
-        { method: "POST" },
-      );
-      await refreshEvents();
-    } catch (e) {
-      setEventError(e instanceof Error ? e.message : String(e));
-    }
-  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-2xl">
         {trigger ? (
           <>
-            <div className="border-b border-border bg-background p-6">
-              <SheetHeader className="space-y-4">
-                <div className="flex items-start justify-between gap-6 pr-8">
+            {/* Header */}
+            <div className="border-b border-border bg-background px-6 py-5">
+              <SheetHeader className="space-y-3">
+                <div className="flex items-start justify-between gap-4 pr-8">
                   <div className="flex min-w-0 items-start gap-3">
-                    <div className="rounded-md border border-border bg-muted p-2">
-                      <RadioTower className="h-5 w-5 text-muted-foreground" />
-                    </div>
+                    <SourceIcon source={trigger.source_name} size="lg" />
                     <div className="min-w-0 space-y-1">
-                      <SheetTitle className="truncate">
-                        {trigger.source_name}
+                      <SheetTitle className="flex flex-wrap items-center gap-2 text-base font-semibold">
+                        <span className="truncate lowercase">
+                          {trigger.source_name}
+                        </span>
+                        <CopyIdentifierChip
+                          value={trigger.id}
+                          tooltip="Copy trigger ID"
+                          idTailVisible={6}
+                        />
                       </SheetTitle>
-                      <SheetDescription className="truncate text-muted-foreground">
-                        {trigger.id}
+                      <SheetDescription className="truncate font-mono text-xs">
+                        <span className="text-muted-foreground">
+                          {trigger.target_node_id}
+                        </span>
+                        <span className="text-muted-foreground/60">.</span>
+                        <span className="font-medium text-foreground">
+                          {trigger.target_reasoner}
+                        </span>
                       </SheetDescription>
                     </div>
                   </div>
@@ -169,6 +165,7 @@ export function TriggerSheet({
                       checked={trigger.enabled}
                       disabled={busy}
                       onCheckedChange={onEnabledChange}
+                      aria-label={trigger.enabled ? "Disable trigger" : "Enable trigger"}
                     />
                     <Button
                       variant="ghost"
@@ -177,21 +174,29 @@ export function TriggerSheet({
                       onClick={onDelete}
                       title={
                         isCodeManaged
-                          ? "Code-managed triggers are removed from agent code"
+                          ? "Code-managed triggers must be deleted from agent code"
                           : "Delete trigger"
                       }
                     >
-                      <Trash className="h-4 w-4" />
+                      <Trash className="size-4" />
                     </Button>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={trigger.enabled ? "secondary" : "outline"}>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Badge
+                    variant={trigger.enabled ? "secondary" : "outline"}
+                    size="sm"
+                    showIcon={false}
+                  >
                     {trigger.enabled ? "Enabled" : "Paused"}
                   </Badge>
-                  <Badge variant={isCodeManaged ? "secondary" : "outline"}>
-                    {trigger.managed_by}
+                  <Badge variant="outline" size="sm" showIcon={false}>
+                    {isCodeManaged ? "Code-managed" : "UI-managed"}
                   </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {eventTypeLabel}
+                  </span>
+                  <span className="text-xs text-muted-foreground">·</span>
                   <span className="text-xs text-muted-foreground">
                     Updated {formatDate(trigger.updated_at)}
                   </span>
@@ -200,37 +205,73 @@ export function TriggerSheet({
             </div>
 
             {!trigger.enabled ? (
-              <div className="sticky top-0 z-10 border-b border-border bg-muted p-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <PauseFilled className="h-4 w-4" />
-                  This trigger is paused and will not dispatch inbound events.
+              <div className="border-b border-border bg-muted px-6 py-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <PauseFilled className="size-3.5" />
+                  This trigger is paused. Inbound events are accepted and
+                  recorded, but not dispatched.
                 </div>
               </div>
             ) : null}
 
-            <Tabs defaultValue="events" className="flex min-h-0 flex-1 flex-col">
+            {/* Tabs — flush full width */}
+            <AnimatedTabs
+              defaultValue="events"
+              className="flex min-h-0 flex-1 flex-col"
+            >
               <div className="border-b border-border bg-background px-6 py-3">
-                <TabsList variant="underline" className="w-full justify-start overflow-x-auto">
-                  <TabsTrigger value="events" variant="underline">
+                <AnimatedTabsList className="h-10 w-full justify-start gap-1 rounded-md bg-muted/40 p-1">
+                  <AnimatedTabsTrigger
+                    value="events"
+                    className="gap-1.5 px-3 text-xs"
+                  >
+                    <Activity className="size-3.5" />
                     Events
-                  </TabsTrigger>
-                  <TabsTrigger value="configuration" variant="underline">
+                  </AnimatedTabsTrigger>
+                  <AnimatedTabsTrigger
+                    value="configuration"
+                    className="gap-1.5 px-3 text-xs"
+                  >
+                    <SlidersHorizontal className="size-3.5" />
                     Configuration
-                  </TabsTrigger>
-                  <TabsTrigger value="secrets" variant="underline">
+                  </AnimatedTabsTrigger>
+                  <AnimatedTabsTrigger
+                    value="secrets"
+                    className="gap-1.5 px-3 text-xs"
+                  >
+                    <Lock className="size-3.5" />
                     Secrets
-                  </TabsTrigger>
-                  <TabsTrigger value="dispatch" variant="underline">
-                    Dispatch logs
-                  </TabsTrigger>
-                </TabsList>
+                  </AnimatedTabsTrigger>
+                  <AnimatedTabsTrigger
+                    value="dispatch"
+                    className="gap-1.5 px-3 text-xs"
+                  >
+                    <ArrowLeftRight className="size-3.5" />
+                    Dispatches
+                  </AnimatedTabsTrigger>
+                </AnimatedTabsList>
               </div>
 
               <ScrollArea className="min-h-0 flex-1">
-                <div className="p-6">
-                  <TabsContent value="events" className="mt-0 space-y-4">
+                <div className="space-y-6 p-6">
+                  <AnimatedTabsContent value="events" className="mt-0 space-y-5">
+                    <DetailSection title="Public ingest URL">
+                      <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                          {publicUrl}
+                        </span>
+                        <CopyButton
+                          value={publicUrl}
+                          size="icon-sm"
+                          tooltip="Copy public URL"
+                        />
+                      </div>
+                    </DetailSection>
+
+                    <Separator />
+
                     <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-1">
+                      <div className="space-y-0.5">
                         <h3 className="text-sm font-medium">Recent events</h3>
                         <p className="text-xs text-muted-foreground">
                           Stored events received for this trigger.
@@ -252,11 +293,11 @@ export function TriggerSheet({
                     ) : null}
                     {loadingEvents ? (
                       <div className="text-sm text-muted-foreground">
-                        Loading...
+                        Loading…
                       </div>
                     ) : events.length === 0 ? (
-                      <div className="rounded-md border border-border bg-muted p-4 text-sm text-muted-foreground">
-                        No events received yet.
+                      <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                        No events received yet. Events appear here after the first inbound delivery.
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -264,75 +305,86 @@ export function TriggerSheet({
                           <EventRow
                             key={event.id}
                             event={event}
-                            onReplay={(eventId) => void replay(eventId)}
+                            triggerID={triggerId ?? ""}
+                            onReplayed={() => void refreshEvents()}
                           />
                         ))}
                       </div>
                     )}
-                  </TabsContent>
+                  </AnimatedTabsContent>
 
-                  <TabsContent value="configuration" className="mt-0 space-y-4">
-                    <DetailSection
-                      icon={<Settings className="h-4 w-4" />}
-                      title="Target"
-                      rows={[
-                        ["Node", trigger.target_node_id],
-                        ["Reasoner", trigger.target_reasoner],
-                        ["Event types", eventTypes],
-                      ]}
-                    />
+                  <AnimatedTabsContent
+                    value="configuration"
+                    className="mt-0 space-y-5"
+                  >
+                    <DetailSection title="Target">
+                      <RowList
+                        rows={[
+                          ["Node", trigger.target_node_id],
+                          ["Reasoner", trigger.target_reasoner],
+                          ["Event types", eventTypeLabel],
+                        ]}
+                      />
+                    </DetailSection>
                     <Separator />
-                    <DetailSection
-                      icon={<RadioTower className="h-4 w-4" />}
-                      title="Ingress"
-                      rows={[
-                        ["Public URL", publicUrl],
-                        ["Created", formatDate(trigger.created_at)],
-                        ["Updated", formatDate(trigger.updated_at)],
-                      ]}
-                      copyValue={publicUrl}
-                    />
+                    <DetailSection title="Lifecycle">
+                      <RowList
+                        rows={[
+                          ["Created", formatDate(trigger.created_at)],
+                          ["Updated", formatDate(trigger.updated_at)],
+                        ]}
+                      />
+                    </DetailSection>
                     <Separator />
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-medium">Config JSON</h3>
-                      <pre className="overflow-x-auto rounded-md border border-border bg-muted p-4 text-xs text-foreground">
+                    <DetailSection title="Config JSON">
+                      <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 text-xs text-foreground">
                         {formatConfig(trigger.config)}
                       </pre>
-                    </div>
-                  </TabsContent>
+                    </DetailSection>
+                  </AnimatedTabsContent>
 
-                  <TabsContent value="secrets" className="mt-0 space-y-4">
-                    <DetailSection
-                      icon={<Lock className="h-4 w-4" />}
-                      title="Signature secret"
-                      rows={[
-                        ["Env var", trigger.secret_env_var || "Not configured"],
-                        ["Source", trigger.source_name],
-                      ]}
-                    />
-                    <div className="rounded-md border border-border bg-muted p-4 text-sm text-muted-foreground">
-                      Secret values stay on the server and are referenced by env
-                      var name only.
+                  <AnimatedTabsContent
+                    value="secrets"
+                    className="mt-0 space-y-5"
+                  >
+                    <DetailSection title="Signature secret">
+                      <RowList
+                        rows={[
+                          ["Env var", trigger.secret_env_var || "Not configured"],
+                          ["Source", trigger.source_name],
+                        ]}
+                      />
+                    </DetailSection>
+                    <div className="rounded-md border border-border bg-muted/30 p-4 text-xs text-muted-foreground">
+                      Secret values stay on the control plane and are referenced
+                      by env var name only. Rotate by updating the env var on
+                      the host — no UI restart required.
                     </div>
-                  </TabsContent>
+                  </AnimatedTabsContent>
 
-                  <TabsContent value="dispatch" className="mt-0 space-y-4">
-                    <DetailSection
-                      icon={<Clock className="h-4 w-4" />}
-                      title="Dispatch logs"
-                      rows={[
-                        ["Target", `${trigger.target_node_id}.${trigger.target_reasoner}`],
-                        ["Last update", formatDate(trigger.updated_at)],
-                      ]}
-                    />
-                    <div className="rounded-md border border-border bg-muted p-4 text-sm text-muted-foreground">
-                      Dispatch log rows will appear here when the API exposes
-                      them.
+                  <AnimatedTabsContent
+                    value="dispatch"
+                    className="mt-0 space-y-5"
+                  >
+                    <DetailSection title="Dispatch target">
+                      <RowList
+                        rows={[
+                          [
+                            "Target",
+                            `${trigger.target_node_id}.${trigger.target_reasoner}`,
+                          ],
+                          ["Last update", formatDate(trigger.updated_at)],
+                        ]}
+                      />
+                    </DetailSection>
+                    <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                      Dispatch log rows appear here once the API surfaces
+                      per-trigger dispatch history.
                     </div>
-                  </TabsContent>
+                  </AnimatedTabsContent>
                 </div>
               </ScrollArea>
-            </Tabs>
+            </AnimatedTabs>
           </>
         ) : null}
       </SheetContent>
@@ -341,37 +393,33 @@ export function TriggerSheet({
 }
 
 function DetailSection({
-  icon,
   title,
-  rows,
-  copyValue,
+  children,
 }: {
-  icon: ReactNode;
   title: string;
-  rows: Array<[string, string]>;
-  copyValue?: string;
+  children: ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          <h3 className="text-sm font-medium">{title}</h3>
-        </div>
-        {copyValue ? (
-          <CopyButton value={copyValue} size="icon-sm" tooltip="Copy value" />
-        ) : null}
-      </div>
-      <dl className="grid gap-3">
-        {rows.map(([label, value]) => (
-          <div key={label} className="grid gap-1">
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="break-all font-mono text-xs text-foreground">
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+    <section className="space-y-2.5">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h3>
+      {children}
     </section>
+  );
+}
+
+function RowList({ rows }: { rows: Array<[string, string]> }) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="grid gap-1">
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="break-all font-mono text-xs text-foreground">
+            {value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

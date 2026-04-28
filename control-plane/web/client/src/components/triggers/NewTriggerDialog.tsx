@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +74,19 @@ export function NewTriggerDialog({
     [sources, sourceName],
   );
   const requiresSecret = selectedSource?.secret_required ?? false;
+
+  // Sync source selection when the dialog is reopened with a different
+  // defaultSourceName (e.g. user clicked Connect on a specific Integrations card).
+  // Without this, the internal `sourceName` state stays at its initial value from
+  // first mount and ignores subsequent prop changes.
+  useEffect(() => {
+    if (!open) return;
+    if (defaultSourceName) {
+      setSourceName(defaultSourceName);
+    } else if (!sourceName && sources.length > 0) {
+      setSourceName(sources[0].name);
+    }
+  }, [open, defaultSourceName, sources, sourceName]);
 
   const handleOpenChange = (newOpen: boolean) => {
     if (newOpen === false) {
