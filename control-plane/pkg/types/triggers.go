@@ -92,3 +92,25 @@ type TriggerBinding struct {
 	// so the UI's Drift Card can render the source location.
 	CodeOrigin string `json:"code_origin,omitempty"`
 }
+
+// TriggerMetrics holds aggregate statistics for the dashboard tile.
+type TriggerMetrics struct {
+	TotalTriggers          int     `json:"total_triggers"`
+	EnabledTriggers        int     `json:"enabled_triggers"`
+	OrphanedTriggers       int     `json:"orphaned_triggers"`
+	Events24h              int     `json:"events_24h"`
+	DispatchSuccess24h     int     `json:"dispatch_success_24h"`
+	DispatchFailed24h      int     `json:"dispatch_failed_24h"`
+	DispatchSuccessRate24h float64 `json:"dispatch_success_rate_24h"`
+	DLQDepth               int     `json:"dlq_depth"`
+}
+
+// TriggerEventMetadata describes a trigger event attached to an execution.
+type TriggerEventMetadata struct {
+	TriggerID       string `json:"trigger_id"`
+	SourceName      string `json:"source_name"`
+	EventType       string `json:"event_type"`
+	EventID         string `json:"event_id"`
+	ReceivedAt      string `json:"received_at"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+}

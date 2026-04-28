@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Agent-Field/agentfield/control-plane/internal/events"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 
 	"gorm.io/gorm"
@@ -272,6 +273,10 @@ func (ls *LocalStorage) ConvertTriggerToUIManaged(ctx context.Context, triggerID
 // (source_name, idempotency_key) means duplicate inserts return a constraint
 // error — InboundEventExistsByIdempotency lets callers detect that case
 // without relying on driver-specific error parsing.
+//
+// Publishes a TriggerEventTypeReceived to the global trigger event bus
+// after a successful insert so SSE subscribers see the event arrive in
+// real-time without polling.
 func (ls *LocalStorage) InsertInboundEvent(ctx context.Context, e *types.InboundEvent) error {
 	if e == nil {
 		return errors.New("nil event")
@@ -284,7 +289,20 @@ func (ls *LocalStorage) InsertInboundEvent(ctx context.Context, e *types.Inbound
 	if model.ReceivedAt.IsZero() {
 		model.ReceivedAt = time.Now().UTC()
 	}
-	return gormDB.Create(&model).Error
+	if err := gormDB.Create(&model).Error; err != nil {
+		return err
+	}
+	events.GlobalTriggerEventBus.Publish(events.TriggerEvent{
+		Type:           events.TriggerEventTypeReceived,
+		TriggerID:      e.TriggerID,
+		EventID:        e.ID,
+		SourceName:     e.SourceName,
+		EventType:      e.EventType,
+		Status:         e.Status,
+		IdempotencyKey: e.IdempotencyKey,
+		Timestamp:      model.ReceivedAt,
+	})
+	return nil
 }
 
 // InboundEventExistsByIdempotency reports whether an event with the given
@@ -348,6 +366,10 @@ func (ls *LocalStorage) ListInboundEvents(ctx context.Context, triggerID string,
 
 // MarkInboundEventProcessed updates an event's status after dispatch finishes.
 // vcID may be empty when DID/VC issuance is disabled or not yet wired.
+//
+// Publishes a TriggerEventTypeDispatched / TriggerEventTypeFailed (matching
+// the new status) so SSE subscribers see the lifecycle transition without
+// re-querying. Best-effort — bus publish never blocks the write.
 func (ls *LocalStorage) MarkInboundEventProcessed(ctx context.Context, id, status, errorMessage, vcID string) error {
 	gormDB, err := ls.gormWithContext(ctx)
 	if err != nil {
@@ -364,7 +386,30 @@ func (ls *LocalStorage) MarkInboundEventProcessed(ctx context.Context, id, statu
 	if vcID != "" {
 		updates["vc_id"] = vcID
 	}
-	return gormDB.Model(&InboundEventModel{}).Where("id = ?", id).Updates(updates).Error
+	if err := gormDB.Model(&InboundEventModel{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return err
+	}
+	// Look up the trigger metadata for the event-bus message; failures here
+	// don't block the write since the row update already succeeded.
+	var ev InboundEventModel
+	if err := gormDB.Where("id = ?", id).First(&ev).Error; err == nil {
+		busType := events.TriggerEventTypeDispatched
+		if status == types.InboundEventStatusFailed {
+			busType = events.TriggerEventTypeFailed
+		}
+		events.GlobalTriggerEventBus.Publish(events.TriggerEvent{
+			Type:         busType,
+			TriggerID:    ev.TriggerID,
+			EventID:      ev.ID,
+			SourceName:   ev.SourceName,
+			EventType:    ev.EventType,
+			Status:       status,
+			VCID:         vcID,
+			ErrorMessage: errorMessage,
+			Timestamp:    now,
+		})
+	}
+	return nil
 }
 
 // triggerToModel marshals a domain Trigger into its persistence form.
@@ -477,4 +522,82 @@ func modelToInboundEvent(m InboundEventModel) types.InboundEvent {
 		ReceivedAt:        m.ReceivedAt,
 		ProcessedAt:       m.ProcessedAt,
 	}
+}
+
+// TriggerMetrics returns aggregate statistics across all triggers for the dashboard tile.
+func (ls *LocalStorage) TriggerMetrics(ctx context.Context) (*types.TriggerMetrics, error) {
+	gormDB, err := ls.gormWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics := &types.TriggerMetrics{}
+
+	// Count total triggers
+	var totalCount int64
+	if err := gormDB.Model(&TriggerModel{}).Count(&totalCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.TotalTriggers = int(totalCount)
+
+	// Count enabled triggers
+	var enabledCount int64
+	if err := gormDB.Model(&TriggerModel{}).Where("enabled IS TRUE").Count(&enabledCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.EnabledTriggers = int(enabledCount)
+
+	// Count orphaned triggers
+	var orphanedCount int64
+	if err := gormDB.Model(&TriggerModel{}).Where("orphaned IS TRUE").Count(&orphanedCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.OrphanedTriggers = int(orphanedCount)
+
+	// Count events in the last 24 hours
+	twentyFourHoursAgo := time.Now().UTC().Add(-24 * time.Hour)
+	var events24hCount int64
+	if err := gormDB.Model(&InboundEventModel{}).
+		Where("received_at > ?", twentyFourHoursAgo).
+		Count(&events24hCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.Events24h = int(events24hCount)
+
+	// Count dispatched events in the last 24 hours
+	var successCount int64
+	if err := gormDB.Model(&InboundEventModel{}).
+		Where("received_at > ? AND status = ?", twentyFourHoursAgo, types.InboundEventStatusDispatched).
+		Count(&successCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.DispatchSuccess24h = int(successCount)
+
+	// Count failed events in the last 24 hours
+	var failedCount int64
+	if err := gormDB.Model(&InboundEventModel{}).
+		Where("received_at > ? AND status = ?", twentyFourHoursAgo, types.InboundEventStatusFailed).
+		Count(&failedCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.DispatchFailed24h = int(failedCount)
+
+	// Calculate dispatch success rate (handle divide-by-zero)
+	totalDispatched := metrics.DispatchSuccess24h + metrics.DispatchFailed24h
+	if totalDispatched > 0 {
+		metrics.DispatchSuccessRate24h = float64(metrics.DispatchSuccess24h) / float64(totalDispatched)
+	} else {
+		metrics.DispatchSuccessRate24h = 0.0
+	}
+
+	// Count DLQ depth for inbound_dispatch kind
+	var dlqCount int64
+	if err := gormDB.Model(&ObservabilityDeadLetterQueueModel{}).
+		Where("kind = ?", "inbound_dispatch").
+		Count(&dlqCount).Error; err != nil {
+		return nil, err
+	}
+	metrics.DLQDepth = int(dlqCount)
+
+	return metrics, nil
 }

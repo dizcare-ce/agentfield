@@ -1315,3 +1315,4 @@ func (m *mockStorage) InboundEventExistsByIdempotency(context.Context, string, s
 func (m *mockStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *mockStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (m *mockStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (m *mockStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

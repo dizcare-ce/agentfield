@@ -644,3 +644,4 @@ func (m *configStorageMock) InboundEventExistsByIdempotency(context.Context, str
 func (m *configStorageMock) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *configStorageMock) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (m *configStorageMock) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (m *configStorageMock) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

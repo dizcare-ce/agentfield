@@ -7222,7 +7222,8 @@ func (ls *LocalStorage) GetExecutionVC(ctx context.Context, vcID string) (*types
 
 	query := `
 		SELECT vc_id, execution_id, workflow_id, session_id, issuer_did, target_did,
-			   caller_did, input_hash, output_hash, status, created_at, storage_uri, document_size_bytes
+			   caller_did, input_hash, output_hash, status, created_at, storage_uri, document_size_bytes,
+			   parent_vc_id, kind, trigger_id, source_name, event_type, event_id
 		FROM execution_vcs WHERE vc_id = ?`
 
 	row := ls.db.QueryRowContext(ctx, query, vcID)
@@ -7230,7 +7231,8 @@ func (ls *LocalStorage) GetExecutionVC(ctx context.Context, vcID string) (*types
 
 	err := row.Scan(&info.VCID, &info.ExecutionID, &info.WorkflowID, &info.SessionID,
 		&info.IssuerDID, &info.TargetDID, &info.CallerDID, &info.InputHash,
-		&info.OutputHash, &info.Status, &info.CreatedAt, &info.StorageURI, &info.DocumentSize)
+		&info.OutputHash, &info.Status, &info.CreatedAt, &info.StorageURI, &info.DocumentSize,
+		&info.ParentVCID, &info.Kind, &info.TriggerID, &info.SourceName, &info.EventType, &info.EventID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("execution VC %s not found", vcID)
@@ -7319,7 +7321,8 @@ func (ls *LocalStorage) ListExecutionVCs(ctx context.Context, filters types.VCFi
 		SELECT evc.vc_id, evc.execution_id, evc.workflow_id, evc.session_id,
 		       evc.issuer_did, evc.target_did, evc.caller_did, evc.input_hash,
 		       evc.output_hash, evc.status, evc.created_at, evc.storage_uri,
-		       evc.document_size_bytes, we.agent_node_id, we.workflow_name
+		       evc.document_size_bytes, we.agent_node_id, we.workflow_name,
+		       evc.parent_vc_id, evc.kind, evc.trigger_id, evc.source_name, evc.event_type, evc.event_id
 		FROM execution_vcs evc
 		LEFT JOIN workflow_executions we ON we.execution_id = evc.execution_id`
 
@@ -7355,7 +7358,8 @@ func (ls *LocalStorage) ListExecutionVCs(ctx context.Context, filters types.VCFi
 		err := rows.Scan(&info.VCID, &info.ExecutionID, &info.WorkflowID, &info.SessionID,
 			&info.IssuerDID, &info.TargetDID, &info.CallerDID, &info.InputHash,
 			&info.OutputHash, &info.Status, &info.CreatedAt, &info.StorageURI,
-			&info.DocumentSize, &info.AgentNodeID, &info.WorkflowName)
+			&info.DocumentSize, &info.AgentNodeID, &info.WorkflowName,
+			&info.ParentVCID, &info.Kind, &info.TriggerID, &info.SourceName, &info.EventType, &info.EventID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan execution VC: %w", err)
 		}

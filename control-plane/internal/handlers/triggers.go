@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -497,6 +498,191 @@ func ListSourcesHandler() gin.HandlerFunc {
 
 // triggerEventTypeMatches reports whether an inbound event matches one of the
 // trigger's configured filters. An empty filter list means "match all".
+// GetSource handles GET /api/v1/sources/:name. Returns one Source plugin's
+// full metadata: name, kind, secret_required, config_schema.
+func (h *TriggerHandlers) GetSource() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		name := c.Param("name")
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source name is required"})
+			return
+		}
+		src, ok := sources.Get(name)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "source not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"name":             src.Name(),
+			"kind":             src.Kind().String(),
+			"secret_required":  src.SecretRequired(),
+			"config_schema":    src.ConfigSchema(),
+		})
+	}
+}
+
+// GetTriggerEvent handles GET /api/v1/triggers/:trigger_id/events/:event_id.
+// Returns a single InboundEvent row with full raw + normalized payloads.
+// Validates that the event's TriggerID matches the path to prevent enumeration.
+func (h *TriggerHandlers) GetTriggerEvent() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		triggerID := c.Param("trigger_id")
+		eventID := c.Param("event_id")
+
+		if triggerID == "" || eventID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trigger_id and event_id are required"})
+			return
+		}
+
+		ev, err := h.storage.GetInboundEvent(ctx, eventID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+			return
+		}
+
+		// Prevent enumeration: event must belong to the specified trigger.
+		if ev.TriggerID != triggerID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, ev)
+	}
+}
+
+// GetSecretStatus handles GET /api/v1/triggers/:trigger_id/secret-status.
+// Returns { env_var: string, set: bool } indicating whether the trigger's
+// secret environment variable is set on the control plane host.
+func (h *TriggerHandlers) GetSecretStatus() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		id := c.Param("trigger_id")
+
+		trig, err := h.storage.GetTrigger(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
+			return
+		}
+
+		envVar := trig.SecretEnvVar
+		if envVar == "" {
+			// Source doesn't require a secret
+			c.JSON(http.StatusOK, gin.H{
+				"env_var": "",
+				"set":     true,
+			})
+			return
+		}
+
+		_, set := os.LookupEnv(envVar)
+		c.JSON(http.StatusOK, gin.H{
+			"env_var": envVar,
+			"set":     set,
+		})
+	}
+}
+
+// testEventPayload is the optional request body for POST /triggers/:trigger_id/test.
+type testEventPayload struct {
+	Payload   json.RawMessage `json:"payload"`
+	EventType string          `json:"event_type"`
+}
+
+// TestTrigger handles POST /api/v1/triggers/:trigger_id/test. Operator-initiated
+// synthetic event. Manually persists and dispatches a test event.
+// Returns { event_id, status }. If source doesn't support synthetic signing,
+// returns 501 with a descriptive message. For v1, only generic_hmac and
+// generic_bearer are supported; other sources require a captured fixture.
+func (h *TriggerHandlers) TestTrigger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		id := c.Param("trigger_id")
+
+		trig, err := h.storage.GetTrigger(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
+			return
+		}
+
+		var payload testEventPayload
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			// Allow empty body (use default payload)
+			payload = testEventPayload{
+				Payload:   json.RawMessage("{}"),
+				EventType: "test",
+			}
+		}
+
+		if len(payload.Payload) == 0 {
+			payload.Payload = json.RawMessage("{}")
+		}
+		if payload.EventType == "" {
+			payload.EventType = "test"
+		}
+
+		// Check if source supports synthetic test events
+		src, ok := sources.Get(trig.SourceName)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "source not found"})
+			return
+		}
+
+		// For v1, we support generic_hmac and generic_bearer. Other sources
+		// like Stripe, GitHub, Cron are not yet supported for synthetic events.
+		// FIXME: Implement synthetic signing for Stripe, GitHub, and other HTTP sources.
+		if trig.SourceName != "generic_hmac" && trig.SourceName != "generic_bearer" {
+			c.JSON(http.StatusNotImplemented, gin.H{
+				"error": fmt.Sprintf("synthetic test events not yet supported for source %q — use a captured fixture instead", trig.SourceName),
+			})
+			return
+		}
+
+		// Get the secret
+		secret := ""
+		if trig.SecretEnvVar != "" {
+			secret = os.Getenv(trig.SecretEnvVar)
+			if src.SecretRequired() && secret == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": fmt.Sprintf("secret environment variable %q is not set", trig.SecretEnvVar),
+				})
+				return
+			}
+		}
+
+		// Build the synthetic event and manually dispatch it
+		// (skips signature verification since we trust the operator).
+		syntheticEvent := &types.InboundEvent{
+			ID:                utils.GenerateExecutionID(),
+			TriggerID:         trig.ID,
+			SourceName:        trig.SourceName,
+			EventType:         payload.EventType,
+			RawPayload:        payload.Payload,
+			NormalizedPayload: payload.Payload,
+			IdempotencyKey:    "", // No dedup for synthetic events
+			Status:            types.InboundEventStatusReceived,
+			ReceivedAt:        time.Now().UTC(),
+		}
+
+		if err := h.storage.InsertInboundEvent(ctx, syntheticEvent); err != nil {
+			logger.Logger.Error().
+				Err(err).
+				Str("trigger_id", id).
+				Msg("failed to persist synthetic test event")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create test event"})
+			return
+		}
+
+		// Dispatch asynchronously
+		go h.dispatcher.DispatchEvent(context.Background(), trig, syntheticEvent)
+
+		c.JSON(http.StatusAccepted, gin.H{
+			"event_id": syntheticEvent.ID,
+			"status":   "accepted",
+		})
+	}
+}
+
 func triggerEventTypeMatches(filters []string, eventType string) bool {
 	if len(filters) == 0 {
 		return true
@@ -517,3 +703,16 @@ func triggerEventTypeMatches(filters []string, eventType string) bool {
 	return false
 }
 
+
+// GetTriggerMetrics handles GET /api/v1/triggers/metrics — dashboard tile stats
+// (global aggregate, not per-trigger).
+func (h *TriggerHandlers) GetTriggerMetrics() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		metrics, err := h.storage.TriggerMetrics(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, metrics)
+	}
+}

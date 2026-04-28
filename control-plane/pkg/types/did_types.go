@@ -405,6 +405,17 @@ type ExecutionVCInfo struct {
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	StorageURI   string    `json:"storage_uri" db:"storage_uri"`
 	DocumentSize int64     `json:"document_size_bytes" db:"document_size_bytes"`
+
+	// Phase 1 + Phase 3 fields. Optional pointers so nil means "not set".
+	// ParentVCID is the chain pointer (trigger_event VC → execution VC).
+	// Kind is "execution" or "trigger_event". The trigger_* fields are
+	// populated only on kind=trigger_event rows.
+	ParentVCID *string `json:"parent_vc_id,omitempty" db:"parent_vc_id"`
+	Kind       string  `json:"kind,omitempty" db:"kind"`
+	TriggerID  *string `json:"trigger_id,omitempty" db:"trigger_id"`
+	SourceName *string `json:"source_name,omitempty" db:"source_name"`
+	EventType  *string `json:"event_type,omitempty" db:"event_type"`
+	EventID    *string `json:"event_id,omitempty" db:"event_id"`
 }
 
 // WorkflowVCInfo represents information about a workflow VC.

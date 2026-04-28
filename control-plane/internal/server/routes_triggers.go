@@ -20,6 +20,7 @@ func (s *AgentFieldServer) registerTriggerRoutes(agentAPI *gin.RouterGroup) {
 
 	// Authenticated UI/API surface for managing triggers.
 	triggers := agentAPI.Group("/triggers")
+	triggers.GET("/metrics", s.triggerHandlers.GetTriggerMetrics())
 	triggers.GET("", s.triggerHandlers.ListTriggers())
 	triggers.POST("", s.triggerHandlers.CreateTrigger())
 	triggers.GET("/:trigger_id", s.triggerHandlers.GetTrigger())
@@ -31,6 +32,14 @@ func (s *AgentFieldServer) registerTriggerRoutes(agentAPI *gin.RouterGroup) {
 	triggers.POST("/:trigger_id/pause", s.triggerHandlers.PauseTrigger())
 	triggers.POST("/:trigger_id/resume", s.triggerHandlers.ResumeTrigger())
 	triggers.POST("/:trigger_id/convert-to-ui", s.triggerHandlers.ConvertTriggerToUI())
+
+	// Phase 4 endpoints: single source detail, event detail, secret status, test trigger.
+	agentAPI.GET("/sources/:name", s.triggerHandlers.GetSource())
+	triggers.GET("/:trigger_id/events/:event_id", s.triggerHandlers.GetTriggerEvent())
+	triggers.GET("/:trigger_id/secret-status", s.triggerHandlers.GetSecretStatus())
+	triggers.POST("/:trigger_id/test", s.triggerHandlers.TestTrigger())
+	// SSE: live inbound-event stream for one trigger.
+	triggers.GET("/:trigger_id/events/stream", s.triggerHandlers.StreamTriggerEvents())
 
 	// Plugin catalog — UI uses this to render the "new trigger" form.
 	agentAPI.GET("/sources", handlers.ListSourcesHandler())

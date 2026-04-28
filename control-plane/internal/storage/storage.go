@@ -681,6 +681,9 @@ type StorageProvider interface {
 	ListInboundEvents(ctx context.Context, triggerID string, limit int) ([]*types.InboundEvent, error)
 	// MarkInboundEventProcessed updates an event's status after dispatch finishes.
 	MarkInboundEventProcessed(ctx context.Context, id, status, errorMessage, vcID string) error
+	// TriggerMetrics returns aggregate statistics for the dashboard tile
+	// (global across all triggers).
+	TriggerMetrics(ctx context.Context) (*types.TriggerMetrics, error)
 }
 
 // ComponentDIDRequest represents a component DID to be stored

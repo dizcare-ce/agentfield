@@ -574,3 +574,4 @@ func (m *mockTagStorage) InboundEventExistsByIdempotency(context.Context, string
 func (m *mockTagStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (m *mockTagStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (m *mockTagStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (s *stubStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

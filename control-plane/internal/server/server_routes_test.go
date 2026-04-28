@@ -699,3 +699,4 @@ func (s *stubStorage) InboundEventExistsByIdempotency(context.Context, string, s
 func (s *stubStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (s *stubStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (s *stubStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
+func (s *stubStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

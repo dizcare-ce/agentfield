@@ -195,6 +195,7 @@ type ExecutionDetailsResponse struct {
 	TargetDID *string `json:"target_did,omitempty"`
 	InputHash *string `json:"input_hash,omitempty"`
 	OutputHash *string `json:"output_hash,omitempty"`
+	Trigger             *types.TriggerEventMetadata `json:"trigger,omitempty"`
 }
 
 type EnhancedExecution struct {
@@ -701,6 +702,67 @@ func (h *ExecutionHandler) toExecutionSummary(exec *types.Execution) ExecutionSu
 	}
 }
 
+// enrichExecutionWithTrigger resolves the parent trigger event VC and populates
+// the response with trigger metadata if available.
+func (h *ExecutionHandler) enrichExecutionWithTrigger(ctx context.Context, exec *types.Execution, resp *ExecutionDetailsResponse) error {
+	if h.storage == nil {
+		return nil
+	}
+
+	// Fetch the execution's VC to find parent_vc_id
+	execID := exec.ExecutionID
+	vcs, err := h.storage.ListExecutionVCs(ctx, types.VCFilters{ExecutionID: &execID, Limit: 1})
+	if err != nil || len(vcs) == 0 || vcs[0] == nil {
+		return nil
+	}
+
+	vc := vcs[0]
+	if vc.ParentVCID == nil || *vc.ParentVCID == "" {
+		return nil
+	}
+
+	// Fetch the parent VC directly by ID — VCFilters doesn't expose VCID,
+	// and a single-row lookup is the right shape anyway.
+	parentVCID := *vc.ParentVCID
+	parentVC, err := h.storage.GetExecutionVC(ctx, parentVCID)
+	if err != nil || parentVC == nil {
+		return nil
+	}
+
+	// Only proceed if parent is a trigger event VC
+	if parentVC.Kind != types.ExecutionVCKindTriggerEvent {
+		return nil
+	}
+
+	// Fetch the inbound event to get full trigger metadata
+	if parentVC.EventID == nil || *parentVC.EventID == "" {
+		return nil
+	}
+
+	inboundEvent, err := h.storage.GetInboundEvent(ctx, *parentVC.EventID)
+	if err != nil {
+		return nil
+	}
+
+	// Fetch trigger to get source info
+	trigger, err := h.storage.GetTrigger(ctx, inboundEvent.TriggerID)
+	if err != nil {
+		return nil
+	}
+
+	// Populate the trigger metadata
+	resp.Trigger = &types.TriggerEventMetadata{
+		TriggerID:      trigger.ID,
+		SourceName:     trigger.SourceName,
+		EventType:      inboundEvent.EventType,
+		EventID:        inboundEvent.ID,
+		ReceivedAt:     inboundEvent.ReceivedAt.Format(time.RFC3339),
+		IdempotencyKey: inboundEvent.IdempotencyKey,
+	}
+
+	return nil
+}
+
 func (h *ExecutionHandler) toExecutionDetails(ctx context.Context, exec *types.Execution) ExecutionDetailsResponse {
 	inputData, inputSize := h.resolveExecutionData(ctx, exec.InputPayload, exec.InputURI)
 	outputData, outputSize := h.resolveExecutionData(ctx, exec.ResultPayload, exec.ResultURI)
@@ -810,6 +872,11 @@ func (h *ExecutionHandler) toExecutionDetails(ctx context.Context, exec *types.E
 		}
 	}
 
+
+	// Enrich with trigger metadata if this execution was triggered by a webhook
+	if err := h.enrichExecutionWithTrigger(ctx, exec, &resp); err != nil {
+		logger.Logger.Warn().Err(err).Str("execution_id", exec.ExecutionID).Msg("failed to enrich execution with trigger metadata")
+	}
 	return resp
 }
 
