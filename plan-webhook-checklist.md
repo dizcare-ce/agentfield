@@ -366,7 +366,25 @@ Every code-managed row carries metadata so operators understand what they're see
 
 ---
 
-## 6. UI — single Triggers page (no sub-pages)
+## 6. UI — single Triggers page (no sub-pages) ✅ SHIPPED (Phase 6, commits `a01c49d2` + `365cb5db` + `715d405a` + `e7e9746d` + `fc5b54b4`)
+
+Three parallel subagents (codex / cursor / gemini-Pro) shipped the full UI deepening pass. Every component composed from `components/ui/*` primitives. **Zero hardcoded colors verified by grep** — all status semantics via `Badge` variants and theme tokens (`bg-background`, `bg-muted`, `text-muted-foreground`, `border-border`, etc.).
+
+What landed:
+- **`pages/TriggersPage.tsx` rewrite** — single-page master-detail layout with searchable/multi-filterable `CompactTable` and clickable rows opening a right-side `Sheet`
+- **`components/triggers/TriggerSheet.tsx`** — Sheet shell with header, sticky-pause `Alert` banner, drift card, 4 `Tabs` (Events / Configuration / Secrets / Dispatch logs), SSE event subscription
+- **`components/triggers/SourcesStrip.tsx`** — horizontal source cards with "Create →" CTA per source
+- **`components/triggers/NewTriggerDialog.tsx`** — extracted create flow
+- **`components/triggers/EventRow.tsx`** + **`EventDetailPanel.tsx`** + **`VerificationCard.tsx`** + **`PayloadViewer.tsx`** + **`VCChainCard.tsx`** — the inline-expand event-detail composition (5 components, 520 LOC, all theme-token compliant)
+- **Cross-page integration:**
+  - `RunsPage` — "Triggered by Stripe / GitHub" `Badge` on inbound-event rows
+  - `RunDetailPage` — "Trigger" `Card` showing source + event metadata + webhook input via `UnifiedJsonViewer` with deep-link to `/triggers?trigger=X&event=Y`
+  - `WorkflowDAG/NodeDetailSidebar` — bound-triggers section per node from `GET /api/v1/triggers?target_node_id=X`
+  - `NewDashboardPage` — `MetricCard` tile "Inbound events (24h)" with dispatch-success-rate sub-line and DLQ depth `Badge` when > 0
+
+Below is the design reference; the boxes are now retroactive.
+
+
 
 **One left-nav entry, one page.** Everything else is right-side `Sheet` drawers, inline expansions, and integration into existing pages (runs, reasoner detail). Reasoner-side context lives where users already are.
 
