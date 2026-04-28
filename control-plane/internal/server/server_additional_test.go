@@ -614,4 +614,4 @@ func (s *listAgentsStorage) InboundEventExistsByIdempotency(context.Context, str
 func (s *listAgentsStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (s *listAgentsStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (s *listAgentsStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
-func (s *stubStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }
+func (s *listAgentsStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }

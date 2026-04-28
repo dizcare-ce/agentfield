@@ -599,4 +599,4 @@ func (s *handlerTestStorage) InboundEventExistsByIdempotency(context.Context, st
 func (s *handlerTestStorage) GetInboundEvent(context.Context, string) (*types.InboundEvent, error) { return nil, nil }
 func (s *handlerTestStorage) ListInboundEvents(context.Context, string, int) ([]*types.InboundEvent, error) { return nil, nil }
 func (s *handlerTestStorage) MarkInboundEventProcessed(context.Context, string, string, string, string) error { return nil }
-func (s *stubStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }
+func (s *handlerTestStorage) TriggerMetrics(context.Context) (*types.TriggerMetrics, error) { return &types.TriggerMetrics{}, nil }
