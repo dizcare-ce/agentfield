@@ -499,7 +499,11 @@ So integrations from other pages don't need new routes:
 
 ---
 
-## 7. P1 — Shared API contract (UI + CLI consume the same endpoints)
+## 7. P1 — Shared API contract ✅ SHIPPED (Phase 4, commits `c7fcbe0f` + `b0300385`)
+
+The endpoints needed before §6 UI deepening have all landed: 4 read/test handlers (sources/:name, single-event, secret-status, test), GetTriggerMetrics, run-detail trigger embedding, plus a global trigger event bus + SSE stream for live UI updates. Below is the design reference; the new endpoints are working and tested.
+
+
 
 The non-negotiable rule: **no UI-only endpoints, no CLI-only endpoints.** Every action goes through one of the endpoints below or doesn't exist. CLI parity is a free side-effect of getting the API right.
 
