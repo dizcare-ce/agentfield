@@ -22,7 +22,7 @@ import {
   Settings,
   Trash,
 } from "@/components/ui/icon-bridge";
-import { EventRow, type EventRowEvent } from "@/components/triggers/EventRow";
+import { EventRow, type InboundEvent as EventRowInboundEvent } from "@/components/triggers/EventRow";
 
 interface Trigger {
   id: string;
@@ -49,10 +49,9 @@ interface TriggerSheetProps {
   onDelete: () => void;
 }
 
-interface InboundEvent extends EventRowEvent {
-  trigger_id: string;
-  source_name: string;
-}
+// Sheet-local alias for the trigger event-list state. Mirrors the type the
+// underlying EventRow component ships so type-flow stays aligned end-to-end.
+type InboundEvent = EventRowInboundEvent;
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
