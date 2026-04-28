@@ -90,6 +90,8 @@ class ReasonerEntry:
     # decorators @on_event / @on_schedule. The control plane upserts a
     # code-managed Trigger row per binding at registration.
     triggers: List[Any] = field(default_factory=list)
+    # 3-state webhook flag: True (opt-in), False (opt-out), "warn" (default)
+    accepts_webhook: Union[bool, str] = "warn"
     # Note: input_schema and output_schema are generated on-demand via _get_handler_schema()
 
 
@@ -795,6 +797,14 @@ class Agent(FastAPI):
             else self._agent_vc_enabled,
         }
         triggers = getattr(entry, "triggers", None)
+        accepts_webhook = getattr(entry, "accepts_webhook", "warn")
+        if kind == "reasoner":
+            if accepts_webhook not in ("warn", None):
+                # Only include if not the default
+                metadata["accepts_webhook"] = accepts_webhook
+            elif accepts_webhook == "warn" or accepts_webhook is None:
+                # Explicitly set to "warn" if it's the default
+                metadata["accepts_webhook"] = "warn"
         if kind == "reasoner" and triggers:
             from .triggers import trigger_to_payload  # local import to avoid cycle
 
@@ -1807,6 +1817,11 @@ class Agent(FastAPI):
             decorator_triggers = getattr(original_func, "_reasoner_triggers", None)
             if not decorator_triggers:
                 decorator_triggers = getattr(tracked_func, "_reasoner_triggers", None)
+            # Resolve accepts_webhook from the decorator
+            decorator_accepts_webhook = getattr(original_func, "_accepts_webhook", "warn")
+            if not decorator_accepts_webhook:
+                decorator_accepts_webhook = getattr(tracked_func, "_accepts_webhook", "warn")
+            
             self._reasoner_registry[reasoner_id] = ReasonerEntry(
                 id=reasoner_id,
                 func=func,
@@ -1815,6 +1830,7 @@ class Agent(FastAPI):
                 tags=resolved_tags,
                 vc_enabled=vc_setting,
                 triggers=list(decorator_triggers or []),
+                accepts_webhook=decorator_accepts_webhook,
             )
 
             # NOTE: Legacy storage removed - reasoners property generates list on-demand
@@ -1841,6 +1857,107 @@ class Agent(FastAPI):
 
         return decorator
 
+    def _detect_and_unwrap_trigger_envelope(self, payload_dict: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[Any]]:
+        """
+        Detect dispatcher webhook envelope {event: ..., _meta: ...} and unwrap it.
+        Returns (unwrapped_input, trigger_context_or_none).
+        If not an envelope, returns (payload_dict, None) for backward compat.
+        """
+        # Check if this looks like a dispatcher envelope
+        if not isinstance(payload_dict, dict):
+            return payload_dict, None
+        
+        if "event" in payload_dict and "_meta" in payload_dict:
+            # This is a dispatcher envelope
+            event_data = payload_dict.get("event", {})
+            meta_data = payload_dict.get("_meta", {})
+            
+            # Parse metadata into TriggerContext
+            try:
+                from datetime import datetime
+                from .triggers import TriggerContext
+                
+                received_at_str = meta_data.get("received_at", "")
+                if received_at_str:
+                    received_at = datetime.fromisoformat(received_at_str.replace('Z', '+00:00'))
+                else:
+                    received_at = datetime.utcnow()
+                
+                trigger_ctx = TriggerContext(
+                    trigger_id=meta_data.get("trigger_id", ""),
+                    source=meta_data.get("source", ""),
+                    event_type=meta_data.get("event_type", ""),
+                    event_id=meta_data.get("event_id", ""),
+                    idempotency_key=meta_data.get("idempotency_key", ""),
+                    received_at=received_at,
+                    vc_id=meta_data.get("vc_id"),
+                )
+                return event_data, trigger_ctx
+            except Exception:
+                # If parsing fails, return raw envelope for compatibility
+                return payload_dict, None
+        
+        # Not an envelope
+        return payload_dict, None
+
+    def _apply_trigger_transform(self, trigger_ctx, bindings: list, input_data: dict) -> dict:
+        """
+        Match trigger context against reasoner bindings and apply transform if found.
+        Returns transformed input or original input if no match.
+        
+        Matching logic:
+        1. Find bindings where binding.source == trigger_ctx.source
+        2. Check event_type: binding.types empty OR trigger_ctx.event_type matches (exact or prefix)
+        3. If multiple match, prefer most specific (non-empty types)
+        4. Apply transform if binding has one
+        """
+        from .triggers import EventTrigger
+        
+        if not bindings or not trigger_ctx:
+            return input_data
+        
+        # Find best-matching binding
+        best_match = None
+        best_specificity = -1  # -1 = no match, 0 = broad (empty types), 1+ = specific
+        
+        for binding in bindings:
+            if not isinstance(binding, EventTrigger):
+                continue
+            
+            if binding.source != trigger_ctx.source:
+                continue
+            
+            # Check event_type match
+            if binding.types:
+                # binding has specific types — check for match
+                matched = False
+                for btype in binding.types:
+                    if trigger_ctx.event_type.startswith(btype):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+                specificity = 1
+            else:
+                # binding accepts all types
+                specificity = 0
+            
+            # This binding matches; is it better than current best?
+            if specificity > best_specificity:
+                best_match = binding
+                best_specificity = specificity
+        
+        # Apply transform if found
+        if best_match and best_match.transform:
+            try:
+                return best_match.transform(input_data)
+            except Exception as e:
+                if self.dev_mode:
+                    log_warn(f"Transform failed for {trigger_ctx.source}/{trigger_ctx.event_type}: {e}; using raw input")
+                return input_data
+        
+        return input_data
+
     async def _execute_reasoner_endpoint(
         self,
         *,
@@ -1855,6 +1972,10 @@ class Agent(FastAPI):
 
         execution_context = ExecutionContext.from_request(request, self.node_id)
         payload_dict = input_data  # Already a dict from runtime validation
+        # Unwrap dispatcher envelope if present (Phase 5 webhook DX)
+        payload_dict, trigger_context = self._detect_and_unwrap_trigger_envelope(payload_dict)
+        if trigger_context:
+            execution_context.trigger = trigger_context
 
         self._current_execution_context = execution_context
         context_token = set_execution_context(execution_context)
@@ -1889,6 +2010,15 @@ class Agent(FastAPI):
             )
 
         try:
+            # Phase 5: Apply trigger transform if applicable
+            trigger_bindings = getattr(func, "_reasoner_triggers", [])
+            if execution_context.trigger and trigger_bindings:
+                payload_dict = self._apply_trigger_transform(
+                    execution_context.trigger,
+                    trigger_bindings,
+                    payload_dict
+                )
+
             try:
                 if should_convert_args(func):
                     converted_args, converted_kwargs = convert_function_args(
@@ -1912,6 +2042,12 @@ class Agent(FastAPI):
 
             if "execution_context" in signature.parameters:
                 kwargs["execution_context"] = execution_context
+
+            # Phase 5: Inject trigger context (webhook metadata)
+            if "trigger" in signature.parameters:
+                kwargs["trigger"] = execution_context.trigger
+            if "webhook" in signature.parameters:
+                kwargs["webhook"] = execution_context.trigger
 
             if asyncio.iscoroutinefunction(func):
                 result = await func(*args, **kwargs)

@@ -6,7 +6,10 @@ import contextvars
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .triggers import TriggerContext
 
 
 _RUN_HEADER = "X-Run-ID"
@@ -38,6 +41,7 @@ class ExecutionContext:
     target_did: Optional[str] = None
     agent_node_did: Optional[str] = None
     parent_vc_id: Optional[str] = None
+    trigger: Optional["TriggerContext"] = None
     # Compatibility fields retained for existing integrations
     workflow_id: Optional[str] = None
     parent_workflow_id: Optional[str] = None
@@ -166,6 +170,7 @@ class ExecutionContext:
             target_did=self.target_did,
             agent_node_did=self.agent_node_did,
             parent_vc_id=self.parent_vc_id,
+            trigger=self.trigger,
             workflow_id=self.workflow_id,
             parent_workflow_id=self.workflow_id,
             root_workflow_id=self.root_workflow_id or self.workflow_id,

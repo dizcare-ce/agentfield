@@ -54,6 +54,7 @@ def reasoner(
     description: Optional[str] = None,
     track_workflow: bool = True,
     triggers: Optional[List[Trigger]] = None,
+    accepts_webhook: Optional[Union[bool, str]] = None,
     **kwargs,
 ):
     """Enhanced reasoner decorator with automatic workflow tracking and triggers.
@@ -71,6 +72,13 @@ def reasoner(
         @on_schedule("*/5 * * * *")
         async def poll(input, ctx): ...
 
+        # Explicitly opt into/out of webhook input:
+        @reasoner(accepts_webhook=True)
+        async def webhook_ready(input, ctx): ...
+
+        @reasoner(accepts_webhook=False)
+        async def not_for_webhooks(input, ctx): ...
+
     Args:
         triggers: Typed trigger bindings (EventTrigger / ScheduleTrigger) that
             cause this reasoner to fire when the named external Source emits
@@ -80,6 +88,9 @@ def reasoner(
         tags: Tags for grouping and authorization.
         description: Human-readable description (defaults to the docstring).
         track_workflow: Whether to enable automatic workflow tracking.
+        accepts_webhook: Controls whether UI-managed triggers can invoke this reasoner.
+            True = explicitly opt in; False = explicitly refuse; None (default) = auto-detect
+            from triggers (True if any declared) or default to "warn".
         **kwargs: Additional metadata stored on the function.
     """
 
@@ -130,6 +141,19 @@ def reasoner(
                     trigger.code_origin = origin
 
         wrapper._reasoner_triggers = merged
+
+        # Resolve accepts_webhook value:
+        # - If explicitly passed (True/False/str), use that
+        # - Else if any triggers declared, auto-set to True
+        # - Else default to "warn"
+        resolved_accepts_webhook: Union[bool, str]
+        if accepts_webhook is not None:
+            resolved_accepts_webhook = accepts_webhook
+        elif merged:
+            resolved_accepts_webhook = True
+        else:
+            resolved_accepts_webhook = "warn"
+        wrapper._accepts_webhook = resolved_accepts_webhook
 
         # Store any additional metadata
         for key, value in kwargs.items():
@@ -339,6 +363,12 @@ async def _execute_with_tracking(func: Callable, *args, **kwargs) -> Any:
         # Inject execution_context if the function accepts it
         if "execution_context" in sig.parameters:
             call_kwargs.setdefault("execution_context", execution_context)
+
+        # Phase 5: Inject trigger context (webhook metadata)
+        if "trigger" in sig.parameters:
+            call_kwargs.setdefault("trigger", execution_context.trigger)
+        if "webhook" in sig.parameters:
+            call_kwargs.setdefault("webhook", execution_context.trigger)
 
         # 🔥 NEW: Automatic Pydantic model conversion (FastAPI-like behavior)
         try:
