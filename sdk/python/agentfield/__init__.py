@@ -59,7 +59,7 @@ from .exceptions import (
     ValidationError,
 )
 from .client import ApprovalRequestResponse, ApprovalResult, ApprovalStatusResponse
-from .triggers import EventTrigger, ScheduleTrigger
+from .triggers import EventTrigger, ScheduleTrigger, TriggerContext
 from .decorators import on_event, on_schedule, reasoner
 from .tool_calling import (
     ToolCallConfig,
@@ -139,6 +139,7 @@ __all__ = [
     # Trigger / webhook plugin system
     "EventTrigger",
     "ScheduleTrigger",
+    "TriggerContext",
     "on_event",
     "on_schedule",
     "reasoner",
