@@ -135,15 +135,7 @@ func TestStripeIngest_HappyPath(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	t.Logf("Request: %s %s", req.Method, req.URL.Path)
-	t.Logf("Headers: %v", req.Header)
-	t.Logf("Body: %s", string(body))
 	router.ServeHTTP(w, req)
-	
-	if w.Code != http.StatusOK {
-		t.Logf("Response code: %d", w.Code)
-		t.Logf("Response body: %s", w.Body.String())
-	}
 
 	// Verify response.
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -345,15 +337,7 @@ func TestStripeIngest_BadSignature(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	t.Logf("Request: %s %s", req.Method, req.URL.Path)
-	t.Logf("Headers: %v", req.Header)
-	t.Logf("Body: %s", string(body))
 	router.ServeHTTP(w, req)
-	
-	if w.Code != http.StatusOK {
-		t.Logf("Response code: %d", w.Code)
-		t.Logf("Response body: %s", w.Body.String())
-	}
 
 	// Expect 401 Unauthorized.
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -419,15 +403,7 @@ func TestStripeIngest_ExpiredTimestamp(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	t.Logf("Request: %s %s", req.Method, req.URL.Path)
-	t.Logf("Headers: %v", req.Header)
-	t.Logf("Body: %s", string(body))
 	router.ServeHTTP(w, req)
-	
-	if w.Code != http.StatusOK {
-		t.Logf("Response code: %d", w.Code)
-		t.Logf("Response body: %s", w.Body.String())
-	}
 
 	// Expect 401 Unauthorized.
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -490,15 +466,7 @@ func TestStripeIngest_DispatchedEventStatusUpdate(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	t.Logf("Request: %s %s", req.Method, req.URL.Path)
-	t.Logf("Headers: %v", req.Header)
-	t.Logf("Body: %s", string(body))
 	router.ServeHTTP(w, req)
-	
-	if w.Code != http.StatusOK {
-		t.Logf("Response code: %d", w.Code)
-		t.Logf("Response body: %s", w.Body.String())
-	}
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
