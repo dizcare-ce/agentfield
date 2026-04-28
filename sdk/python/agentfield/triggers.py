@@ -30,12 +30,16 @@ class EventTrigger:
             ``secret_required`` is true.
         config: Source-specific JSON config (timestamp tolerance, custom
             header names, etc). The Source's ``Validate`` runs server-side.
+        code_origin: Optional source code location (``path/to/file.py:42``)
+            where this trigger is declared. Used for observability and drift
+            detection. Automatically captured by decorators.
     """
 
     source: str
     types: List[str] = field(default_factory=list)
     secret_env: Optional[str] = None
     config: Dict[str, Any] = field(default_factory=dict)
+    code_origin: Optional[str] = None
 
 
 @dataclass
@@ -45,10 +49,14 @@ class ScheduleTrigger:
     Attributes:
         cron: 5-field cron expression (``minute hour dom month dow``).
         timezone: IANA timezone name. Defaults to UTC.
+        code_origin: Optional source code location (``path/to/file.py:42``)
+            where this trigger is declared. Used for observability and drift
+            detection. Automatically captured by decorators.
     """
 
     cron: str
     timezone: str = "UTC"
+    code_origin: Optional[str] = None
 
 
 Trigger = Union[EventTrigger, ScheduleTrigger]
@@ -70,9 +78,11 @@ def trigger_to_payload(trigger: Trigger) -> Dict[str, Any]:
             payload["config"] = dict(trigger.config)
         if trigger.secret_env:
             payload["secret_env_var"] = trigger.secret_env
+        if trigger.code_origin:
+            payload["code_origin"] = trigger.code_origin
         return payload
     if isinstance(trigger, ScheduleTrigger):
-        return {
+        payload = {
             "source": "cron",
             "event_types": [],
             "config": {
@@ -80,4 +90,7 @@ def trigger_to_payload(trigger: Trigger) -> Dict[str, Any]:
                 "timezone": trigger.timezone or "UTC",
             },
         }
+        if trigger.code_origin:
+            payload["code_origin"] = trigger.code_origin
+        return payload
     raise TypeError(f"unknown trigger type: {type(trigger).__name__}")

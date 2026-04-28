@@ -30,6 +30,22 @@ from pydantic import ValidationError
 _PENDING_TRIGGERS_ATTR = "_pending_triggers"
 
 
+def _code_origin(fn) -> Optional[str]:
+    """Capture the source code location (file:line) of a function.
+
+    Returns the fully qualified path to the file and the line number where the
+    function is declared, in the format 'path/to/file.py:42'.
+    """
+    try:
+        src = inspect.getsourcefile(fn)
+        line = fn.__code__.co_firstlineno
+        if src and line:
+            return f"{src}:{line}"
+    except Exception:
+        pass
+    return None
+
+
 def reasoner(
     func=None,
     *,
@@ -104,6 +120,15 @@ def reasoner(
                 delattr(f, _PENDING_TRIGGERS_ATTR)
             except AttributeError:
                 pass
+        # Stamp code_origin on triggers that don't already have it
+
+        origin = _code_origin(f)
+
+        if origin:
+            for trigger in merged:
+                if not getattr(trigger, "code_origin", None):
+                    trigger.code_origin = origin
+
         wrapper._reasoner_triggers = merged
 
         # Store any additional metadata
@@ -143,6 +168,9 @@ def on_event(
             secret_env=secret_env,
             config=dict(config or {}),
         )
+        # Capture code origin automatically
+        if not binding.code_origin:
+            binding.code_origin = _code_origin(func)
         existing = getattr(func, _PENDING_TRIGGERS_ATTR, None)
         if existing is None:
             existing = []
@@ -161,6 +189,9 @@ def on_schedule(cron: str, *, timezone: str = "UTC"):
 
     def decorator(func: Callable) -> Callable:
         binding = ScheduleTrigger(cron=cron, timezone=timezone)
+        # Capture code origin automatically
+        if not binding.code_origin:
+            binding.code_origin = _code_origin(func)
         existing = getattr(func, _PENDING_TRIGGERS_ATTR, None)
         if existing is None:
             existing = []
