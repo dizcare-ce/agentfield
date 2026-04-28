@@ -92,12 +92,14 @@ func TestGenericBearerIngest_DefaultBearerScheme(t *testing.T) {
 		TargetNodeID:   "bearer-target-default",
 		TargetReasoner: "handle_event",
 		SecretEnvVar:   "BEARER_TOKEN",
-		EventTypes:     []string{"webhook"},
-		ManagedBy:      types.ManagedByUI,
-		Enabled:        true,
-		Config:         json.RawMessage(`{}`),
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		// generic_bearer doesn't extract event types from the body, so leave
+		// EventTypes empty (match-all). Filtering by event type with
+		// generic_bearer requires an event_type_header config.
+		ManagedBy: types.ManagedByUI,
+		Enabled:   true,
+		Config:    json.RawMessage(`{}`),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 	require.NoError(t, provider.CreateTrigger(ctx, trig))
 
@@ -177,10 +179,9 @@ func TestGenericBearerIngest_CustomHeaderEmptyScheme(t *testing.T) {
 		TargetNodeID:   "bearer-target-custom",
 		TargetReasoner: "handle_event",
 		SecretEnvVar:   "API_KEY",
-		EventTypes:     []string{"webhook"},
-		ManagedBy:      types.ManagedByUI,
-		Enabled:        true,
-		Config:         cfg,
+		ManagedBy: types.ManagedByUI,
+		Enabled:   true,
+		Config:    cfg,
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
 	}

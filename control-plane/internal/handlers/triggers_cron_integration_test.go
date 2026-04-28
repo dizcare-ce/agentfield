@@ -13,6 +13,7 @@ import (
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/config"
 	"github.com/Agent-Field/agentfield/control-plane/internal/services"
+	"github.com/Agent-Field/agentfield/control-plane/internal/sources"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 
@@ -197,30 +198,18 @@ func TestCronIngest_StartAndStopCleanly(t *testing.T) {
 
 // TestCronIngest_InvalidExpression rejects invalid cron expressions early.
 func TestCronIngest_InvalidExpression(t *testing.T) {
-	_, manager, _ := setupCronTestEnv(t)
+	// Source.Validate is the synchronous validation surface — Start spawns a
+	// goroutine and surfaces config errors via logging there, not via the
+	// Start return. So we exercise validation directly through the registry.
+	src, ok := sources.Get("cron")
+	require.True(t, ok, "cron source must be registered")
 
-	// Create a trigger with invalid cron expression.
 	badCfg := json.RawMessage(`{
 		"expression": "invalid cron expression",
 		"timezone": "UTC"
 	}`)
-	trig := &types.Trigger{
-		ID:             "cron_trigger_invalid",
-		SourceName:     "cron",
-		TargetNodeID:   "target",
-		TargetReasoner: "handler",
-		SecretEnvVar:   "",
-		EventTypes:     []string{"tick"},
-		ManagedBy:      types.ManagedByCode,
-		Enabled:        true,
-		Config:         badCfg,
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
-	}
-
-	// Start should return an error (not panic).
-	err := manager.Start(trig)
-	assert.Error(t, err, "invalid cron expression should cause Start to return error")
+	err := src.Validate(badCfg)
+	assert.Error(t, err, "invalid cron expression should fail Validate")
 	assert.Contains(t, err.Error(), "cron", "error should mention cron")
 }
 

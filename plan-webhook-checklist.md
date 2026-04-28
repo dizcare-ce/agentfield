@@ -2,9 +2,52 @@
 
 Companion to `plan-webhook.md` (architecture). Track every remaining piece across backend, SDKs, UI, docs, and ops. Phases ordered by dependency, not time-to-ship.
 
-**Branch:** `feat/webhooks` (commits `5c9ecd44` + `1ef9eac7`)
+**Branch:** `feat/webhooks` (Phase 0 `5c9ecd44`+`1ef9eac7`; Phase 1 `189c2c38`+`b1b85284`; Phase 2 in progress)
 
 **Legend:** ✅ done · 🟡 partial · ⬜ not started · 🚫 explicitly out of v1 scope
+
+---
+
+## 0a. Final acceptance demo — end-to-end smoke (TODO after UI work)
+
+After §6 UI is shipped, package a one-command **Docker demo** showing a webhook-triggered reasoner happening live in the UI. Request from the user 2026-04-28: "launch the built Docker container with the UI and sample agent node, reasoner with trigger and we can launch as if a new webhook has reached to our control plane as GitHub or cron or other things and I can look at it in the UI happening."
+
+### Demo composition
+- [ ] **Docker compose** at `examples/triggers-demo/docker-compose.yml`:
+  - `agentfield-server` — control plane with embedded UI (single binary built via `make build`)
+  - `sample-agent` — Python SDK agent with **deterministic** reasoners (no LLM): `handle_payment` (logs amount), `handle_pr` (logs repo + title), `handle_tick` (writes a counter to memory)
+  - All wired via `@on_event(...)` and `@on_schedule(...)` so triggers register automatically on agent startup
+- [ ] **Pre-seeded triggers**: Stripe (generic_hmac variant for the demo), GitHub, cron — created via `af triggers create` in the agent's startup script OR auto-registered via `@on_event` decorators
+- [ ] **Replay-script** at `examples/triggers-demo/scripts/fire-events.sh`:
+  - Sends a signed Stripe-style HMAC payload to `/sources/<trigger_id>` for the payment trigger
+  - Sends a signed GitHub `pull_request.opened` payload
+  - (Cron fires by itself once per minute)
+- [ ] **README.md** at `examples/triggers-demo/README.md` walking through: bring up compose, open browser to `http://localhost:8080/triggers`, run the fire-events script, watch events appear live in the UI
+- [ ] All reasoners are **deterministic** — no AI, no external API calls. Just enough to demonstrate the dispatch path lights up.
+
+### What to look at in the UI (cross-page tour)
+
+When demoing, point to **all the places the trigger feature surfaces** so the operator/dev sees the full integration story:
+
+| UI surface | What you should see when a webhook fires |
+|---|---|
+| **`/triggers` (list page)** | Three trigger rows (Stripe, GitHub, cron), each with public URL + copy button + secret-status pill + enabled toggle. Last-event-at column updates live; 24h count increments. |
+| **`/triggers` → click row → right Sheet** (when §6 ships) | Header: source icon, public URL, enabled switch. Drift card showing `code_origin: examples/triggers-demo/agent.py:42`. Tabs: Events / Configuration / Secrets / Dispatch logs. |
+| **Sheet → Events tab → expand row** | Verification result, raw + normalized payload via `UnifiedJsonViewer`, **VC chain card** linking trigger event VC ↔ execution VC (deep-link into `VerifyProvenancePage`), Replay button. |
+| **`/runs` (executions list page)** | New "Triggered by Stripe" / "Triggered by GitHub" / "Triggered by cron" badge on rows that came from inbound events (per §6.7.1). |
+| **`/runs/:id` (run detail)** | New "Trigger" Card section showing source, event_type, idempotency_key, received_at. Run input panel shows the inbound event payload (per §6.7.2). |
+| **Reasoner detail page** | "Bound triggers" card listing the @on_event/@on_schedule bindings (per §6.7.3). |
+| **Dashboard tile** | "Inbound events (24h)" `MetricCard` with sparkline + dispatch-success-rate (per §6.7.5). |
+| **`af verify audit.json` (CLI)** | Walks the chain back to the trigger event VC, surfacing source name + verification result. |
+
+### Acceptance criteria
+- [ ] `docker compose up` from clean state → control plane + agent both green within 30s
+- [ ] Run `fire-events.sh` → ≥3 inbound events appear in UI within 2s of the script completing
+- [ ] Click any event → see verified signature evidence, payload, and VC chain links (when §6 ships VC links)
+- [ ] Click a triggered run from `/runs` → see Trigger card + input panel
+- [ ] Demo runs in under 90 seconds wall-clock from `up` to "I see the chain"
+
+**This demo locks down the integration story.** It's the artifact someone can hand to a stakeholder to show "AgentField has webhooks." It's also the smoke test we run before tagging any release.
 
 ---
 
@@ -51,23 +94,23 @@ Companion to `plan-webhook.md` (architecture). Track every remaining piece acros
 
 ---
 
-## 1. P0 — VC chain extension ✅ SHIPPED (commits 189c2c38 + b1b85284)
+## 1. P0 — VC chain extension ✅ SHIPPED (commits `189c2c38` + `b1b85284`)
 
-Closes the audit chain so `af verify audit.json` walks back past the first reasoner to a CP-rooted credential. Shipped as Phase 1 on `feat/webhooks`.
+Closes the audit chain so `af verify audit.json` walks back past the first reasoner to a CP-rooted credential. Shipped.
 
 ### Backend
 - [x] `pkg/types/trigger_event_vc.go` — `TriggerEventVCSubject` + `VCTriggerVerification`
 - [x] Migration `030_vc_kind_discriminator.sql` — `kind` column + trigger metadata on `execution_vcs`
 - [x] `services/vc_issuance_trigger.go` — `GenerateTriggerEventVC` signs with CP root DID
-- [x] Storage interface gains `StoreExecutionVCRecord` (writes new fields); existing scalar `StoreExecutionVC` unchanged for back-compat
+- [x] Storage interface gains `StoreExecutionVCRecord` (writes new fields); legacy scalar `StoreExecutionVC` unchanged
 - [x] `services/trigger_dispatcher.go` — mints VC after target lookup, best-effort, logs on failure, dispatches anyway
 - [x] `X-Parent-VC-ID` header on dispatched reasoner request
-- [x] Replay reuses original event's `vc_id` so the chain still terminates at original payload's evidence
-- [x] `GenerateExecutionVC` now sets `Kind='execution'` and reads `ParentVCID` from `ExecutionContext`
+- [x] Replay reuses original event's `vc_id` so chain still terminates at original payload
+- [x] `GenerateExecutionVC` sets `Kind='execution'` and reads `ParentVCID` from `ExecutionContext`
 - [x] DID disabled → clean nil-VC no-op; dispatch still works
 - [ ] Verifier CLI extension to recognize `kind='trigger_event'` as a chain root (deferred to docs/CLI polish phase)
 
-### Python SDK (subagent in worktree)
+### Python SDK
 - [x] `execution_context.py` reads/emits `X-Parent-VC-ID`, exposes `ctx.parent_vc_id`
 - [x] `vc_generator.py` includes `parent_vc_id` in `/api/v1/execution/vc` payload
 - [x] `agent.py` propagates on outbound `app.call()`
@@ -76,27 +119,32 @@ Closes the audit chain so `af verify audit.json` walks back past the first reaso
 ### Tests
 - [x] 4 unit tests on `GenerateTriggerEventVC` (happy path, DID disabled, persist disabled, ParentVCID propagation)
 - [x] 3 dispatcher integration tests (full ingest→mint→header→back-write, DID disabled, replay reuses VC)
-- [x] Wider sweep clean: 2268 tests + race tests on services pass
-
-### Docs
-- [ ] `docs/ARCHITECTURE.md` "Trigger event VC" section (deferred to docs phase)
-- [ ] Per-source VC verification semantics table (deferred to docs phase)
 
 ---
 
-## 2. P0 — Per-source HTTP integration tests 🟡 IN FLIGHT (Phase 2)
+## 2. P0 — Per-source HTTP integration tests ✅ SHIPPED (Phase 2)
 
-Unit tests cover the verification path; integration tests cover the full `POST /sources/:id` → persistence → dispatch loop with a fake target node. Three parallel subagents in worktrees split the work:
+Three parallel subagents in worktrees + cleanup pass. 25 integration tests covering all six sources.
 
-- 🟡 **Stripe** + idempotency (subagent 1) — signed `payment_intent.succeeded` → row + dispatch; same `evt_xxx` twice → 1 row, 1 dispatch; bad signature → 401; expired timestamp → 401
-- 🟡 **GitHub** + **Slack** (subagent 2) — GitHub `pull_request.opened` with action concat + bare ping; Slack `event_callback` unwrap + URL verification + replay window
-- 🟡 **generic_hmac** + **generic_bearer** + **cron** (subagent 3) — default & custom headers; bearer scheme variants; cron `SourceManager` lifecycle
+### Sources covered
+- [x] **Stripe** — 5 tests: happy path + idempotency dedup + bad signature + expired timestamp + dispatched-status update
+- [x] **GitHub** — 4 tests: pull_request.opened with action concat + bare ping (no action) + tampered body + missing signature header
+- [x] **Slack** — 4 tests: app_mention event_callback unwrap + URL verification challenge filter + tampered body + expired timestamp (anti-replay)
+- [x] **generic_hmac** — 4 tests: default header + custom header/prefix + tampered body + missing signature
+- [x] **generic_bearer** — 4 tests: default Bearer scheme + custom header empty scheme + wrong token + missing header
+- [x] **cron** — 5 tests: lifecycle + invalid expression Validate + start/stop cleanup + multiple triggers independent + cleanup on StopAll
 
-Each test asserts:
-1. Public 200 response shape and timing (no waiting on dispatcher)
-2. `inbound_events` row contents (raw + normalized payload, idempotency_key, status)
-3. Dispatcher invoked the target reasoner with documented headers (`X-Source-Name`, `X-Event-Type`, `X-Trigger-ID`, `X-Event-ID`)
-4. Failure-mode rows: bad signature → 401, no row, no dispatch
+### Each test asserts
+- [x] Public 200 response shape and timing (no waiting on dispatcher)
+- [x] `inbound_events` row contents (raw + normalized payload, idempotency_key, status)
+- [x] Dispatcher invoked target reasoner with documented headers (`X-Source-Name`, `X-Event-Type`, `X-Trigger-ID`, `X-Event-ID`)
+- [x] Failure modes: bad signature → 401, no row, no dispatch
+
+### Known FIXMEs surfaced for future phases
+- ⬜ Slack URL-verification body should echo the `challenge` token (current handler returns 200 + received=0 only; spec wants the challenge value back in the response body) — Phase 3+
+- ⬜ Cron parser is 1-minute floor; lacks faked-clock injection so we test lifecycle, not scheduled-fire timing — Phase 3+
+- ⬜ Dispatcher does not propagate source-level `idempotency_key` as an outbound header — design decision for §3 hardening
+- ⬜ `generic_*` filter-by-event-type requires `event_type_header` config; default-config triggers can't filter on type — document in §6 Configuration tab
 
 ---
 
