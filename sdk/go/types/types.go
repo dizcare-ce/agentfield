@@ -7,12 +7,13 @@ import (
 
 // ReasonerDefinition mirrors the AgentField server registration contract.
 type ReasonerDefinition struct {
-	ID           string           `json:"id"`
-	InputSchema  json.RawMessage  `json:"input_schema"`
-	OutputSchema json.RawMessage  `json:"output_schema"`
-	Tags         []string         `json:"tags,omitempty"`
-	ProposedTags []string         `json:"proposed_tags,omitempty"`
-	Triggers     []TriggerBinding `json:"triggers,omitempty"`
+	ID             string           `json:"id"`
+	InputSchema    json.RawMessage  `json:"input_schema"`
+	OutputSchema   json.RawMessage  `json:"output_schema"`
+	Tags           []string         `json:"tags,omitempty"`
+	ProposedTags   []string         `json:"proposed_tags,omitempty"`
+	Triggers       []TriggerBinding `json:"triggers,omitempty"`
+	AcceptsWebhook *string          `json:"accepts_webhook,omitempty"`
 }
 
 // TriggerBinding declares that a reasoner should fire when an external Source

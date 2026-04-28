@@ -188,6 +188,41 @@ func (h *TriggerHandlers) CreateTrigger() gin.HandlerFunc {
 			return
 		}
 
+		// Validate accepts_webhook flag on target reasoner
+		agent, err := h.storage.GetAgent(c.Request.Context(), req.TargetNodeID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target node not found: " + req.TargetNodeID})
+			return
+		}
+
+		// Find the reasoner in the agent's registered reasoners
+		var reasoner *types.ReasonerDefinition
+		if agent.Reasoners != nil {
+			for i := range agent.Reasoners {
+				if agent.Reasoners[i].ID == req.TargetReasoner {
+					reasoner = &agent.Reasoners[i]
+					break
+				}
+			}
+		}
+
+		if reasoner == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "target reasoner not found: " + req.TargetReasoner})
+			return
+		}
+
+		// Check accepts_webhook flag
+		if reasoner.AcceptsWebhook != nil && *reasoner.AcceptsWebhook == "false" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target reasoner has accepts_webhook=false; it explicitly does not accept webhook triggers"})
+			return
+		}
+		if reasoner.AcceptsWebhook != nil && *reasoner.AcceptsWebhook == "warn" || reasoner.AcceptsWebhook == nil {
+			logger.Logger.Warn().
+				Str("target_node_id", req.TargetNodeID).
+				Str("target_reasoner", req.TargetReasoner).
+				Msg("UI trigger created for reasoner with accepts_webhook=warn (default); operator should verify reasoner is webhook-compatible")
+		}
+
 		enabled := true
 		if req.Enabled != nil {
 			enabled = *req.Enabled

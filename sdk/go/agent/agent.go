@@ -107,6 +107,17 @@ func WithDescription(desc string) ReasonerOption {
 	}
 }
 
+// WithAcceptsWebhook sets the accepts_webhook flag for UI-managed trigger guardrailing.
+// Pass "true" to explicitly opt in, "false" to refuse, or omit for auto-detect (True if
+// any triggers declared, else "warn").
+func WithAcceptsWebhook(flag string) ReasonerOption {
+	return func(r *Reasoner) {
+		if flag != "" {
+			r.AcceptsWebhook = &flag
+		}
+	}
+}
+
 // Reasoner represents a single handler exposed by the agent.
 type Reasoner struct {
 	Name         string
@@ -134,6 +145,11 @@ type Reasoner struct {
 	// WithTriggers(...); the WithEventTrigger / WithScheduleTrigger helpers
 	// are sugar that append to this slice.
 	Triggers []types.TriggerBinding
+
+	// AcceptsWebhook controls whether UI-managed triggers can invoke this reasoner.
+	// nil/empty = inherit default ("warn"), "true" = explicitly opt in, "false" = explicitly refuse.
+	// Auto-set to "true" if any Triggers are declared.
+	AcceptsWebhook *string
 }
 
 // EventTrigger describes an external event source binding for a reasoner.
@@ -673,6 +689,12 @@ func (a *Agent) RegisterReasoner(name string, handler HandlerFunc, opts ...Reaso
 		opt(meta)
 	}
 
+	// Auto-set accepts_webhook=true if any triggers declared and not explicitly set
+	if meta.AcceptsWebhook == nil && len(meta.Triggers) > 0 {
+		flag := "true"
+		meta.AcceptsWebhook = &flag
+	}
+
 	if meta.DefaultCLI {
 		if a.defaultCLIReasoner != "" && a.defaultCLIReasoner != name {
 			a.logger.Printf("warn: default CLI reasoner already set to %s, ignoring default flag on %s", a.defaultCLIReasoner, name)
@@ -807,12 +829,13 @@ func (a *Agent) registerNode(ctx context.Context) error {
 	reasoners := make([]types.ReasonerDefinition, 0, len(a.reasoners))
 	for _, reasoner := range a.reasoners {
 		reasoners = append(reasoners, types.ReasonerDefinition{
-			ID:           reasoner.Name,
-			InputSchema:  reasoner.InputSchema,
-			OutputSchema: reasoner.OutputSchema,
-			Tags:         reasoner.Tags,
-			ProposedTags: reasoner.Tags,
-			Triggers:     reasoner.Triggers,
+			ID:             reasoner.Name,
+			InputSchema:    reasoner.InputSchema,
+			OutputSchema:   reasoner.OutputSchema,
+			Tags:           reasoner.Tags,
+			ProposedTags:   reasoner.Tags,
+			Triggers:       reasoner.Triggers,
+			AcceptsWebhook: reasoner.AcceptsWebhook,
 		})
 	}
 
