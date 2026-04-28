@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.72-rc.8] - 2026-04-28
+
+
+### Fixed
+
+- Fix(control-plane): require signed approval webhooks (#504)
+
+* fix(control-plane): require signed approval webhooks
+
+* fix(functional-tests): sign approval webhook payloads
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com> (002dc5a)
+
 ## [0.1.72-rc.7] - 2026-04-28
 
 
