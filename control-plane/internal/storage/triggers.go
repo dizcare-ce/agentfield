@@ -505,6 +505,7 @@ func inboundEventToModel(e *types.InboundEvent) InboundEventModel {
 		ReceivedAt:           e.ReceivedAt,
 		ProcessedAt:          e.ProcessedAt,
 		DispatchedWorkflowID: e.DispatchedWorkflowID,
+		ReplayOf:             e.ReplayOf,
 	}
 }
 
@@ -521,8 +522,9 @@ func modelToInboundEvent(m InboundEventModel) types.InboundEvent {
 		Status:               m.Status,
 		ErrorMessage:         m.ErrorMessage,
 		ReceivedAt:           m.ReceivedAt,
-		ProcessedAt:           m.ProcessedAt,
+		ProcessedAt:          m.ProcessedAt,
 		DispatchedWorkflowID: m.DispatchedWorkflowID,
+		ReplayOf:             m.ReplayOf,
 	}
 }
 

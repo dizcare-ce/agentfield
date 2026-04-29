@@ -508,6 +508,11 @@ type InboundEventModel struct {
 	// depending on the DID/VC chain being fully wired (which requires
 	// the agent SDK to relay X-Parent-VC-ID and emit signed execution VCs).
 	DispatchedWorkflowID string `gorm:"column:dispatched_workflow_id;not null;default:'';index"`
+	// ReplayOf is the ID of the original inbound_event this row was cloned
+	// from. Set by ReplayEvent so UI consumers (and `af verify` audit walks)
+	// can show "this event is a replay of X" instead of guessing from
+	// payload-equality heuristics. Empty for fresh deliveries.
+	ReplayOf string `gorm:"column:replay_of;not null;default:'';index:idx_inbound_events_replay_of"`
 }
 
 func (InboundEventModel) TableName() string { return "inbound_events" }

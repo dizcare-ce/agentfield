@@ -580,7 +580,9 @@ func (h *TriggerHandlers) ReplayEvent() gin.HandlerFunc {
 			return
 		}
 		// Mint a new event row so the replay has its own audit trail. Keep the
-		// idempotency key cleared so providers' dedup index doesn't reject it.
+		// idempotency key cleared so providers' dedup index doesn't reject it,
+		// and stamp ReplayOf with the original event's ID so the UI / audit
+		// walkers can navigate from "this replay" back to the signed delivery.
 		replayed := &types.InboundEvent{
 			ID:                utils.GenerateExecutionID(),
 			TriggerID:         trig.ID,
@@ -591,13 +593,17 @@ func (h *TriggerHandlers) ReplayEvent() gin.HandlerFunc {
 			IdempotencyKey:    "",
 			Status:            types.InboundEventStatusReplayed,
 			ReceivedAt:        time.Now().UTC(),
+			ReplayOf:          ev.ID,
 		}
 		if err := h.storage.InsertInboundEvent(ctx, replayed); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		go h.dispatcher.DispatchEvent(context.Background(), trig, replayed)
-		c.JSON(http.StatusAccepted, gin.H{"event_id": replayed.ID})
+		c.JSON(http.StatusAccepted, gin.H{
+			"event_id":  replayed.ID,
+			"replay_of": ev.ID,
+		})
 	}
 }
 

@@ -73,6 +73,13 @@ type InboundEvent struct {
 	// this delivery. Lets the runs-list / run-dag handlers correlate a run
 	// back to its trigger without traversing the DID/VC chain.
 	DispatchedWorkflowID string `json:"dispatched_workflow_id,omitempty"`
+	// ReplayOf is the ID of the original inbound event this row was cloned
+	// from when an operator hit "Replay" in the UI (or POST .../replay).
+	// Empty for fresh deliveries from a provider. Idempotency key is
+	// cleared on replays so providers' dedup index doesn't block the
+	// re-dispatch — without this back-pointer there'd be no way to
+	// navigate from the replay row to the original event.
+	ReplayOf string `json:"replay_of,omitempty"`
 }
 
 const (
