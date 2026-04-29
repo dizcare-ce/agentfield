@@ -208,6 +208,37 @@ async def summarize_issue(event: dict, trigger: TriggerContext | None = None):
 
 
 # ---------------------------------------------------------------------------
+# Generic catch-all — exercised by UI-managed Slack / HMAC / Bearer triggers
+#
+# The demo's three code-managed triggers cover Stripe, GitHub, and cron via
+# decorators. To exercise the other three built-in source plugins (Slack
+# Events API, generic HMAC, generic Bearer) the fire-events.sh script lazily
+# creates UI-managed triggers via POST /api/v1/triggers, all routed at this
+# one reasoner. handle_inbound just records the payload + provider context
+# into per-agent memory so the UI's trigger event surface shows real data.
+# The `accepts_webhook="yes"` opt-in lets the CP create UI triggers for it
+# without the soft-warning fallback.
+# ---------------------------------------------------------------------------
+
+
+@app.reasoner(accepts_webhook=True)
+async def handle_inbound(payload, trigger: TriggerContext | None = None):
+    """Catch-all handler for UI-managed triggers (Slack / HMAC / Bearer)."""
+    record = {
+        "kind": "inbound",
+        "received_via": trigger.source if trigger else "direct_call",
+        "event_type": trigger.event_type if trigger else None,
+        "event_id": trigger.event_id if trigger else None,
+        "idempotency_key": trigger.idempotency_key if trigger else None,
+        "payload": payload,
+    }
+    if trigger and trigger.event_id:
+        await app.memory.set(key=f"inbound:{trigger.source}:{trigger.event_id}", data=record)
+    print(f"[handle_inbound] {trigger.source if trigger else 'direct'} event_type={record['event_type']}", flush=True)
+    return record
+
+
+# ---------------------------------------------------------------------------
 # Cron — periodic tick
 #
 # The cron source runs as a LoopSource inside the CP, emitting a "tick" event
@@ -257,7 +288,8 @@ if __name__ == "__main__":
         f"  node_id            = {app.node_id}\n"
         f"  agentfield_server  = {os.getenv('AGENTFIELD_URL', 'http://localhost:8080')}\n"
         f"  callback url       = {os.getenv('AGENT_CALLBACK_URL', f'http://localhost:{port}')}\n"
-        "  reasoners          = handle_payment (stripe), handle_pr (github), summarize_issue (github), handle_tick (cron)",
+        "  reasoners          = handle_payment (stripe), handle_pr (github), summarize_issue (github),\n"
+        "                       handle_inbound (slack/hmac/bearer via UI), handle_tick (cron)",
         flush=True,
         file=sys.stderr,
     )

@@ -6,7 +6,7 @@
 #   2. triggers-demo-agent — Python agent declaring three triggers via
 #                            @on_event (Stripe, GitHub) and @on_schedule (cron)
 #
-# Once both services are healthy, open http://localhost:8080/triggers in your
+# Once both services are healthy, open http://localhost:8080/ui/triggers in your
 # browser. The cron trigger fires automatically every minute. To fire signed
 # Stripe and GitHub events on demand, run:
 #
@@ -31,6 +31,13 @@ services:
       # signatures. The fire-events script signs with the same values.
       STRIPE_DEMO_SECRET: whsec_demo_stripe_secret_change_me_in_prod
       GITHUB_DEMO_SECRET: ghsecret_demo_github_secret_change_me
+      # Secrets for the three secondary plugins exercised by fire-events.sh —
+      # Slack signing secret + a couple of bring-your-own-auth flavours. These
+      # back UI-managed triggers the script creates on first run; they aren't
+      # tied to any code-level @on_event decorator.
+      SLACK_DEMO_SIGNING_SECRET: slack_demo_signing_secret_change_me
+      GENERIC_HMAC_DEMO_SECRET: generic_hmac_demo_secret_change_me
+      GENERIC_BEARER_DEMO_TOKEN: generic_bearer_demo_token_change_me
       # DID enabled so the dispatcher mints a trigger event VC and chains
       # it onto the resulting execution VC. The runs-list / run-dag trigger
       # enrichment walks this chain to populate WorkflowSummary.trigger and
