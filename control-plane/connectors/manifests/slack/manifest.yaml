@@ -1,0 +1,177 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# Slack connector — messaging and member lookup operations.
+#
+# Integrates with the Slack Web API to post messages, list conversations,
+# add reactions, and look up users by email. All operations require Bearer
+# token authentication via SLACK_BOT_TOKEN.
+
+schema_version: "1.0"
+name: slack
+display: Slack
+category: Provider
+version: "1.0"
+
+description: |
+  Post messages, react, and lookup users in Slack. Post to channels or
+  threads, list conversations with type filters, add emoji reactions,
+  and resolve email addresses to Slack user IDs.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#4A154B"
+  hover_blurb: "Post messages, react, and lookup users in Slack."
+  highlights:
+    - chat.postMessage
+    - conversations.list
+    - reactions.add
+    - users.lookupByEmail
+  docs_url: "https://docs.agentfield.ai/connectors/slack"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: SLACK_BOT_TOKEN
+  description: |
+    Slack bot token with chat:write and users:read permissions. Generate
+    at https://api.slack.com/apps → your app → OAuth & Permissions.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  chat_post_message:
+    display: Post message to channel
+    description: |
+      Posts a message to a Slack channel or thread. Supports plain text or
+      rich block-kit JSON. Returns the message timestamp and channel ID on success.
+    method: POST
+    url: "https://slack.com/api/chat.postMessage"
+    inputs:
+      channel:
+        type: string
+        in: body
+        description: Channel ID or name (e.g., C12345678 or #general).
+        example: "#general"
+      text:
+        type: string
+        in: body
+        description: Plain-text message content (used if blocks not provided).
+        example: "Hello from AgentField!"
+      thread_ts:
+        type: string
+        in: body
+        description: Optional. Message timestamp to reply to (for threads).
+      blocks:
+        type: array
+        in: body
+        description: Optional. Rich block-kit JSON array for formatted layout.
+        items: { type: object }
+    output:
+      type: object
+      schema:
+        ok:      { type: boolean, jsonpath: "$.ok" }
+        ts:      { type: string,  jsonpath: "$.ts" }
+        channel: { type: object,  jsonpath: "$.channel" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Send }
+      tags: [write, social]
+
+  conversations_list:
+    display: List channels and conversations
+    description: |
+      Lists Slack channels and conversations. Filter by type (public
+      channels, private channels, direct messages, etc.). Returns paginated list.
+    method: GET
+    url: "https://slack.com/api/conversations.list"
+    inputs:
+      types:
+        type: string
+        in: query
+        default: "public_channel"
+        description: Comma-separated types to list (public_channel, private_channel, mpim, im).
+      limit:
+        type: integer
+        in: query
+        default: 100
+        description: Maximum conversations per page (1–1000).
+    paginate:
+      strategy: cursor
+      max_pages: 10
+    output:
+      type: array
+      schema:
+        items:
+          id:      { type: string, jsonpath: "$.id" }
+          name:    { type: string, jsonpath: "$.name" }
+          is_dm:   { type: boolean, jsonpath: "$.is_im" }
+          members_count: { type: integer, jsonpath: "$.num_members" }
+          created: { type: integer, jsonpath: "$.created" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: List }
+      tags: [read]
+
+  reactions_add:
+    display: Add emoji reaction to message
+    description: |
+      Adds an emoji reaction to a message in a channel or thread.
+      The emoji name is without colons (e.g., "thumbsup" not ":thumbsup:").
+    method: POST
+    url: "https://slack.com/api/reactions.add"
+    inputs:
+      channel:
+        type: string
+        in: body
+        description: Channel ID containing the message.
+        example: "C12345678"
+      name:
+        type: string
+        in: body
+        description: Emoji name without colons (e.g., thumbsup, heart, laugh).
+        example: "thumbsup"
+      timestamp:
+        type: string
+        in: body
+        description: Message timestamp (ts) to react to.
+        example: "1234567890.123456"
+    output:
+      type: object
+      schema:
+        ok: { type: boolean, jsonpath: "$.ok" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Smile }
+      tags: [write, social]
+
+  users_lookup_by_email:
+    display: Look up user by email
+    description: |
+      Resolves a user's email address to their Slack user ID and profile info.
+      Returns the user object or an error if not found.
+    method: GET
+    url: "https://slack.com/api/users.lookupByEmail"
+    inputs:
+      email:
+        type: string
+        in: query
+        description: Email address of the Slack user.
+        example: "user@example.com"
+    output:
+      type: object
+      schema:
+        ok:   { type: boolean, jsonpath: "$.ok" }
+        user: { type: object,  jsonpath: "$.user" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Search }
+      tags: [read]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10

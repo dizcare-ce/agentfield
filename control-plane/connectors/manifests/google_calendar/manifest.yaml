@@ -1,0 +1,209 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# Google Calendar connector — create, list, delete events and query free/busy.
+#
+# Integrates with the Google Calendar API v3 to manage calendar events,
+# list events with filters, delete events, and query free/busy information.
+# Uses OAuth 2.0 bearer token authentication via GOOGLE_OAUTH_TOKEN.
+
+schema_version: "1.0"
+name: google_calendar
+display: Google Calendar
+category: Provider
+version: "1.0"
+
+description: |
+  Create, list, and delete calendar events; query free/busy slots.
+  Support for recurring events, attendees, descriptions, and time-zone
+  aware scheduling, all with Google Calendar API v3 OAuth2 authentication.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#4285F4"
+  hover_blurb: "Create, list, and delete calendar events; query free/busy."
+  highlights:
+    - events.insert
+    - events.list
+    - events.delete
+    - freebusy
+  docs_url: "https://docs.agentfield.ai/connectors/google_calendar"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: GOOGLE_OAUTH_TOKEN
+  description: |
+    Google OAuth 2.0 access token with Google Calendar API scope
+    (https://www.googleapis.com/auth/calendar). Obtain via Google OAuth 2.0
+    consent flow with calendar.events scope enabled.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  insert_event:
+    display: Create a calendar event
+    description: |
+      Creates a new event in a Google Calendar. Supports attendees,
+      descriptions, recurring patterns, and all standard event fields.
+      Returns the created event ID and web link.
+    method: POST
+    url: "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+    inputs:
+      calendar_id:
+        type: string
+        in: path
+        default: "primary"
+        description: Calendar ID or "primary" for the authenticated user's default calendar.
+      summary:
+        type: string
+        in: body
+        description: Event title or summary.
+        example: "Team standup"
+      description:
+        type: string
+        in: body
+        description: Optional event description or notes.
+      start:
+        type: object
+        in: body
+        description: Event start time (object with dateTime/timeZone or just date for all-day).
+      end:
+        type: object
+        in: body
+        description: Event end time (object with dateTime/timeZone or just date for all-day).
+      attendees:
+        type: array
+        in: body
+        description: Optional array of attendee objects (each with email, displayName, optional).
+        items: { type: object }
+    output:
+      type: object
+      schema:
+        id:        { type: string, jsonpath: "$.id" }
+        html_link: { type: string, jsonpath: "$.htmlLink" }
+        status:    { type: string, jsonpath: "$.status" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Plus }
+      tags: [write]
+
+  list_events:
+    display: List calendar events
+    description: |
+      Lists events from a calendar within a specified time range.
+      Supports filtering by time, sorting, and pagination. Returns
+      event IDs, titles, and time information.
+    method: GET
+    url: "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+    inputs:
+      calendar_id:
+        type: string
+        in: path
+        default: "primary"
+        description: Calendar ID or "primary" for the authenticated user's default calendar.
+      time_min:
+        type: string
+        in: query
+        description: Lower bound for event start time (RFC3339 format, e.g., 2025-01-01T00:00:00Z).
+      time_max:
+        type: string
+        in: query
+        description: Upper bound for event start time (RFC3339 format).
+      max_results:
+        type: integer
+        in: query
+        default: 25
+        description: Maximum events per page (1–2500).
+      single_events:
+        type: boolean
+        in: query
+        default: true
+        description: Expand recurring events into single event instances.
+      order_by:
+        type: string
+        in: query
+        default: "startTime"
+        enum: [startTime, updated]
+        description: Sort order (startTime requires singleEvents=true).
+    paginate:
+      strategy: page_token
+      max_pages: 10
+    output:
+      type: array
+      schema:
+        items:
+          id:        { type: string, jsonpath: "$.id" }
+          summary:   { type: string, jsonpath: "$.summary" }
+          start:     { type: object, jsonpath: "$.start" }
+          end:       { type: object, jsonpath: "$.end" }
+          html_link: { type: string, jsonpath: "$.htmlLink" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Calendar }
+      tags: [read]
+
+  delete_event:
+    display: Delete a calendar event
+    description: |
+      Deletes an event from a calendar. The event is permanently removed.
+      Requires the event ID and calendar ID.
+    method: DELETE
+    url: "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}"
+    inputs:
+      calendar_id:
+        type: string
+        in: path
+        default: "primary"
+        description: Calendar ID or "primary" for the authenticated user's default calendar.
+      event_id:
+        type: string
+        in: path
+        description: Event ID to delete.
+    output:
+      type: object
+      schema:
+        status: { type: string, jsonpath: "$.status", default: "deleted" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Trash2 }
+      tags: [write, destructive]
+
+  freebusy_query:
+    display: Query free/busy information
+    description: |
+      Queries free/busy status for one or more calendars within a time range.
+      Useful for finding available meeting slots without exposing event details.
+      Returns busy and free time blocks.
+    method: POST
+    url: "https://www.googleapis.com/calendar/v3/freeBusy"
+    inputs:
+      time_min:
+        type: string
+        in: body
+        description: Lower bound for query time (RFC3339 format).
+      time_max:
+        type: string
+        in: body
+        description: Upper bound for query time (RFC3339 format).
+      items:
+        type: array
+        in: body
+        description: Array of calendar objects to query (each with id field).
+        items: { type: object }
+    output:
+      type: object
+      schema:
+        calendars: { type: object, jsonpath: "$.calendars" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Clock }
+      tags: [read]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10
