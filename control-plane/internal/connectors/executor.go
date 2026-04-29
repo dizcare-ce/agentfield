@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/Agent-Field/agentfield/control-plane/internal/connectors/auth"
 	"github.com/Agent-Field/agentfield/control-plane/internal/connectors/manifest"
@@ -65,10 +66,11 @@ func (e *Executor) Invoke(ctx context.Context, connector, operation string, inpu
 	startMs := startTime.UnixNano() / 1e6
 
 	auditRec := AuditRecord{
-		Connector:   connector,
-		Operation:   operation,
-		StartedAt:   startMs,
-		Status:      "pending",
+		InvocationID: uuid.New().String(),
+		Connector:    connector,
+		Operation:    operation,
+		StartedAt:    startMs,
+		Status:       "pending",
 	}
 	_ = e.auditor.OnStart(ctx, auditRec)
 

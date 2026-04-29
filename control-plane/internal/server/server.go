@@ -726,6 +726,7 @@ func (s *AgentFieldServer) setupRoutes() {
 		s.registerAdminRoutes(agentAPI)
 		s.registerConnectorRoutes(agentAPI)
 		s.registerAgenticRoutes(agentAPI)
+		s.registerConnectorAPIRoutes(agentAPI)
 	}
 
 	s.registerKBRoutes()
