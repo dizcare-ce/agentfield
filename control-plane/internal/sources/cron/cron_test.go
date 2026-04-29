@@ -1,9 +1,31 @@
 package cron
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Agent-Field/agentfield/control-plane/internal/sources"
 )
+
+func TestCron_MetadataAndSchema(t *testing.T) {
+	s := &source{}
+	if s.Name() != "cron" {
+		t.Fatalf("Name() = %q, want cron", s.Name())
+	}
+	if s.Kind() != sources.KindLoop {
+		t.Fatalf("Kind() = %v, want loop", s.Kind())
+	}
+	if s.SecretRequired() {
+		t.Fatal("cron must not require a secret")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(s.ConfigSchema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+}
 
 func TestParseExpression_Basic(t *testing.T) {
 	cases := []struct {
@@ -112,5 +134,58 @@ func TestValidate_RejectsBadTimezone(t *testing.T) {
 	err := (&source{}).Validate([]byte(`{"expression":"* * * * *","timezone":"Mars/Olympus_Mons"}`))
 	if err == nil {
 		t.Fatal("expected error for bogus timezone")
+	}
+}
+
+func TestCronValidateAndRunErrorBranches(t *testing.T) {
+	s := &source{}
+	if err := s.Validate([]byte(`{`)); err == nil || !strings.Contains(err.Error(), "invalid config") {
+		t.Fatalf("expected invalid config error, got %v", err)
+	}
+	if err := s.Validate([]byte(`{"expression":"* * *"}`)); err == nil || !strings.Contains(err.Error(), "expected 5 fields") {
+		t.Fatalf("expected expression error, got %v", err)
+	}
+
+	ctx := context.Background()
+	if err := s.Run(ctx, []byte(`{`), "", func(sources.Event) {}); err == nil || !strings.Contains(err.Error(), "invalid config") {
+		t.Fatalf("expected run config error, got %v", err)
+	}
+	if err := s.Run(ctx, []byte(`{"expression":"bad"}`), "", func(sources.Event) {}); err == nil || !strings.Contains(err.Error(), "expected 5 fields") {
+		t.Fatalf("expected run expression error, got %v", err)
+	}
+	if err := s.Run(ctx, []byte(`{"expression":"* * * * *","timezone":"Mars/Olympus_Mons"}`), "", func(sources.Event) {}); err == nil {
+		t.Fatal("expected run timezone error")
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	err := s.Run(cancelled, []byte(`{"expression":"* * * * *"}`), "", func(sources.Event) {
+		t.Fatal("cancelled cron source should not emit")
+	})
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
+
+func TestParseFieldRejectsMalformedParts(t *testing.T) {
+	for _, field := range []string{"*/0", "*/nope", "5-2", "x-y", "x", "61"} {
+		if _, err := parseField(field, 0, 59); err == nil {
+			t.Fatalf("parseField(%q) expected error", field)
+		}
+	}
+}
+
+func TestScheduleNextUsesCronDaySemantics(t *testing.T) {
+	// Restricted DOM and DOW use standard OR semantics. This should match
+	// Wednesday April 29 because the day-of-month is 29 even though DOW asks
+	// for Sunday.
+	s, err := parseExpression("0 8 29 * 0")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	now := time.Date(2026, 4, 28, 9, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 4, 29, 8, 0, 0, 0, time.UTC)
+	if got := s.Next(now); !got.Equal(want) {
+		t.Fatalf("Next = %v, want %v", got, want)
 	}
 }

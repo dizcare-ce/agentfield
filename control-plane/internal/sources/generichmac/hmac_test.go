@@ -49,6 +49,34 @@ func TestGenericHMAC_DefaultHeader(t *testing.T) {
 	}
 }
 
+func TestGenericHMAC_MetadataValidateAndDefaults(t *testing.T) {
+	s := &source{}
+	if s.Name() != "generic_hmac" {
+		t.Fatalf("Name() = %q, want generic_hmac", s.Name())
+	}
+	if s.Kind() != sources.KindHTTP {
+		t.Fatalf("Kind() = %v, want HTTP", s.Kind())
+	}
+	if !s.SecretRequired() {
+		t.Fatal("generic_hmac should require a secret")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(s.ConfigSchema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if err := s.Validate(nil); err != nil {
+		t.Fatalf("empty config should validate: %v", err)
+	}
+	if err := s.Validate([]byte(`{`)); err == nil {
+		t.Fatal("expected invalid config error")
+	}
+
+	parsed := parseConfig(json.RawMessage(`{"signature_header":""}`))
+	if parsed.SignatureHeader != "X-Signature" {
+		t.Fatalf("empty signature header should default, got %q", parsed.SignatureHeader)
+	}
+}
+
 func TestGenericHMAC_CustomHeaderAndPrefix(t *testing.T) {
 	secret := "supersecret"
 	body := []byte(`{"k":"v"}`)
@@ -59,9 +87,9 @@ func TestGenericHMAC_CustomHeaderAndPrefix(t *testing.T) {
         "idempotency_header":"X-Delivery-ID"
     }`)
 	r := req(body, map[string]string{
-		"X-Custom-Sig":   "sha256=" + sign(body, secret),
-		"X-Event-Type":   "order.created",
-		"X-Delivery-ID":  "del-99",
+		"X-Custom-Sig":  "sha256=" + sign(body, secret),
+		"X-Event-Type":  "order.created",
+		"X-Delivery-ID": "del-99",
 	})
 
 	events, err := (&source{}).HandleRequest(context.Background(), r, cfg, secret)

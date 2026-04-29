@@ -132,4 +132,10 @@ func TestGitHub_RegistryMetadata(t *testing.T) {
 	if !s.SecretRequired() {
 		t.Error("github should require secret")
 	}
+	if len(s.ConfigSchema()) == 0 {
+		t.Fatal("github should expose a config schema")
+	}
+	if err := s.Validate([]byte(`{`)); err != nil {
+		t.Fatalf("github has no config knobs, validate should ignore payload: %v", err)
+	}
 }

@@ -5,9 +5,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,29 @@ func TestStripe_VerifiesAndEmitsEvent(t *testing.T) {
 	}
 	if events[0].IdempotencyKey != "evt_123" {
 		t.Fatalf("unexpected idempotency key: %q", events[0].IdempotencyKey)
+	}
+}
+
+func TestStripe_MetadataAndValidateBranches(t *testing.T) {
+	s := &source{}
+	if s.Name() != "stripe" {
+		t.Fatalf("Name() = %q, want stripe", s.Name())
+	}
+	if s.Kind() != sources.KindHTTP {
+		t.Fatalf("Kind() = %v, want HTTP", s.Kind())
+	}
+	if !s.SecretRequired() {
+		t.Fatal("stripe should require a secret")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(s.ConfigSchema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if err := s.Validate(nil); err != nil {
+		t.Fatalf("empty config should validate: %v", err)
+	}
+	if err := s.Validate([]byte(`{`)); err == nil {
+		t.Fatal("expected invalid config error")
 	}
 }
 
@@ -157,5 +182,59 @@ func TestStripe_RejectsMissingSecret(t *testing.T) {
 func TestStripe_ValidateRejectsNegativeTolerance(t *testing.T) {
 	if err := (&source{}).Validate([]byte(`{"tolerance_seconds":-1}`)); err == nil {
 		t.Fatal("expected validation error for negative tolerance_seconds")
+	}
+}
+
+func TestStripe_VerifySignatureRejectsMalformedHeader(t *testing.T) {
+	body := []byte(`{"id":"evt","type":"x"}`)
+	now := time.Now()
+	for _, header := range []string{
+		"v1=deadbeef",
+		"t=not-a-number,v1=deadbeef",
+		"t=" + strconv.FormatInt(now.Unix(), 10),
+	} {
+		if err := verifySignature(body, header, "secret", 300, now); err == nil {
+			t.Fatalf("verifySignature(%q) expected error", header)
+		}
+	}
+}
+
+func TestStripe_HandleRequestAdditionalRejects(t *testing.T) {
+	secret := "whsec_test"
+	ts := time.Now().Unix()
+	body := []byte(`{`)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(strconv.FormatInt(ts, 10)))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	header := "t=" + strconv.FormatInt(ts, 10) + ",v1=" + hex.EncodeToString(mac.Sum(nil))
+	req := &sources.RawRequest{
+		Headers: http.Header{"Stripe-Signature": []string{header}},
+		Body:    body,
+		URL:     &url.URL{Path: "/x"},
+		Method:  "POST",
+	}
+	if _, err := (&source{}).HandleRequest(context.Background(), req, nil, secret); err == nil || !strings.Contains(err.Error(), "invalid event JSON") {
+		t.Fatalf("expected invalid JSON error, got %v", err)
+	}
+
+	old := time.Now().Add(-24 * time.Hour).Unix()
+	body = []byte(`{"id":"evt_old","type":"x"}`)
+	mac = hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(strconv.FormatInt(old, 10)))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	req = &sources.RawRequest{
+		Headers: http.Header{"Stripe-Signature": []string{"t=" + strconv.FormatInt(old, 10) + ",v1=" + hex.EncodeToString(mac.Sum(nil))}},
+		Body:    body,
+		URL:     &url.URL{Path: "/x"},
+		Method:  "POST",
+	}
+	events, err := (&source{}).HandleRequest(context.Background(), req, json.RawMessage(`{"tolerance_seconds":0}`), secret)
+	if err != nil {
+		t.Fatalf("zero tolerance should accept old signed request: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want 1 event, got %d", len(events))
 	}
 }

@@ -215,3 +215,108 @@ func TestLocalStorageInboundEventCoverage(t *testing.T) {
 	_, err = ls.ListTriggers(cancelled, "", "")
 	require.Error(t, err)
 }
+
+func TestLocalStorageTriggerErrorBranchesCoverage(t *testing.T) {
+	ls, ctx := setupLocalStorage(t)
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+
+	require.Error(t, ls.CreateTrigger(cancelled, testTrigger("cancel-create", "generic_bearer", "node", "handle")))
+	_, err := ls.GetTrigger(cancelled, "missing")
+	require.Error(t, err)
+	_, err = ls.ListTriggers(cancelled, "", "")
+	require.Error(t, err)
+	require.Error(t, ls.UpdateTrigger(cancelled, testTrigger("cancel-update", "generic_bearer", "node", "handle")))
+	require.Error(t, ls.DeleteTrigger(cancelled, "missing"))
+	_, err = ls.UpsertCodeManagedTrigger(cancelled, testTrigger("cancel-upsert", "github", "node", "handle"))
+	require.Error(t, err)
+	require.Error(t, ls.MarkOrphanedTriggers(cancelled, "node", nil))
+	require.Error(t, ls.SetTriggerOverride(cancelled, "missing", true, false))
+	require.Error(t, ls.ConvertTriggerToUIManaged(cancelled, "missing"))
+	require.Error(t, ls.InsertInboundEvent(cancelled, &types.InboundEvent{ID: "cancel-event"}))
+	_, err = ls.InboundEventExistsByIdempotency(cancelled, "source", "idem")
+	require.Error(t, err)
+	_, err = ls.GetInboundEvent(cancelled, "missing")
+	require.Error(t, err)
+	_, err = ls.ListInboundEvents(cancelled, "missing", 1)
+	require.Error(t, err)
+	require.Error(t, ls.MarkInboundEventProcessed(cancelled, "missing", types.InboundEventStatusFailed, "nope", ""))
+	require.Error(t, ls.SetInboundEventDispatchedWorkflow(cancelled, "missing", "wf"))
+
+	gormDB, err := ls.gormWithContext(ctx)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	require.NoError(t, gormDB.Create(&TriggerModel{
+		ID:             "bad-event-types",
+		SourceName:     "generic_bearer",
+		ConfigJSON:     "{}",
+		TargetNodeID:   "node",
+		TargetReasoner: "handle",
+		EventTypes:     "{",
+		ManagedBy:      string(types.ManagedByUI),
+		Enabled:        true,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error)
+	_, err = ls.GetTrigger(ctx, "bad-event-types")
+	require.Error(t, err)
+	_, err = ls.ListTriggers(ctx, "", "")
+	require.Error(t, err)
+}
+
+func TestLocalStorageStoreExecutionVCRecordCoverage(t *testing.T) {
+	ls, ctx := setupLocalStorage(t)
+	require.EqualError(t, ls.StoreExecutionVCRecord(ctx, nil), "execution VC is nil")
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Error(t, ls.StoreExecutionVCRecord(cancelled, &types.ExecutionVC{VCID: "cancel-vc"}))
+
+	parentID := "parent-vc"
+	triggerID := "trigger-vc"
+	sourceName := "github"
+	eventType := "push"
+	eventID := "event-vc"
+	created := time.Now().UTC().Truncate(time.Second)
+	vc := &types.ExecutionVC{
+		VCID:         "vc-record",
+		ExecutionID:  "exec-vc-record",
+		WorkflowID:   "wf-vc-record",
+		SessionID:    "session-vc-record",
+		IssuerDID:    "did:issuer",
+		TargetDID:    "did:target",
+		CallerDID:    "did:caller",
+		VCDocument:   json.RawMessage(`{"vc":true}`),
+		Signature:    "sig",
+		StorageURI:   "file://vc",
+		DocumentSize: 11,
+		InputHash:    "in",
+		OutputHash:   "out",
+		Status:       "verified",
+		CreatedAt:    created,
+		ParentVCID:   &parentID,
+		TriggerID:    &triggerID,
+		SourceName:   &sourceName,
+		EventType:    &eventType,
+		EventID:      &eventID,
+	}
+	require.NoError(t, ls.StoreExecutionVCRecord(ctx, vc))
+
+	stored, err := ls.GetExecutionVC(ctx, vc.VCID)
+	require.NoError(t, err)
+	require.Equal(t, types.ExecutionVCKindExecution, stored.Kind)
+	require.Equal(t, parentID, *stored.ParentVCID)
+	require.Equal(t, triggerID, *stored.TriggerID)
+	require.Equal(t, sourceName, *stored.SourceName)
+	require.Equal(t, eventType, *stored.EventType)
+	require.Equal(t, eventID, *stored.EventID)
+
+	vc.Status = "updated"
+	vc.Kind = types.ExecutionVCKindTriggerEvent
+	vc.Signature = "sig2"
+	require.NoError(t, ls.StoreExecutionVCRecord(ctx, vc))
+	updated, err := ls.GetExecutionVC(ctx, vc.VCID)
+	require.NoError(t, err)
+	require.Equal(t, "updated", updated.Status)
+	require.Equal(t, types.ExecutionVCKindTriggerEvent, updated.Kind)
+}

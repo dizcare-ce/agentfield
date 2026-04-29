@@ -37,6 +37,34 @@ func TestBearer_DefaultSchemeAccepted(t *testing.T) {
 	}
 }
 
+func TestBearer_MetadataValidateAndDefaults(t *testing.T) {
+	s := &source{}
+	if s.Name() != "generic_bearer" {
+		t.Fatalf("Name() = %q, want generic_bearer", s.Name())
+	}
+	if s.Kind() != sources.KindHTTP {
+		t.Fatalf("Kind() = %v, want HTTP", s.Kind())
+	}
+	if !s.SecretRequired() {
+		t.Fatal("generic_bearer should require a secret")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(s.ConfigSchema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if err := s.Validate(nil); err != nil {
+		t.Fatalf("empty config should validate: %v", err)
+	}
+	if err := s.Validate([]byte(`{`)); err == nil {
+		t.Fatal("expected invalid config error")
+	}
+
+	parsed := parseConfig(json.RawMessage(`{"header":"","scheme":""}`))
+	if parsed.Header != "Authorization" {
+		t.Fatalf("empty header should default to Authorization, got %q", parsed.Header)
+	}
+}
+
 func TestBearer_CustomHeaderAndScheme(t *testing.T) {
 	secret := "tok_test"
 	cfg := json.RawMessage(`{"header":"X-API-Key","scheme":""}`)
@@ -87,9 +115,9 @@ func TestBearer_PopulatesEventTypeAndIdempotencyFromHeaders(t *testing.T) {
 	secret := "tok_test"
 	cfg := json.RawMessage(`{"event_type_header":"X-Event-Type","idempotency_header":"X-Delivery"}`)
 	r := req([]byte(`{}`), map[string]string{
-		"Authorization":  "Bearer " + secret,
-		"X-Event-Type":   "thing.happened",
-		"X-Delivery":     "del-1",
+		"Authorization": "Bearer " + secret,
+		"X-Event-Type":  "thing.happened",
+		"X-Delivery":    "del-1",
 	})
 	events, err := (&source{}).HandleRequest(context.Background(), r, cfg, secret)
 	if err != nil {

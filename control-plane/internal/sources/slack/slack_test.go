@@ -66,6 +66,29 @@ func TestSlack_VerifiesAndUnwrapsEventCallback(t *testing.T) {
 	}
 }
 
+func TestSlack_MetadataAndValidateBranches(t *testing.T) {
+	s := &source{}
+	if s.Name() != "slack" {
+		t.Fatalf("Name() = %q, want slack", s.Name())
+	}
+	if s.Kind() != sources.KindHTTP {
+		t.Fatalf("Kind() = %v, want HTTP", s.Kind())
+	}
+	if !s.SecretRequired() {
+		t.Fatal("slack should require a secret")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(s.ConfigSchema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	if err := s.Validate(nil); err != nil {
+		t.Fatalf("empty config should validate: %v", err)
+	}
+	if err := s.Validate([]byte(`{`)); err == nil {
+		t.Fatal("expected invalid config error")
+	}
+}
+
 func TestSlack_KeepsTopLevelTypeWhenNotEventCallback(t *testing.T) {
 	secret := "slack_signing_secret"
 	body, _ := json.Marshal(map[string]any{
@@ -143,5 +166,47 @@ func TestSlack_ConfigToleranceOverride(t *testing.T) {
 	cfg := json.RawMessage(`{"tolerance_seconds":-1}`)
 	if err := (&source{}).Validate(cfg); err == nil {
 		t.Fatal("expected validation failure for negative tolerance")
+	}
+}
+
+func TestSlack_HandleRequestAdditionalRejects(t *testing.T) {
+	secret := "slack_signing_secret"
+	body := []byte(`{"type":"event_callback","event":{"type":"x"}}`)
+
+	r := req(body, map[string]string{
+		"X-Slack-Request-Timestamp": "not-a-number",
+		"X-Slack-Signature":         "v0=deadbeef",
+	})
+	if _, err := (&source{}).HandleRequest(context.Background(), r, nil, secret); err == nil || !strings.Contains(err.Error(), "invalid timestamp") {
+		t.Fatalf("expected invalid timestamp, got %v", err)
+	}
+
+	ts := time.Now().Unix()
+	r = req([]byte(`{`), map[string]string{
+		"X-Slack-Request-Timestamp": strconv.FormatInt(ts, 10),
+		"X-Slack-Signature":         slackSig([]byte(`{`), secret, ts),
+	})
+	if _, err := (&source{}).HandleRequest(context.Background(), r, nil, secret); err == nil || !strings.Contains(err.Error(), "invalid event JSON") {
+		t.Fatalf("expected invalid JSON, got %v", err)
+	}
+
+	_, err := (&source{}).HandleRequest(context.Background(), req(body, nil), nil, "")
+	if err == nil || !strings.Contains(err.Error(), "missing signing secret") {
+		t.Fatalf("expected missing secret, got %v", err)
+	}
+
+	// A zero tolerance disables timestamp freshness checks but still verifies
+	// the HMAC and parses the payload.
+	oldTS := time.Now().Add(-24 * time.Hour).Unix()
+	r = req(body, map[string]string{
+		"X-Slack-Request-Timestamp": strconv.FormatInt(oldTS, 10),
+		"X-Slack-Signature":         slackSig(body, secret, oldTS),
+	})
+	events, err := (&source{}).HandleRequest(context.Background(), r, json.RawMessage(`{"tolerance_seconds":0}`), secret)
+	if err != nil {
+		t.Fatalf("zero tolerance should accept old signed request: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("want 1 event, got %d", len(events))
 	}
 }
