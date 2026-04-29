@@ -1,0 +1,222 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# Airtable connector — Airtable API for record CRUD, list views, filtering.
+#
+# Reference: https://airtable.com/api
+
+schema_version: "1.0"
+name: airtable
+display: Airtable
+category: Provider
+version: "1.0"
+
+description: |
+  Read, create, update, and delete records in Airtable bases. Query views,
+  apply filters, and manage field values. Supports bulk operations and
+  pagination across large tables.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#FFBF00"
+  hover_blurb: "Read, create, and update records in Airtable bases."
+  highlights:
+    - records.list
+    - records.create
+    - records.update
+    - records.delete
+  docs_url: "https://airtable.com/api"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: AIRTABLE_PAT
+  description: |
+    Airtable personal access token. Generate a PAT at
+    https://airtable.com/account/tokens with at least table:read, table:write scopes.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  list_records:
+    display: List records in a table
+    description: |
+      Retrieves records from an Airtable table. Supports pagination, filtering,
+      and sorting. Returns an array of records with optional offset for continued pagination.
+    method: GET
+    url: "https://api.airtable.com/v0/{base_id}/{table_id_or_name}"
+    inputs:
+      base_id:
+        type: string
+        in: path
+        description: The Airtable base ID (alphanumeric, starts with 'app').
+        example: "appXYZ123"
+      table_id_or_name:
+        type: string
+        in: path
+        description: The table name or ID within the base.
+        example: "tblABC456"
+      max_records:
+        type: integer
+        in: query
+        description: Maximum number of records to return. Default 100 if not provided.
+        default: 100
+      page_size:
+        type: integer
+        in: query
+        description: Number of records per page (default 100, max 100).
+        default: 100
+      view:
+        type: string
+        in: query
+        description: Optional view ID or name to query records from a specific view.
+        example: "viwXYZ"
+      filter_by_formula:
+        type: string
+        in: query
+        description: Optional Airtable formula to filter records (e.g. {Status}='Done').
+        example: "{Status}='Done'"
+      offset:
+        type: string
+        in: query
+        description: Optional offset token for pagination. Use next_offset from previous response.
+        example: "itrXYZ123"
+    paginate:
+      strategy: cursor
+      max_pages: 10
+    output:
+      type: object
+      schema:
+        records:
+          type: array
+          jsonpath: "$.records"
+        offset:
+          type: string
+          jsonpath: "$.offset"
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: List }
+      tags: [read]
+
+  create_records:
+    display: Create records in a table
+    description: |
+      Creates one or more records in an Airtable table. Pass an array of
+      record objects with fields. Returns the created records with their IDs.
+    method: POST
+    url: "https://api.airtable.com/v0/{base_id}/{table_id_or_name}"
+    inputs:
+      base_id:
+        type: string
+        in: path
+        description: The Airtable base ID (alphanumeric, starts with 'app').
+        example: "appXYZ123"
+      table_id_or_name:
+        type: string
+        in: path
+        description: The table name or ID within the base.
+        example: "tblABC456"
+      records:
+        type: array
+        in: body
+        description: Array of record objects to create. Each object has a fields key containing the field values.
+        items: { type: object }
+        example: [{ "fields": { "Name": "John", "Email": "john@example.com" } }]
+      typecast:
+        type: boolean
+        in: body
+        description: Optional flag to enable automatic type conversion (e.g. "true" to boolean). Default false.
+    output:
+      type: object
+      schema:
+        records:
+          type: array
+          jsonpath: "$.records"
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Plus }
+      tags: [write]
+
+  update_records:
+    display: Update records in a table
+    description: |
+      Updates one or more existing records in an Airtable table. Pass an array
+      of record objects with id and fields to update. Returns the updated records.
+    method: PATCH
+    url: "https://api.airtable.com/v0/{base_id}/{table_id_or_name}"
+    inputs:
+      base_id:
+        type: string
+        in: path
+        description: The Airtable base ID (alphanumeric, starts with 'app').
+        example: "appXYZ123"
+      table_id_or_name:
+        type: string
+        in: path
+        description: The table name or ID within the base.
+        example: "tblABC456"
+      records:
+        type: array
+        in: body
+        description: Array of record objects with id and fields to update.
+        items: { type: object }
+        example: [{ "id": "recXYZ", "fields": { "Status": "Complete" } }]
+      typecast:
+        type: boolean
+        in: body
+        description: Optional flag to enable automatic type conversion. Default false.
+    output:
+      type: object
+      schema:
+        records:
+          type: array
+          jsonpath: "$.records"
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Pencil }
+      tags: [write]
+
+  delete_record:
+    display: Delete a record
+    description: |
+      Deletes a single record from an Airtable table. Returns the deleted
+      record ID and a confirmation flag.
+    method: DELETE
+    url: "https://api.airtable.com/v0/{base_id}/{table_id_or_name}/{record_id}"
+    inputs:
+      base_id:
+        type: string
+        in: path
+        description: The Airtable base ID (alphanumeric, starts with 'app').
+        example: "appXYZ123"
+      table_id_or_name:
+        type: string
+        in: path
+        description: The table name or ID within the base.
+        example: "tblABC456"
+      record_id:
+        type: string
+        in: path
+        description: The record ID to delete (starts with 'rec').
+        example: "recABC123"
+    output:
+      type: object
+      schema:
+        id:
+          type: string
+          jsonpath: "$.id"
+        deleted:
+          type: boolean
+          jsonpath: "$.deleted"
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Trash2 }
+      tags: [write, destructive]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10

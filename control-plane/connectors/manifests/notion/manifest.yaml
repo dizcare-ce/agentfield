@@ -1,0 +1,277 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# Notion connector — Notion API for page creation, database queries, block operations.
+#
+# Reference: https://developers.notion.com/reference
+
+schema_version: "1.0"
+name: notion
+display: Notion
+category: Provider
+version: "1.0"
+
+description: |
+  Create pages, query databases, and append blocks in Notion. Manage properties,
+  update pages, and read page content. All operations require a Notion API token
+  and the Notion-Version header (default 2022-06-28).
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#000000"
+  hover_blurb: "Create pages, query databases, and append blocks in Notion."
+  highlights:
+    - pages.create
+    - databases.query
+    - blocks.append
+    - pages.update
+  docs_url: "https://developers.notion.com/reference"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: NOTION_TOKEN
+  description: |
+    Notion integration token (API key). Create an integration at
+    https://www.notion.so/my-integrations and generate an internal token.
+    Grant appropriate capabilities to the integration and share databases/pages with it.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  create_page:
+    display: Create a page
+    description: |
+      Creates a new page in Notion. Parent can be a database, page, or workspace.
+      Properties define the page content (title, attributes, etc.). Children
+      (optional) are blocks to nest under the page.
+    method: POST
+    url: "https://api.notion.com/v1/pages"
+    inputs:
+      notion_version:
+        type: string
+        in: header
+        description: Notion API version. Default 2022-06-28.
+        default: "2022-06-28"
+      parent:
+        type: object
+        in: body
+        description: Parent location (database_id, page_id, or workspace). Object with type and id/workspace_id keys.
+        example: { "type": "database_id", "database_id": "abc123" }
+      properties:
+        type: object
+        in: body
+        description: Page properties as key-value pairs (title, attributes, etc. matching the parent's schema).
+        example: { "Name": { "title": [{ "text": { "content": "My Page" } }] } }
+      children:
+        type: array
+        in: body
+        description: Optional block objects to nest under the page (array of block objects).
+        items: { type: object }
+    output:
+      type: object
+      schema:
+        id:
+          type: string
+          jsonpath: "$.id"
+        url:
+          type: string
+          jsonpath: "$.url"
+        created_time:
+          type: string
+          jsonpath: "$.created_time"
+        parent_type:
+          type: string
+          jsonpath: "$.parent.type"
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Plus }
+      tags: [write]
+
+  update_page:
+    display: Update a page
+    description: |
+      Updates a page's properties and metadata. Optionally archive the page.
+      Pass properties to update (matching the parent schema) and archived flag.
+    method: PATCH
+    url: "https://api.notion.com/v1/pages/{page_id}"
+    inputs:
+      notion_version:
+        type: string
+        in: header
+        description: Notion API version. Default 2022-06-28.
+        default: "2022-06-28"
+      page_id:
+        type: string
+        in: path
+        description: The page ID to update (UUID format).
+        example: "f4f9c3e0-1234-5678-abcd-ef0123456789"
+      properties:
+        type: object
+        in: body
+        description: Properties to update (title, attributes, etc.).
+        example: { "Name": { "title": [{ "text": { "content": "Updated Title" } }] } }
+      archived:
+        type: boolean
+        in: body
+        description: Optional flag to archive (delete) the page.
+    output:
+      type: object
+      schema:
+        id:
+          type: string
+          jsonpath: "$.id"
+        updated_time:
+          type: string
+          jsonpath: "$.last_edited_time"
+        archived:
+          type: boolean
+          jsonpath: "$.archived"
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Pencil }
+      tags: [write]
+
+  query_database:
+    display: Query a database
+    description: |
+      Retrieves records from a Notion database. Supports filtering, sorting,
+      and pagination. Returns a list of page objects matching the query.
+    method: POST
+    url: "https://api.notion.com/v1/databases/{database_id}/query"
+    inputs:
+      notion_version:
+        type: string
+        in: header
+        description: Notion API version. Default 2022-06-28.
+        default: "2022-06-28"
+      database_id:
+        type: string
+        in: path
+        description: The database ID to query (UUID format).
+        example: "abc123def456"
+      filter:
+        type: object
+        in: body
+        description: Optional filter object (see Notion filter spec) to narrow results.
+        example: { "property": "Name", "rich_text": { "contains": "Notion" } }
+      sorts:
+        type: array
+        in: body
+        description: Optional array of sort objects (property and direction).
+        items: { type: object }
+      page_size:
+        type: integer
+        in: body
+        description: Number of records per page (default 100, max 100).
+        default: 100
+    paginate:
+      strategy: cursor
+      max_pages: 10
+    output:
+      type: object
+      schema:
+        results:
+          type: array
+          jsonpath: "$.results"
+        has_more:
+          type: boolean
+          jsonpath: "$.has_more"
+        next_cursor:
+          type: string
+          jsonpath: "$.next_cursor"
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Search }
+      tags: [read]
+
+  append_blocks:
+    display: Append blocks to a page
+    description: |
+      Appends block objects (paragraphs, headings, lists, code, etc.) to the
+      end of a page or block container. Returns the newly created blocks.
+    method: PATCH
+    url: "https://api.notion.com/v1/blocks/{block_id}/children"
+    inputs:
+      notion_version:
+        type: string
+        in: header
+        description: Notion API version. Default 2022-06-28.
+        default: "2022-06-28"
+      block_id:
+        type: string
+        in: path
+        description: The block ID or page ID to append to (UUID format).
+        example: "f4f9c3e0-1234-5678-abcd-ef0123456789"
+      children:
+        type: array
+        in: body
+        description: Array of block objects to append (paragraph, heading, list_item, etc.).
+        items: { type: object }
+        example: [{ "object": "block", "type": "paragraph", "paragraph": { "rich_text": [{ "type": "text", "text": { "content": "Hello" } }] } }]
+    output:
+      type: object
+      schema:
+        results:
+          type: array
+          jsonpath: "$.results"
+        object:
+          type: string
+          jsonpath: "$.object"
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: BookOpen }
+      tags: [write]
+
+  retrieve_page:
+    display: Retrieve a page
+    description: |
+      Gets the full page object including its properties and metadata.
+      Use this to read page content and structure.
+    method: GET
+    url: "https://api.notion.com/v1/pages/{page_id}"
+    inputs:
+      notion_version:
+        type: string
+        in: header
+        description: Notion API version. Default 2022-06-28.
+        default: "2022-06-28"
+      page_id:
+        type: string
+        in: path
+        description: The page ID to retrieve (UUID format).
+        example: "f4f9c3e0-1234-5678-abcd-ef0123456789"
+    output:
+      type: object
+      schema:
+        id:
+          type: string
+          jsonpath: "$.id"
+        created_time:
+          type: string
+          jsonpath: "$.created_time"
+        last_edited_time:
+          type: string
+          jsonpath: "$.last_edited_time"
+        archived:
+          type: boolean
+          jsonpath: "$.archived"
+        url:
+          type: string
+          jsonpath: "$.url"
+        properties:
+          type: object
+          jsonpath: "$.properties"
+    concurrency:
+      max_in_flight: 10
+    ui:
+      operation_icon: { lucide: Eye }
+      tags: [read]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10
