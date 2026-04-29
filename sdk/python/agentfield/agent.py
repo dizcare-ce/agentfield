@@ -2115,9 +2115,10 @@ class Agent(FastAPI):
                     else:
                         args, kwargs = (), payload_dict
                 except ValidationError as exc:
-                    raise ValidationError(
-                        f"Pydantic validation failed for reasoner '{reasoner_id}': {exc}",
-                        model=getattr(exc, "model", None),
+                    # Convert Pydantic validation error to safe _HandlerInputError
+                    # to prevent potential stack trace exposure in 422 responses.
+                    raise _HandlerInputError(
+                        f"Pydantic validation failed for reasoner '{reasoner_id}'"
                     ) from exc
                 except Exception as exc:  # pragma: no cover - best effort log
                     if self.dev_mode:
@@ -2646,10 +2647,10 @@ class Agent(FastAPI):
                     else:
                         kwargs = dict(input_payload)
                 except ValidationError as e:
-                    # Re-raise validation errors with context
-                    raise ValidationError(
-                        f"Pydantic validation failed for skill '{skill_id}': {e}",
-                        model=getattr(e, "model", None),
+                    # Convert Pydantic validation error to safe _HandlerInputError
+                    # to prevent potential stack trace exposure in 422 responses.
+                    raise _HandlerInputError(
+                        f"Pydantic validation failed for skill '{skill_id}'"
                     ) from e
                 except Exception as e:
                     # Log conversion errors but continue with original args for backward compatibility

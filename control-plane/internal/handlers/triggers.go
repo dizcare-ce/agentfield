@@ -462,7 +462,7 @@ func (h *TriggerHandlers) DeleteTrigger() gin.HandlerFunc {
 // PauseTrigger handles POST /api/v1/triggers/:trigger_id/pause. Sets the
 // sticky-pause override and disables the trigger atomically. For code-managed
 // rows this means the next agent re-registration will NOT silently re-enable
-// it (see plan-webhook-checklist.md §5.3).
+// it.
 func (h *TriggerHandlers) PauseTrigger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()

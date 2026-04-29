@@ -7,7 +7,6 @@
 --              the binding (last_registered_at), and flags rows whose
 --              decorator was removed in code (orphaned).
 -- Created: 2026-04-28
--- See: plan-webhook-checklist.md §5 (Source of truth)
 
 -- +goose Up
 ALTER TABLE triggers

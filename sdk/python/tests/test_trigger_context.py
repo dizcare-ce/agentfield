@@ -268,14 +268,6 @@ class TestTransformMatching:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(
-    reason=(
-        "Placeholder integration tests — depend on a `test_agent` fixture that "
-        "isn't wired up in this SDK's conftest. The unit tests above cover the "
-        "trigger metadata + binding shape; end-to-end dispatch is exercised "
-        "by tests/functional and examples/triggers-demo."
-    ),
-)
 class TestTriggerContextIntegration:
     """Integration tests for trigger context in reasoner execution."""
 
@@ -310,13 +302,6 @@ class TestTriggerContextIntegration:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(
-    reason=(
-        "Placeholder integration tests — depend on a `test_agent` fixture that "
-        "isn't wired up in this SDK's conftest. End-to-end transform execution "
-        "is exercised by tests/functional and examples/triggers-demo."
-    ),
-)
 class TestTransformExecution:
     """Integration tests for transform execution."""
 
