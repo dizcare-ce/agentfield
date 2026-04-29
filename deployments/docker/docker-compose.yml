@@ -26,8 +26,18 @@ services:
       AGENTFIELD_STORAGE_POSTGRES_URL: postgres://agentfield:agentfield@postgres:5432/agentfield?sslmode=disable
       AGENTFIELD_DATABASE_URL: postgres://agentfield:agentfield@postgres:5432/agentfield?sslmode=disable
       AGENTFIELD_HTTP_ADDR: 0.0.0.0:8080
+      # Connector secrets — forward from host. Each connector reads its own
+      # env var (auth.secret_env in the manifest). Add more as you onboard.
+      GITHUB_PAT: ${GITHUB_PAT:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      AIRTABLE_PAT: ${AIRTABLE_PAT:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      HUBSPOT_PRIVATE_APP_TOKEN: ${HUBSPOT_PRIVATE_APP_TOKEN:-}
+      GOOGLE_OAUTH_TOKEN: ${GOOGLE_OAUTH_TOKEN:-}
     ports:
-      - "8080:8080"
+      # Host 8089 → container 8080 (avoids collision with other local CPs).
+      - "8089:8080"
     restart: unless-stopped
     depends_on:
       postgres:
