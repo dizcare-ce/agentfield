@@ -1,0 +1,204 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# HubSpot connector — Manage HubSpot contacts and deals.
+#
+
+schema_version: "1.0"
+name: hubspot
+display: HubSpot
+category: Provider
+version: "1.0"
+
+description: |
+  Manage HubSpot contacts and deals. Create, update, and search contacts,
+  and create deals. All requests authenticated via a HubSpot private app
+  access token.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#FF7A59"
+  hover_blurb: "Manage HubSpot contacts and deals."
+  highlights:
+    - contacts.create
+    - contacts.search
+    - contacts.update
+    - deals.create
+  docs_url: "https://docs.agentfield.ai/connectors/hubspot"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: HUBSPOT_PRIVATE_APP_TOKEN
+  description: |
+    HubSpot private app access token with contacts and deals scopes.
+    Generate at https://app.hubspot.com/l/private-apps.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  create_contact:
+    display: Create a contact
+    description: |
+      Creates a new contact in HubSpot. The properties object contains fields
+      like email, firstname, lastname, etc. Returns the created contact ID.
+    method: POST
+    url: "https://api.hubapi.com/crm/v3/objects/contacts"
+    inputs:
+      properties:
+        type: object
+        in: body
+        description: Contact properties as a flat object (e.g., email, firstname, lastname, phone).
+        example: { "email": "john@example.com", "firstname": "John", "lastname": "Doe" }
+    output:
+      type: object
+      schema:
+        id:         { type: string,  jsonpath: "$.id" }
+        email:      { type: string,  jsonpath: "$.properties.email" }
+        firstname:  { type: string,  jsonpath: "$.properties.firstname" }
+        lastname:   { type: string,  jsonpath: "$.properties.lastname" }
+        created_at: { type: string,  jsonpath: "$.createdAt" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Plus }
+      tags: [write]
+
+  update_contact:
+    display: Update a contact
+    description: |
+      Updates an existing HubSpot contact. The properties object contains
+      fields to update (e.g., email, firstname, lastname, phone).
+    method: PATCH
+    url: "https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
+    inputs:
+      contact_id:
+        type: string
+        in: path
+        description: HubSpot contact ID.
+        example: "123456"
+      properties:
+        type: object
+        in: body
+        description: Contact properties to update as a flat object.
+        example: { "firstname": "Jane" }
+    output:
+      type: object
+      schema:
+        id:         { type: string,  jsonpath: "$.id" }
+        email:      { type: string,  jsonpath: "$.properties.email" }
+        firstname:  { type: string,  jsonpath: "$.properties.firstname" }
+        lastname:   { type: string,  jsonpath: "$.properties.lastname" }
+        updated_at: { type: string,  jsonpath: "$.updatedAt" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Edit }
+      tags: [write]
+
+  search_contacts:
+    display: Search contacts
+    description: |
+      Searches for HubSpot contacts using filter groups. Returns a list of
+      matching contacts with their properties.
+    method: POST
+    url: "https://api.hubapi.com/crm/v3/objects/contacts/search"
+    inputs:
+      filter_groups:
+        type: array
+        in: body
+        description: Array of filter group objects for searching (required).
+        items: { type: object }
+        example: [{ "filters": [{ "propertyName": "email", "operator": "EQ", "value": "test@example.com" }] }]
+      properties:
+        type: array
+        in: body
+        description: Array of property names to return (optional).
+        items: { type: string }
+        example: ["email", "firstname", "lastname"]
+      limit:
+        type: integer
+        in: body
+        default: 100
+        description: Maximum number of results to return.
+    output:
+      type: array
+      schema:
+        items:
+          id:         { jsonpath: "$.id" }
+          email:      { jsonpath: "$.properties.email" }
+          firstname:  { jsonpath: "$.properties.firstname" }
+          lastname:   { jsonpath: "$.properties.lastname" }
+          created_at: { jsonpath: "$.createdAt" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Search }
+      tags: [read]
+
+  get_contact:
+    display: Get a contact
+    description: |
+      Retrieves a specific HubSpot contact by ID. Optionally returns
+      specified properties and associations.
+    method: GET
+    url: "https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
+    inputs:
+      contact_id:
+        type: string
+        in: path
+        description: HubSpot contact ID.
+        example: "123456"
+      properties:
+        type: string
+        in: query
+        description: Comma-separated property names to return (optional).
+        example: "email,firstname,lastname"
+      associations:
+        type: string
+        in: query
+        description: Comma-separated association types to return (optional).
+    output:
+      type: object
+      schema:
+        id:         { type: string,  jsonpath: "$.id" }
+        email:      { type: string,  jsonpath: "$.properties.email" }
+        firstname:  { type: string,  jsonpath: "$.properties.firstname" }
+        lastname:   { type: string,  jsonpath: "$.properties.lastname" }
+        created_at: { type: string,  jsonpath: "$.createdAt" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: Users }
+      tags: [read]
+
+  create_deal:
+    display: Create a deal
+    description: |
+      Creates a new deal in HubSpot. The properties object must include
+      dealname, amount, dealstage, and pipeline. Returns the created deal ID.
+    method: POST
+    url: "https://api.hubapi.com/crm/v3/objects/deals"
+    inputs:
+      properties:
+        type: object
+        in: body
+        description: Deal properties (dealname, amount, dealstage, pipeline, etc.).
+        example: { "dealname": "Enterprise Renewal", "amount": "100000", "dealstage": "closedwon", "pipeline": "default" }
+    output:
+      type: object
+      schema:
+        id:         { type: string,  jsonpath: "$.id" }
+        dealname:   { type: string,  jsonpath: "$.properties.dealname" }
+        amount:     { type: string,  jsonpath: "$.properties.amount" }
+        dealstage:  { type: string,  jsonpath: "$.properties.dealstage" }
+        created_at: { type: string,  jsonpath: "$.createdAt" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: DollarSign }
+      tags: [write]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10
