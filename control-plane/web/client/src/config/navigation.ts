@@ -8,6 +8,8 @@ import {
   FileCheck2,
   BookOpen,
   Github,
+  Plug,
+  History,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +38,13 @@ export const navigation: NavGroup[] = [
       { title: "Playground", icon: FlaskConical, path: "/playground" },
       { title: "Runs", icon: Play, path: "/runs" },
       { title: "Agent nodes", icon: Server, path: "/agents" },
+    ],
+  },
+  {
+    label: "Connectors",
+    items: [
+      { title: "Catalog", icon: Plug, path: "/connectors" },
+      { title: "Invocations", icon: History, path: "/connectors/_invocations" },
     ],
   },
   {
