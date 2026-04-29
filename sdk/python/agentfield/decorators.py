@@ -317,6 +317,7 @@ async def _execute_with_tracking(func: Callable, *args, **kwargs) -> Any:
                 session_id,
                 "agent",
                 reasoner_name,
+                parent_vc_id=getattr(execution_context, "parent_vc_id", None),
             )
             if did_execution_context and hasattr(
                 agent_instance, "_populate_execution_context_with_did"

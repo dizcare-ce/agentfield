@@ -2083,6 +2083,7 @@ class Agent(FastAPI):
                 session_identifier,
                 "agent",
                 reasoner_id,
+                parent_vc_id=execution_context.parent_vc_id,
             )
             self._populate_execution_context_with_did(
                 execution_context, did_execution_context
@@ -2626,6 +2627,7 @@ class Agent(FastAPI):
                         session_identifier,
                         "agent",  # caller function
                         skill_id,  # target function
+                        parent_vc_id=execution_context.parent_vc_id,
                     )
                     # Populate execution context with DID information
                     self._populate_execution_context_with_did(
