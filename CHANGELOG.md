@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.72-rc.10] - 2026-04-29
+
+
+### Fixed
+
+- Fix(harness/go): use opencode 1.14+ CLI surface (#519)
+
+Closes #517.
+
+opencode 1.14 rebound the legacy top-level flags the Go provider was
+emitting (`opencode -c <dir> -q -p <prompt>`):
+
+  - `-c` → `--continue` (resume previous session)
+  - `-p` → `--password` (provider password)
+
+Against a current install the binary printed help and exited without
+running, so callers got an empty `RawResult` — the success path
+returned a non-error result with no output, no diffs, and no tool
+calls. The Python SDK has already migrated to the modern surface; the
+Go SDK was the missing half.
+
+This change moves the Go provider to the same shape:
+
+    opencode run --dir <project> [-m <model>] \
+                 --dangerously-skip-permissions <prompt>
+
+`run` is the explicit non-interactive subcommand, `--dir` is the
+project root the agent operates on, `-m` selects the model, and
+`--dangerously-skip-permissions` is required for headless invocation.
+The prompt is positional now (no `-p` flag in front of it).
+
+For the project directory I take `Options.ProjectDir` first, falling
+back to `Options.Cwd`. That preserves the historical convention where
+callers set `ProjectDir` to point opencode at the project, while
+still honouring `Cwd` for callers that only set the working directory.
+The subprocess CWD continues to come from `Options.Cwd` so behaviour
+under `RunCLI` is unchanged.
+
+Updated the existing OpenCode coverage test to assert the new flag
+shape (`run`, `--dir`, `-m`, `--dangerously-skip-permissions`,
+positional prompt) and explicitly forbid the deprecated `-c`, `-q`,
+`-p prompt` strings so a regression wouldn't slip back in.
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com> (c566c0c)
+
 ## [0.1.72-rc.9] - 2026-04-29
 
 
