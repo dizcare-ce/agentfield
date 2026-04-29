@@ -279,11 +279,14 @@ func (e *Executor) buildRequest(ctx context.Context, op *manifest.Operation, inp
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 
-	// Add headers
+	// Add headers. Input names use snake_case (per schema regex), but HTTP
+	// headers conventionally use kebab-case (Notion-Version, X-Api-Key).
+	// Translate underscores to dashes — net/http canonicalizes the rest.
 	for name, input := range op.Inputs {
 		if input.In == "header" {
 			if val, ok := inputs[name]; ok {
-				req.Header.Set(name, fmt.Sprintf("%v", val))
+				headerName := strings.ReplaceAll(name, "_", "-")
+				req.Header.Set(headerName, fmt.Sprintf("%v", val))
 			}
 		}
 	}
