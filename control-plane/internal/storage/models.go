@@ -515,3 +515,26 @@ type ConfigStorageModel struct {
 }
 
 func (ConfigStorageModel) TableName() string { return "config_storage" }
+
+// ConnectorInvocationModel stores a record of a connector operation invocation.
+type ConnectorInvocationModel struct {
+	ID             string     `gorm:"column:id;primaryKey"`
+	RunID          string     `gorm:"column:run_id;not null;index"`
+	ExecutionID    string     `gorm:"column:execution_id;not null;index"`
+	AgentNodeID    string     `gorm:"column:agent_node_id;not null;index"`
+	ConnectorName  string     `gorm:"column:connector_name;not null;index:idx_connector_invocations_conn,priority:1"`
+	OperationName  string     `gorm:"column:operation_name;not null;index:idx_connector_invocations_conn,priority:2"`
+	InputsRedacted []byte     `gorm:"column:inputs_redacted;type:text"`
+	Status         string     `gorm:"column:status;not null"`
+	HTTPStatus     *int       `gorm:"column:http_status"`
+	ErrorMessage   string     `gorm:"column:error_message"`
+	DurationMS     *int64     `gorm:"column:duration_ms"`
+	StartedAt      time.Time  `gorm:"column:started_at;not null;index:idx_connector_invocations_time,priority:1"`
+	CompletedAt    *time.Time `gorm:"column:completed_at"`
+	ParentVCID     string     `gorm:"column:parent_vc_id"`
+	InvocationVCID string     `gorm:"column:invocation_vc_id"`
+	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (ConnectorInvocationModel) TableName() string { return "connector_invocations" }

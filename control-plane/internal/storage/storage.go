@@ -145,6 +145,20 @@ type StorageProvider interface {
 	// The ctx scopes the query, and executionIDs identifies the executions to load.
 	// Returns events keyed by execution ID or an error if the lookup fails.
 	ListExecutionWebhookEventsBatch(ctx context.Context, executionIDs []string) (map[string][]*types.ExecutionWebhookEvent, error)
+	// Connector invocation operations
+	// InsertConnectorInvocation persists a connector invocation record.
+	// The ctx scopes the write, and invocation contains the connector invocation data.
+	// Returns an error if the invocation cannot be stored.
+	InsertConnectorInvocation(ctx context.Context, invocation *types.ConnectorInvocation) error
+	// UpdateConnectorInvocation updates the completion state of a connector invocation.
+	// The ctx scopes the write, id selects the invocation, and remaining params describe the update.
+	// Returns an error if the invocation cannot be updated.
+	UpdateConnectorInvocation(ctx context.Context, id, status, errorMessage string, httpStatus *int, durationMS int64, completedAt time.Time) error
+	// ListConnectorInvocations retrieves all connector invocations for a workflow run.
+	// The ctx scopes the query, and runID identifies the run to inspect.
+	// Returns invocations ordered by started_at or an error if the query fails.
+	ListConnectorInvocations(ctx context.Context, runID string) ([]*types.ConnectorInvocation, error)
+
 	// StoreWorkflowExecutionEvent persists an event associated with a workflow execution.
 	// The ctx scopes the write, and event contains the workflow execution event data.
 	// Returns an error if the event cannot be stored.
