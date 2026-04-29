@@ -119,6 +119,15 @@ func (s *stubStorage) ListExecutionWebhookEvents(ctx context.Context, executionI
 func (s *stubStorage) ListExecutionWebhookEventsBatch(ctx context.Context, executionIDs []string) (map[string][]*types.ExecutionWebhookEvent, error) {
 	return nil, nil
 }
+func (s *stubStorage) InsertConnectorInvocation(ctx context.Context, invocation *types.ConnectorInvocation) error {
+	return nil
+}
+func (s *stubStorage) UpdateConnectorInvocation(ctx context.Context, id, status, errorMessage string, httpStatus *int, durationMS int64, completedAt time.Time) error {
+	return nil
+}
+func (s *stubStorage) ListConnectorInvocations(ctx context.Context, runID string) ([]*types.ConnectorInvocation, error) {
+	return nil, nil
+}
 func (s *stubStorage) StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error {
 	return nil
 }

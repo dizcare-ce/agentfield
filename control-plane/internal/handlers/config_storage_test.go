@@ -125,6 +125,15 @@ func (m *configStorageMock) ListExecutionWebhookEvents(ctx context.Context, exec
 func (m *configStorageMock) ListExecutionWebhookEventsBatch(ctx context.Context, executionIDs []string) (map[string][]*types.ExecutionWebhookEvent, error) {
 	return nil, nil
 }
+func (m *configStorageMock) InsertConnectorInvocation(ctx context.Context, invocation *types.ConnectorInvocation) error {
+	return nil
+}
+func (m *configStorageMock) UpdateConnectorInvocation(ctx context.Context, id, status, errorMessage string, httpStatus *int, durationMS int64, completedAt time.Time) error {
+	return nil
+}
+func (m *configStorageMock) ListConnectorInvocations(ctx context.Context, runID string) ([]*types.ConnectorInvocation, error) {
+	return nil, nil
+}
 func (m *configStorageMock) StoreWorkflowExecutionEvent(ctx context.Context, event *types.WorkflowExecutionEvent) error {
 	return nil
 }
