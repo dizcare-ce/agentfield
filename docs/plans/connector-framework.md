@@ -1,10 +1,23 @@
 # Connector Framework — Plan
 
-**Status:** Draft, pre-implementation. Lives on branch `feat/connector-framework-plan`.
+**Status:** Design locked. Implementation lives on branch `feat/connector-framework-plan`. Will land as one PR when complete (no draft / tracking issue — this doc is the contract).
 
 **Tracks:** Builds on the trigger system shipped in #506 (`feat/webhooks`). Triggers cover the inbound half (provider → CP → agent). This plan covers the symmetric outbound half (agent → CP → provider) **and unifies both halves under one connector definition** so a single YAML drives both inbound + outbound for a service.
 
-**Non-goal:** This is a planning artifact, not implementation. Once the design is reviewed, we'll cut it into contributor-sized sub-issues under an `[Epic] Connector Framework` issue (same shape as the trigger-parity epics #507 / #508).
+## Decisions locked
+
+The six open questions in §8 are resolved. Each answer below shapes Phases 1–3 directly.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Manifest source format | **YAML** for editing, JSON Schema for validation |
+| 2 | Manifest packaging | **Embed only** via Go `embed`. All manifests in-tree under `connectors/manifests/<name>/`. No on-disk loader in v1 |
+| 3 | Versioning | `version: "1.0"` per manifest. SDK codegen produces `v1.<connector>` namespace. Major bumps land as new files; old surface stays callable until deprecated |
+| 4 | Per-operation rate limiting | **Reactive only in v1** — honor `Retry-After` and `X-RateLimit-Reset` response headers. Active per-op limits deferred to v2 |
+| 5 | Operator sideloading of custom manifests | **Out of v1.** The loader reads exclusively from the embedded set. Adding a connector = PR. Sideloading is on the v2/v3 roadmap if customer demand surfaces |
+| 6 | Concurrency limits | Per-connector and per-operation `max_in_flight` declared in the manifest. Default `max_in_flight: 10` per op, `50` per connector. Implemented as a semaphore per `(connector, op)` tuple in the executor |
+
+These decisions are referenced inline through the rest of the doc.
 
 ---
 
@@ -169,9 +182,16 @@ operations:
           title:    { jsonpath: "$.title"    }
           state:    { jsonpath: "$.state"    }
           html_url: { jsonpath: "$.html_url" }
+    concurrency:
+      max_in_flight: 5                            # per-op cap; default 10
     ui:
       operation_icon: { lucide: List }
       tags: [read]
+
+# Per-connector concurrency (default 50)
+concurrency:
+  max_in_flight: 25                                # caps total in-flight ops
+  default_op_max_in_flight: 10                     # default for ops that omit it
 ```
 
 A linter validates: every `auth.strategy`, `paginate.strategy`, and `output.transformer` references something registered in code; every input has a description; the icon resolves; the URL template variables match the inputs declared `in: path`.
@@ -195,10 +215,12 @@ The executor is a single Go package, `control-plane/internal/connectors/`:
 
 | Concern | Where it lives |
 |---|---|
-| Manifest load + validate | `manifest/loader.go` — reads YAML, validates against JSON Schema, registers operations into the runtime registry |
+| Manifest load + validate | `manifest/loader.go` — reads YAML from the **embedded `connectors/manifests/` tree only**, validates against JSON Schema, registers operations into the runtime registry. No disk fallback in v1 |
 | Auth strategies | `auth/{bearer.go, apikey_header.go, apikey_query.go, hmac.go, oauth2.go, aws_sigv4.go}` — registered Go function table. Manifest references by name. **Finite, slow-growing set (~10 ever)** |
 | Pagination | `paginate/{github_link_header.go, cursor.go, offset.go}` — registered named paginators. Manifest references by name |
 | Response transformers | `transform/{jsonpath.go, github_link_merge.go, ...}` — for the rare case where a response needs flattening or accumulation. Used by ~5% of operations |
+| Concurrency gate | `concurrency.go` — per-`(connector, op)` semaphore enforcing `max_in_flight`. Default 10 per op / 50 per connector when manifest omits the field |
+| Reactive rate-limit handler | inside `executor.go` — parses `Retry-After`, `X-RateLimit-Reset`, `X-RateLimit-Remaining` on the response and either returns a typed `RateLimitedError` or sleeps-and-retries based on manifest `retry` policy |
 | Request executor | `executor.go` — builds HTTP request from manifest op + inputs, injects auth, sends, runs paginator if declared, runs transformers, returns shaped output |
 | Audit | `audit.go` — writes `connector_invocations` row per call (run_id, reasoner_id, connector, operation, redacted inputs, status, duration, error) |
 | Secret resolution | `secrets.go` — reads from CP host env at request time. Same posture as the trigger system |
@@ -326,16 +348,20 @@ Review, iterate, lock the manifest schema. **Output:** the `[Epic] Connector Fra
 ### Phase 1 — Framework (4 weeks)
 
 - Manifest schema + JSON Schema validator + linter
-- Go executor (auth dispatcher, manifest loader, request builder, JSONPath response mapper, audit writer)
+- Go executor (auth dispatcher, manifest loader **(embed-only)**, request builder, JSONPath response mapper, audit writer)
 - Auth strategies: `bearer`, `apikey_header`, `apikey_query`, `hmac`, `oauth2_with_refresh` (5 of the eventual ~10)
 - Pagination: `cursor`, `offset`, `link_header`, `github_link_header` (named, registered)
+- **Concurrency control:** semaphore-per-`(connector, op)` enforcing `max_in_flight` from manifest (defaults 10 per op / 50 per connector)
+- **Reactive rate-limit handling:** parse `Retry-After` + `X-RateLimit-Reset` and back off; no active per-op caps yet
 - CP API: `POST /api/v1/connectors/:name/:op`, `GET /api/v1/connectors`, `GET /api/v1/connectors/:name/icon`
 - DB migration for `connector_invocations`
 - Secret resolution layer
 - SDK shim: `app.connector.call(name, op, **kw)` (Python first, Go and TS in Phase 1.5)
 - One full reference connector (**GitHub**) end-to-end as the validation target
 
-**Acceptance:** an agent can `await app.connector.call("github", "create_comment", ...)` with `GITHUB_PAT` set on the CP host, the call lands as a real comment on a GitHub issue, the audit row appears in `connector_invocations`, the operator UI shows the card.
+**Out of Phase 1 scope (locked):** disk-based manifest loading, `/etc/agentfield/connectors/` sideloading, hot-reload, active per-op `max_calls_per_minute`. All deferred to v2 if real demand surfaces.
+
+**Acceptance:** an agent can `await app.connector.call("github", "create_comment", ...)` with `GITHUB_PAT` set on the CP host, the call lands as a real comment on a GitHub issue, the audit row appears in `connector_invocations`, the operator UI shows the card. Concurrency cap demonstrably holds under a `gather`-of-50 load test.
 
 ### Phase 2 — UI surfaces + codegen (3 weeks)
 
@@ -397,16 +423,16 @@ Each manifest ships `manifest.yaml` + `icon.svg` in `connectors/manifests/<name>
 | Secret leakage via audit log | `inputs_redacted` excludes any field marked `sensitive: true` in the manifest. Linter enforces that auth-related fields are marked. Audit log is queryable only by operators with the `connector:audit` capability |
 | Drift between bundled `icon.svg` and the brand's actual logo | Quarterly visual-diff CI job compares each `icon.svg` against the brand's known canonical URL. Drift triggers a PR (manual review for trademark concerns) |
 
-## 8. Open questions
+## 8. Open questions — RESOLVED
 
-These resolve before Phase 1 begins:
+All six are locked. Recorded here for audit.
 
-1. **Manifest source format** — YAML for editing, JSON Schema for validation? Or JSON throughout? **Pick:** YAML for human edits, JSON Schema for the validator. Same shape we use for trigger source plugins.
-2. **Manifest packaging** — embed via Go `embed` at build time, OR load from disk at startup? **Pick:** embed for the Tier 1 set (`connectors/manifests/*/manifest.yaml` + `icon.svg`), load from disk for operator-supplied manifests in `/etc/agentfield/connectors/`.
-3. **Connector versioning** — manifests evolve; how do we handle backward-incompatible changes? **Pick:** every connector has a `version: "1.0"` field. SDK codegen produces files in `agentfield.connectors.v1.github` etc. Major-version bumps land as new files; old surface stays callable until deprecated.
-4. **Per-operation rate limiting** — should manifests declare per-op limits the executor enforces locally? **Pick (defer):** v1 honors rate-limit response headers reactively. Active enforcement (`max_calls_per_minute`) lands in v2 if real customers hit it.
-5. **Authoring workflow** — can a connector be loaded without rebuilding the binary? **Pick:** yes for sideloaded operator manifests in the configured directory; no for the bundled Tier 1 set (rebuild needed). Sideloaded manifests can't reference auth/paginate/transformer strategies that aren't in the binary.
-6. **Concurrency limits** — should the executor cap concurrent in-flight calls per connector? **Pick:** yes, per-connector + per-operation max-in-flight, configurable in the manifest with a sensible default. Prevents an unbounded fan-out from saturating an upstream API.
+1. **Manifest source format** — ✅ YAML for human edits, JSON Schema for the validator. Trigger-source-plugin shape extended.
+2. **Manifest packaging** — ✅ Embed only via Go `embed`. No sideload path in v1; loader reads exclusively from the embedded set. Operators wanting custom connectors fork the repo or wait for the v2 sideload story.
+3. **Connector versioning** — ✅ `version: "1.0"` per manifest. Codegen emits `agentfield.connectors.v1.<name>`. Major bumps live alongside the prior major until deprecated.
+4. **Per-operation rate limiting** — ✅ Reactive only in v1 (response-header-driven `Retry-After` + `X-RateLimit-Reset`). Active per-op caps land in v2 when a real customer hits a bound.
+5. **Authoring workflow / sideloading** — ✅ Out of v1. Adding a connector means opening a PR with the new manifest dir. Simpler executor, simpler audit story, simpler security review.
+6. **Concurrency limits** — ✅ Per-connector + per-operation `max_in_flight` in the manifest. Defaults: `10` per op, `50` per connector. Semaphore per `(connector, op)` tuple in the executor.
 
 ## 9. Out of scope (to be scoped separately if requested)
 
