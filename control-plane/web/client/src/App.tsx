@@ -13,6 +13,9 @@ import { VerifyProvenancePage } from "./pages/VerifyProvenancePage";
 import { ComparisonPage } from "./pages/ComparisonPage";
 import { PlaygroundPage } from "./pages/PlaygroundPage";
 import { AccessManagementPage } from "./pages/AccessManagementPage";
+import { ConnectorsCatalogPage } from "./pages/ConnectorsCatalogPage";
+import { ConnectorDetailPage } from "./pages/ConnectorDetailPage";
+import { ConnectorInvocationsPage } from "./pages/ConnectorInvocationsPage";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AuthGuard } from "./components/AuthGuard";
 import { queryClient } from "./lib/query-client";
@@ -40,6 +43,9 @@ function AppContent() {
         <Route path="/playground" element={<PlaygroundPage />} />
         <Route path="/playground/:reasonerId" element={<PlaygroundPage />} />
         <Route path="/access" element={<AccessManagementPage />} />
+        <Route path="/connectors" element={<ConnectorsCatalogPage />} />
+        <Route path="/connectors/:name" element={<ConnectorDetailPage />} />
+        <Route path="/connectors/_invocations" element={<ConnectorInvocationsPage />} />
 
         {/* Old → New redirects */}
         <Route path="/executions" element={<Navigate to="/runs" replace />} />

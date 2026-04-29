@@ -177,3 +177,69 @@ export interface ConfigurationSchema {
   version?: string;
 }
 
+
+// Connector framework types
+export interface ConnectorOperation {
+  name: string;
+  display: string;
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  url: string;
+  inputs: Record<string, any>;
+  output: Record<string, any>;
+  tags?: string[];
+}
+
+export interface Connector {
+  name: string;
+  display: string;
+  category: string;
+  description: string;
+  brand_color: string;
+  icon_url: string;
+  op_count: number;
+  has_inbound: boolean;
+}
+
+export interface ConnectorDetail {
+  name: string;
+  display: string;
+  category: string;
+  description: string;
+  brand_color: string;
+  icon_url: string;
+  auth: {
+    strategy: string;
+    secret_env: string;
+    secret_set: boolean;
+  };
+  operations: ConnectorOperation[];
+}
+
+export interface ConnectorInvocation {
+  invocation_id: string;
+  connector_name: string;
+  operation_name: string;
+  status: "success" | "error" | "pending";
+  duration_ms: number;
+  started_at: string;
+  http_status?: number;
+  result?: any;
+  error?: string;
+  field_errors?: Record<string, string>;
+  run_id?: string;
+  inputs?: Record<string, any>;
+}
+
+export interface ConnectorInvocationResult {
+  result: any;
+  duration_ms: number;
+  invocation_id: string;
+  http_status: number;
+}
+
+export interface ConnectorInvocationError {
+  error: string;
+  invocation_id?: string;
+  http_status: number;
+  field_errors?: Record<string, string>;
+}
