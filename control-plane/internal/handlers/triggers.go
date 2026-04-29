@@ -106,14 +106,34 @@ func (h *TriggerHandlers) IngestSourceHandler() gin.HandlerFunc {
 			return
 		}
 
+		// Track per-event outcomes so the response can tell the operator
+		// *why* received=0 happened (event-type mismatch vs. idempotency
+		// dedup). Without this, sending a `pull_request` to an `issues`-only
+		// trigger silently returned 0 with no explanation, which forced
+		// operators to read CP logs to diagnose a misconfigured webhook.
+		type filteredEntry struct {
+			EventType string `json:"event_type"`
+			Reason    string `json:"reason"`
+		}
+		filtered := make([]filteredEntry, 0)
+		duplicates := 0
 		persisted := 0
 		for _, ev := range events {
 			if !triggerEventTypeMatches(trig.EventTypes, ev.Type) {
+				accepted := strings.Join(trig.EventTypes, ",")
+				if accepted == "" {
+					accepted = "(none)"
+				}
+				filtered = append(filtered, filteredEntry{
+					EventType: ev.Type,
+					Reason:    "event_type not in trigger filter [" + accepted + "]",
+				})
 				continue
 			}
 			if ev.IdempotencyKey != "" {
 				exists, err := h.storage.InboundEventExistsByIdempotency(ctx, trig.SourceName, ev.IdempotencyKey)
 				if err == nil && exists {
+					duplicates++
 					continue
 				}
 			}
@@ -151,10 +171,38 @@ func (h *TriggerHandlers) IngestSourceHandler() gin.HandlerFunc {
 			go h.dispatcher.DispatchEvent(context.Background(), trig, stored)
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ok",
-			"received": persisted,
-		})
+		// Status string is structured so operators don't need to parse
+		// counts: "ok" means at least one event was persisted; "filtered"
+		// means every event was rejected by the type filter; "duplicate"
+		// means every event was a known idempotency dup; "no_events" is
+		// an HTTP-200-but-Source-extracted-zero edge case (e.g. Slack
+		// URL verification handshake). 200 is preserved across the board
+		// so providers don't retry — the response body carries the nuance.
+		status := "ok"
+		switch {
+		case persisted > 0:
+			status = "ok"
+		case len(filtered) > 0 && duplicates == 0:
+			status = "filtered"
+		case duplicates > 0 && len(filtered) == 0:
+			status = "duplicate"
+		case len(filtered) == 0 && duplicates == 0:
+			status = "no_events"
+		default:
+			// Mixed filtered + duplicate — both informative, no canonical
+			// single-word summary; fall back to "filtered" since that's the
+			// case operators most often need to debug.
+			status = "filtered"
+		}
+		resp := gin.H{
+			"status":     status,
+			"received":   persisted,
+			"duplicates": duplicates,
+		}
+		if len(filtered) > 0 {
+			resp["filtered"] = filtered
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
