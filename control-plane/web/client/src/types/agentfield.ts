@@ -25,6 +25,8 @@ export interface AgentNodeSummary {
   invocation_url?: string; // For serverless agents
   reasoner_count: number;
   skill_count: number;
+  /** Optional MCP roll-up when the control plane exposes it on the summary endpoint */
+  mcp_summary?: MCPSummaryForUI;
 }
 
 export interface AgentNodeDetailsForUI extends AgentNode {}
@@ -33,6 +35,8 @@ export interface AgentNodeDetailsForUIWithPackage extends AgentNode {
   package_info?: {
     package_id: string;
   };
+  mcp_summary?: MCPSummaryForUI;
+  mcp_servers?: MCPServerHealthForUI[];
 }
 
 export type AppMode = 'user' | 'admin' | 'developer';
@@ -73,6 +77,8 @@ export interface AgentStatus {
   last_seen?: string;
   health_status?: HealthStatus;
   lifecycle_status?: LifecycleStatus;
+  /** Optional MCP health snapshot when the control plane includes it on status */
+  mcp_status?: MCPServerStatus;
 }
 
 export interface AgentStatusUpdate {
