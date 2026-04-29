@@ -1,0 +1,182 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# Gmail connector — send, list, and read email messages.
+#
+# Integrates with the Gmail API to send messages, list/search email,
+# retrieve individual messages and threads. Uses OAuth 2.0 bearer token
+# authentication via GOOGLE_OAUTH_TOKEN.
+
+schema_version: "1.0"
+name: gmail
+display: Gmail
+category: Provider
+version: "1.0"
+
+description: |
+  Send, list, and read Gmail messages. Send via raw RFC2822 format,
+  search and list messages with query filters, retrieve full message
+  bodies and threads, all with Gmail API v1 OAuth2 authentication.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#EA4335"
+  hover_blurb: "Send, list, and read Gmail messages."
+  highlights:
+    - send
+    - list
+    - threads
+  docs_url: "https://docs.agentfield.ai/connectors/gmail"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: GOOGLE_OAUTH_TOKEN
+  description: |
+    Google OAuth 2.0 access token with Gmail API scope
+    (https://www.googleapis.com/auth/gmail.send, .compose, .readonly).
+    Obtain via Google OAuth 2.0 consent flow.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  send_message:
+    display: Send email message
+    description: |
+      Sends an email message via Gmail. The message must be provided as
+      a base64url-encoded RFC2822 message (including headers). Use a
+      library to construct the message before encoding.
+    method: POST
+    url: "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages/send"
+    inputs:
+      user_id:
+        type: string
+        in: path
+        default: "me"
+        description: User ID or "me" for the authenticated user.
+      raw:
+        type: string
+        in: body
+        description: Base64url-encoded RFC2822 message (including headers and body).
+        sensitive: true
+    output:
+      type: object
+      schema:
+        id:        { type: string, jsonpath: "$.id" }
+        thread_id: { type: string, jsonpath: "$.threadId" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Send }
+      tags: [write]
+
+  list_messages:
+    display: List and search messages
+    description: |
+      Lists or searches Gmail messages. Supports Gmail query syntax
+      (e.g., "from:user@example.com before:2025-01-01"). Returns paginated
+      message IDs and metadata.
+    method: GET
+    url: "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages"
+    inputs:
+      user_id:
+        type: string
+        in: path
+        default: "me"
+        description: User ID or "me" for the authenticated user.
+      q:
+        type: string
+        in: query
+        description: Gmail search query (e.g., "is:unread from:boss@company.com").
+      max_results:
+        type: integer
+        in: query
+        default: 25
+        description: Maximum results per page (1–500).
+      page_token:
+        type: string
+        in: query
+        description: Token for fetching the next page (from previous response).
+    paginate:
+      strategy: page_token
+      max_pages: 10
+    output:
+      type: array
+      schema:
+        items:
+          id:        { type: string, jsonpath: "$.id" }
+          thread_id: { type: string, jsonpath: "$.threadId" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: List }
+      tags: [read]
+
+  get_message:
+    display: Get full message content
+    description: |
+      Retrieves a single message by ID with full body, headers, and
+      attachments. Use format=full (default) for complete data or format=raw
+      for the original RFC2822 message.
+    method: GET
+    url: "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages/{id}"
+    inputs:
+      user_id:
+        type: string
+        in: path
+        default: "me"
+        description: User ID or "me" for the authenticated user.
+      id:
+        type: string
+        in: path
+        description: Message ID to retrieve.
+      format:
+        type: string
+        in: query
+        default: "full"
+        enum: [full, raw, minimal]
+        description: Response format (full with parts, raw RFC2822, or minimal metadata).
+    output:
+      type: object
+      schema:
+        id:        { type: string, jsonpath: "$.id" }
+        thread_id: { type: string, jsonpath: "$.threadId" }
+        snippet:   { type: string, jsonpath: "$.snippet" }
+        payload:   { type: object, jsonpath: "$.payload" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: FileText }
+      tags: [read]
+
+  get_thread:
+    display: Get thread messages
+    description: |
+      Retrieves all messages in a conversation thread by thread ID.
+      Returns the thread object with all message IDs and metadata.
+    method: GET
+    url: "https://gmail.googleapis.com/gmail/v1/users/{user_id}/threads/{id}"
+    inputs:
+      user_id:
+        type: string
+        in: path
+        default: "me"
+        description: User ID or "me" for the authenticated user.
+      id:
+        type: string
+        in: path
+        description: Thread ID to retrieve.
+    output:
+      type: object
+      schema:
+        id:       { type: string,  jsonpath: "$.id" }
+        messages: { type: array,   jsonpath: "$.messages" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: MessageCircle }
+      tags: [read]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10
