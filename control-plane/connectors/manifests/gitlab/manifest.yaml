@@ -1,0 +1,259 @@
+# yaml-language-server: $schema=../../schema/connector.schema.json
+#
+# GitLab connector — Manage GitLab projects, issues, merge requests, and notes.
+#
+
+schema_version: "1.0"
+name: gitlab
+display: GitLab
+category: Provider
+version: "1.0"
+
+description: |
+  Manage GitLab projects, issues, merge requests, and notes. Create and list
+  issues, add comments to issues, merge pull requests, and list projects.
+  All requests authenticated via a personal access token.
+
+ui:
+  icon: { file: "./icon.svg" }
+  brand_color: "#FC6D26"
+  hover_blurb: "Manage GitLab projects, issues, merge requests, and notes."
+  highlights:
+    - issues
+    - merge_requests
+    - notes
+    - projects
+  docs_url: "https://docs.agentfield.ai/connectors/gitlab"
+
+# ─── Outbound credentials ───────────────────────────────────────────────────
+auth:
+  strategy: bearer
+  secret_env: GITLAB_TOKEN
+  description: |
+    GitLab personal access token with api scope. Generate at
+    https://gitlab.com/-/user_settings/personal_access_tokens.
+
+# ─── Outbound operations ────────────────────────────────────────────────────
+operations:
+
+  create_issue:
+    display: Create a new issue
+    description: |
+      Creates a new issue in the target GitLab project. Caller must include
+      a title; description, labels, and assignees are optional.
+    method: POST
+    url: "https://gitlab.com/api/v4/projects/{project_id}/issues"
+    inputs:
+      project_id:
+        type: string
+        in: path
+        description: GitLab project ID or URL-encoded project path (e.g., group%2Fproject).
+        example: "12345"
+      title:
+        type: string
+        in: body
+        description: Issue title (required).
+        example: "API client throws on 401"
+      description:
+        type: string
+        in: body
+        description: Issue description in Markdown (optional).
+      labels:
+        type: string
+        in: body
+        description: Comma-separated label names (optional).
+        example: "bug,documentation"
+      assignee_ids:
+        type: array
+        in: body
+        description: Array of user IDs to assign the issue to (optional).
+        items: { type: integer }
+        example: [1, 2]
+    output:
+      type: object
+      schema:
+        id:           { type: integer, jsonpath: "$.id" }
+        iid:          { type: integer, jsonpath: "$.iid" }
+        title:        { type: string,  jsonpath: "$.title" }
+        state:        { type: string,  jsonpath: "$.state" }
+        web_url:      { type: string,  jsonpath: "$.web_url" }
+        created_at:   { type: string,  jsonpath: "$.created_at" }
+    concurrency:
+      max_in_flight: 3
+    ui:
+      operation_icon: { lucide: Plus }
+      tags: [write]
+
+  list_issues:
+    display: List issues in a project
+    description: |
+      Returns issues for a GitLab project. By default lists open issues;
+      pass state: closed or state: all to widen the filter.
+    method: GET
+    url: "https://gitlab.com/api/v4/projects/{project_id}/issues"
+    inputs:
+      project_id:
+        type: string
+        in: path
+        description: GitLab project ID or URL-encoded project path.
+        example: "12345"
+      state:
+        type: string
+        in: query
+        default: opened
+        enum: [opened, closed, all]
+        description: Filter by issue state.
+      labels:
+        type: string
+        in: query
+        description: Comma-separated label names to filter by (optional).
+      per_page:
+        type: integer
+        in: query
+        default: 20
+        description: Number of results per page (max 100).
+    paginate:
+      strategy: link_header
+      max_pages: 10
+    output:
+      type: array
+      schema:
+        items:
+          id:           { jsonpath: "$.id" }
+          iid:          { jsonpath: "$.iid" }
+          title:        { jsonpath: "$.title" }
+          state:        { jsonpath: "$.state" }
+          web_url:      { jsonpath: "$.web_url" }
+          created_at:   { jsonpath: "$.created_at" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: List }
+      tags: [read]
+
+  create_note:
+    display: Add a note to an issue
+    description: |
+      Adds a comment (note) to an existing GitLab issue. Returns the created
+      note's ID and content.
+    method: POST
+    url: "https://gitlab.com/api/v4/projects/{project_id}/issues/{issue_iid}/notes"
+    inputs:
+      project_id:
+        type: string
+        in: path
+        description: GitLab project ID or URL-encoded project path.
+        example: "12345"
+      issue_iid:
+        type: integer
+        in: path
+        description: Issue internal ID (IID) within the project.
+        example: 42
+      body:
+        type: string
+        in: body
+        description: Note content in Markdown (required).
+        example: "This looks good. Let's merge it."
+    output:
+      type: object
+      schema:
+        id:           { type: integer, jsonpath: "$.id" }
+        body:         { type: string,  jsonpath: "$.body" }
+        created_at:   { type: string,  jsonpath: "$.created_at" }
+        author:       { type: object,  jsonpath: "$.author" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: MessageSquare }
+      tags: [write, social]
+
+  merge_mr:
+    display: Merge a merge request
+    description: |
+      Merges an open GitLab merge request. Returns the merge status and
+      commit SHA on success. Caller is responsible for deciding when an MR
+      is ready to merge.
+    method: PUT
+    url: "https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/merge"
+    inputs:
+      project_id:
+        type: string
+        in: path
+        description: GitLab project ID or URL-encoded project path.
+        example: "12345"
+      mr_iid:
+        type: integer
+        in: path
+        description: Merge request internal ID (IID) within the project.
+        example: 24
+      merge_commit_message:
+        type: string
+        in: body
+        description: Custom merge commit message (optional).
+      squash:
+        type: boolean
+        in: body
+        description: Squash commits before merging (optional, default false).
+      should_remove_source_branch:
+        type: boolean
+        in: body
+        description: Remove source branch after merge (optional, default false).
+    output:
+      type: object
+      schema:
+        id:             { type: integer, jsonpath: "$.id" }
+        iid:            { type: integer, jsonpath: "$.iid" }
+        merge_status:   { type: string,  jsonpath: "$.merge_status" }
+        sha:            { type: string,  jsonpath: "$.sha" }
+        state:          { type: string,  jsonpath: "$.state" }
+        merged_at:      { type: string,  jsonpath: "$.merged_at" }
+    concurrency:
+      max_in_flight: 2
+    ui:
+      operation_icon: { lucide: GitMerge }
+      tags: [write, destructive]
+
+  list_projects:
+    display: List projects
+    description: |
+      Returns GitLab projects accessible to the authenticated user. By default
+      lists only projects the user is a member of (membership: true).
+    method: GET
+    url: "https://gitlab.com/api/v4/projects"
+    inputs:
+      membership:
+        type: boolean
+        in: query
+        default: true
+        description: Filter to projects the user is a member of (optional).
+      per_page:
+        type: integer
+        in: query
+        default: 20
+        description: Number of results per page (max 100).
+      search:
+        type: string
+        in: query
+        description: Search projects by name (optional).
+    paginate:
+      strategy: link_header
+      max_pages: 10
+    output:
+      type: array
+      schema:
+        items:
+          id:           { jsonpath: "$.id" }
+          name:         { jsonpath: "$.name" }
+          path:         { jsonpath: "$.path" }
+          web_url:      { jsonpath: "$.web_url" }
+          created_at:   { jsonpath: "$.created_at" }
+    concurrency:
+      max_in_flight: 5
+    ui:
+      operation_icon: { lucide: FolderOpen }
+      tags: [read]
+
+# ─── Per-connector concurrency ──────────────────────────────────────────────
+concurrency:
+  max_in_flight: 25
+  default_op_max_in_flight: 10
