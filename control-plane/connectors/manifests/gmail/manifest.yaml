@@ -90,11 +90,13 @@ operations:
       max_results:
         type: integer
         in: query
+        wire_name: maxResults
         default: 25
         description: Maximum results per page (1–500).
       page_token:
         type: string
         in: query
+        wire_name: pageToken
         description: Token for fetching the next page (from previous response).
     paginate:
       strategy: page_token

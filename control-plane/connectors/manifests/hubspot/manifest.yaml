@@ -106,6 +106,7 @@ operations:
       filter_groups:
         type: array
         in: body
+        wire_name: filterGroups
         description: Array of filter group objects for searching (required).
         items: { type: object }
         example: [{ "filters": [{ "propertyName": "email", "operator": "EQ", "value": "test@example.com" }] }]

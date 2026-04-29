@@ -65,6 +65,12 @@ type Operation struct {
 }
 
 // Input describes one input parameter to an operation.
+//
+// WireName overrides the on-the-wire key name. Input keys must be snake_case
+// (per schema regex), but real APIs use mixed casing (maxRecords, X-API-Key,
+// orderBy). Set wire_name to the literal name the API expects. When omitted:
+// query/body use the input key verbatim; headers translate underscores to
+// dashes (notion_version → Notion-Version).
 type Input struct {
 	Type        string      `json:"type" yaml:"type"`
 	In          string      `json:"in" yaml:"in"` // path, query, body, header
@@ -74,6 +80,7 @@ type Input struct {
 	Example     interface{} `json:"example,omitempty" yaml:"example,omitempty"`
 	Items       *InputItems `json:"items,omitempty" yaml:"items,omitempty"`
 	Sensitive   bool        `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`
+	WireName    string      `json:"wire_name,omitempty" yaml:"wire_name,omitempty"`
 }
 
 // InputItems describes array element type for array inputs.

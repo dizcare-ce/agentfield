@@ -58,11 +58,13 @@ operations:
       max_records:
         type: integer
         in: query
+        wire_name: maxRecords
         description: Maximum number of records to return. Default 100 if not provided.
         default: 100
       page_size:
         type: integer
         in: query
+        wire_name: pageSize
         description: Number of records per page (default 100, max 100).
         default: 100
       view:
@@ -73,6 +75,7 @@ operations:
       filter_by_formula:
         type: string
         in: query
+        wire_name: filterByFormula
         description: Optional Airtable formula to filter records (e.g. {Status}='Done').
         example: "{Status}='Done'"
       offset:

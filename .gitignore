@@ -63,3 +63,4 @@ reports/
 # Typescript
 .env
 .plandb.db
+/control-plane/connector-try

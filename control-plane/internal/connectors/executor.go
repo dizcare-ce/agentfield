@@ -49,6 +49,16 @@ func NewExecutor(
 	}
 }
 
+// SetHTTPClient swaps the underlying client. Use to inject a recording
+// transport for dry-runs, a mock RoundTripper for tests, or a custom
+// client with different timeouts. Not concurrency-safe — call before
+// invocation.
+func (e *Executor) SetHTTPClient(c *http.Client) {
+	if c != nil {
+		e.client = c
+	}
+}
+
 // Invoke executes a connector operation and returns the result.
 func (e *Executor) Invoke(ctx context.Context, connector, operation string, inputs map[string]interface{}) (interface{}, error) {
 	startTime := time.Now()
@@ -228,6 +238,19 @@ func (e *Executor) executeWithRetry(
 	return e.mapOutput(body, op.Output), resp.StatusCode, nil
 }
 
+// wireKey returns the on-the-wire key name for an input, honoring an
+// explicit WireName override and applying location-specific defaults
+// (snake-to-kebab for headers).
+func wireKey(name string, in manifest.Input, location string) string {
+	if in.WireName != "" {
+		return in.WireName
+	}
+	if location == "header" {
+		return strings.ReplaceAll(name, "_", "-")
+	}
+	return name
+}
+
 func (e *Executor) buildRequest(ctx context.Context, op *manifest.Operation, inputs map[string]interface{}) (*http.Request, error) {
 	urlStr := op.URL
 
@@ -246,7 +269,7 @@ func (e *Executor) buildRequest(ctx context.Context, op *manifest.Operation, inp
 	for name, input := range op.Inputs {
 		if input.In == "query" {
 			if val, ok := inputs[name]; ok {
-				q.Set(name, fmt.Sprintf("%v", val))
+				q.Set(wireKey(name, input, "query"), fmt.Sprintf("%v", val))
 			}
 		}
 	}
@@ -264,7 +287,7 @@ func (e *Executor) buildRequest(ctx context.Context, op *manifest.Operation, inp
 	for name, input := range op.Inputs {
 		if input.In == "body" {
 			if val, ok := inputs[name]; ok {
-				bodyFields[name] = val
+				bodyFields[wireKey(name, input, "body")] = val
 			}
 		}
 	}
@@ -279,14 +302,12 @@ func (e *Executor) buildRequest(ctx context.Context, op *manifest.Operation, inp
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 
-	// Add headers. Input names use snake_case (per schema regex), but HTTP
-	// headers conventionally use kebab-case (Notion-Version, X-Api-Key).
-	// Translate underscores to dashes — net/http canonicalizes the rest.
+	// Add headers. Input keys are snake_case (per schema regex); HTTP headers
+	// use kebab-case. Use input.WireName when set, else translate _ → -.
 	for name, input := range op.Inputs {
 		if input.In == "header" {
 			if val, ok := inputs[name]; ok {
-				headerName := strings.ReplaceAll(name, "_", "-")
-				req.Header.Set(headerName, fmt.Sprintf("%v", val))
+				req.Header.Set(wireKey(name, input, "header"), fmt.Sprintf("%v", val))
 			}
 		}
 	}

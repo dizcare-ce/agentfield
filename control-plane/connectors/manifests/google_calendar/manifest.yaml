@@ -105,24 +105,29 @@ operations:
       time_min:
         type: string
         in: query
+        wire_name: timeMin
         description: Lower bound for event start time (RFC3339 format, e.g., 2025-01-01T00:00:00Z).
       time_max:
         type: string
         in: query
+        wire_name: timeMax
         description: Upper bound for event start time (RFC3339 format).
       max_results:
         type: integer
         in: query
+        wire_name: maxResults
         default: 25
         description: Maximum events per page (1–2500).
       single_events:
         type: boolean
         in: query
+        wire_name: singleEvents
         default: true
         description: Expand recurring events into single event instances.
       order_by:
         type: string
         in: query
+        wire_name: orderBy
         default: "startTime"
         enum: [startTime, updated]
         description: Sort order (startTime requires singleEvents=true).
@@ -183,10 +188,12 @@ operations:
       time_min:
         type: string
         in: body
+        wire_name: timeMin
         description: Lower bound for query time (RFC3339 format).
       time_max:
         type: string
         in: body
+        wire_name: timeMax
         description: Upper bound for query time (RFC3339 format).
       items:
         type: array

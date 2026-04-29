@@ -282,6 +282,11 @@
         "sensitive": {
           "description": "When true, the value is redacted in the connector_invocations audit log. Default false.",
           "type": "boolean"
+        },
+        "wire_name": {
+          "description": "On-the-wire key name when this input differs from the schema-mandated snake_case. Use for camelCase APIs (maxRecords, orderBy), specific header names (X-API-Key), or API params with hyphens. When omitted: query/body use the snake_case key verbatim, headers translate _ to -.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

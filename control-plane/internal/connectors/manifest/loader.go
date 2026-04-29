@@ -126,6 +126,11 @@ func LoadEmbeddedInto(reg *Registry) error {
 			return fmt.Errorf("walk manifests %q: %w", path, walkErr)
 		}
 		if d.IsDir() {
+			// Skip directories that start with "_" — these are scaffolds
+			// (e.g. _template/) and must not load as runtime connectors.
+			if strings.HasPrefix(d.Name(), "_") && path != "manifests" {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, "manifest.yaml") {
