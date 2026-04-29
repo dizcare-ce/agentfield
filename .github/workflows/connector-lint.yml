@@ -1,0 +1,23 @@
+name: Connector Lint
+
+on:
+  pull_request:
+    paths:
+      - 'connectors/manifests/**'
+      - 'connectors/schema/**'
+      - '.github/workflows/connector-lint.yml'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run connector linter
+        run: make connector-lint

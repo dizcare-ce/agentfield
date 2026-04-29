@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 
-.PHONY: all install build test lint fmt tidy clean control-plane sdk-go sdk-python
+.PHONY: all install build test lint fmt tidy clean control-plane sdk-go sdk-python connector-lint
 .PHONY: test-functional test-functional-local test-functional-postgres test-functional-cleanup test-functional-ci log-demo-up log-demo-down log-demo-native-up log-demo-native-down
 
 # Local UI stack: control plane + Python/Go/TS agents emitting NDJSON process logs (see tests/functional/docker/docker-compose.log-demo.yml).
@@ -117,3 +117,7 @@ test-functional-ci:
 	$(MAKE) test-functional-local || ($(MAKE) test-functional-cleanup-local && exit 1)
 	$(MAKE) test-functional-postgres || ($(MAKE) test-functional-cleanup-postgres && exit 1)
 	@echo "✅ CI functional tests completed successfully"
+
+.PHONY: connector-lint
+connector-lint:
+	cd control-plane && go run ./cmd/connector-lint -root ../connectors/manifests
