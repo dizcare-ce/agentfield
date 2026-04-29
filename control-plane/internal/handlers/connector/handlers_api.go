@@ -291,20 +291,21 @@ func (h *Handlers) InvokeConnectorOperation(c *gin.Context) {
 	}
 	_ = op // suppress unused warning
 
-	// Create context with run_id for auditor
+	// Create context with run_id for auditor + receiver for invocation_id passback.
 	ctx := c.Request.Context()
 	if reqBody.RunID != "" {
 		ctx = context.WithValue(ctx, "run_id", reqBody.RunID)
 	}
+	var invocationID string
+	ctx = WithInvocationIDReceiver(ctx, &invocationID)
 
 	// Invoke operation
 	startTime := time.Now()
 	result, err := api.executor.Invoke(ctx, connectorName, operationName, reqBody.Inputs)
 	duration := int64(time.Since(startTime).Milliseconds())
 
-	// Get invocation ID from auditor
-	invocationID := api.auditor.GetLastInvocationID()
 	if invocationID == "" {
+		// OnStart never fired (e.g. registry lookup failed before audit).
 		invocationID = "unknown"
 	}
 
@@ -349,14 +350,8 @@ func (h *Handlers) ListConnectorInvocations(c *gin.Context) {
 	var invocations []*types.ConnectorInvocation
 	var err error
 
-	if runID != "" {
-		// Filter by run_id
-		invocations, err = h.storage.ListConnectorInvocations(ctx, runID)
-	} else {
-		// No filtering supported in basic version — could extend with limit
-		c.JSON(http.StatusBadRequest, gin.H{"error": "run_id query parameter is required"})
-		return
-	}
+	// Empty runID lists most recent across all runs; non-empty filters by run_id.
+	invocations, err = h.storage.ListConnectorInvocations(ctx, runID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list invocations: %v", err)})

@@ -103,26 +103,42 @@ func (ls *LocalStorage) UpdateConnectorInvocation(ctx context.Context, id, statu
 	return nil
 }
 
-// ListConnectorInvocations retrieves all connector invocations for a workflow run.
+// ListConnectorInvocations retrieves connector invocations. When runID is
+// empty, returns the most recent 100 across all runs (newest first); when
+// provided, returns all invocations for that run ordered chronologically.
 func (ls *LocalStorage) ListConnectorInvocations(ctx context.Context, runID string) ([]*types.ConnectorInvocation, error) {
-	if runID == "" {
-		return nil, fmt.Errorf("run_id is required")
-	}
-
 	db := ls.requireSQLDB()
 
-	query := `
-		SELECT id, run_id, execution_id, agent_node_id,
-		       connector_name, operation_name, inputs_redacted,
-		       status, http_status, error_message, duration_ms,
-		       started_at, completed_at, parent_vc_id, invocation_vc_id,
-		       created_at, updated_at
-		FROM connector_invocations
-		WHERE run_id = ?
-		ORDER BY started_at ASC
-	`
-
-	rows, err := db.QueryContext(ctx, query, runID)
+	var (
+		query string
+		rows  *sql.Rows
+		err   error
+	)
+	if runID == "" {
+		query = `
+			SELECT id, run_id, execution_id, agent_node_id,
+			       connector_name, operation_name, inputs_redacted,
+			       status, http_status, error_message, duration_ms,
+			       started_at, completed_at, parent_vc_id, invocation_vc_id,
+			       created_at, updated_at
+			FROM connector_invocations
+			ORDER BY started_at DESC
+			LIMIT 100
+		`
+		rows, err = db.QueryContext(ctx, query)
+	} else {
+		query = `
+			SELECT id, run_id, execution_id, agent_node_id,
+			       connector_name, operation_name, inputs_redacted,
+			       status, http_status, error_message, duration_ms,
+			       started_at, completed_at, parent_vc_id, invocation_vc_id,
+			       created_at, updated_at
+			FROM connector_invocations
+			WHERE run_id = ?
+			ORDER BY started_at ASC
+		`
+		rows, err = db.QueryContext(ctx, query, runID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("query connector invocations: %w", err)
 	}

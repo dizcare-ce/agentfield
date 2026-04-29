@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	connectors "github.com/Agent-Field/agentfield/control-plane/internal/connectors"
@@ -11,15 +10,23 @@ import (
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 )
 
+// invocationIDKey is the context key handlers use to receive the
+// generated invocation ID from the auditor. Handlers pass a *string;
+// auditor writes the UUID into it on OnStart. Race-free per call.
+type invocationIDKey struct{}
+
+// WithInvocationIDReceiver returns a context that lets the auditor write
+// the generated invocation UUID back to the caller. The handler reads
+// *out after Invoke returns.
+func WithInvocationIDReceiver(ctx context.Context, out *string) context.Context {
+	return context.WithValue(ctx, invocationIDKey{}, out)
+}
+
 // StorageAuditor implements connectors.Auditor by persisting invocations
 // to the connector_invocations table. It tracks pending start, completion,
 // and failure states with full audit metadata.
 type StorageAuditor struct {
 	store storage.StorageProvider
-	// invocationIDs temporarily stores the latest invocation ID during a call
-	// so handlers can retrieve it after Invoke returns
-	mu              sync.Mutex
-	lastInvocationID string
 }
 
 // NewStorageAuditor creates a StorageAuditor with a storage backend.
@@ -59,10 +66,11 @@ func (s *StorageAuditor) OnStart(ctx context.Context, record connectors.AuditRec
 		return fmt.Errorf("storage auditor: insert invocation: %w", err)
 	}
 
-	// Store invocation ID so handlers can retrieve it
-	s.mu.Lock()
-	s.lastInvocationID = record.InvocationID
-	s.mu.Unlock()
+	// Write the generated UUID into the handler's *string receiver if one
+	// was provided via WithInvocationIDReceiver. Race-free per call.
+	if out, ok := ctx.Value(invocationIDKey{}).(*string); ok && out != nil {
+		*out = record.InvocationID
+	}
 
 	return nil
 }
@@ -109,10 +117,3 @@ func (s *StorageAuditor) OnEnd(ctx context.Context, record connectors.AuditRecor
 	return nil
 }
 
-// GetLastInvocationID retrieves the most recent invocation ID (used by handlers
-// to surface the ID in the response).
-func (s *StorageAuditor) GetLastInvocationID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lastInvocationID
-}

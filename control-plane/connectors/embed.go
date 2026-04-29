@@ -2,5 +2,5 @@ package connectors
 
 import "embed"
 
-//go:embed manifests/*/manifest.yaml schema/connector.schema.json
+//go:embed manifests/*/manifest.yaml manifests/*/icon.svg schema/connector.schema.json
 var FS embed.FS

@@ -18,7 +18,9 @@ description: |
   and resolve email addresses to Slack user IDs.
 
 ui:
-  icon: { file: "./icon.svg" }
+  # Slack was removed from simple-icons due to brand-policy request. Using
+  # lucide as a clean fallback; swap to a hand-vectored brand SVG if needed.
+  icon: { lucide: MessagesSquare }
   brand_color: "#4A154B"
   hover_blurb: "Post messages, react, and lookup users in Slack."
   highlights:
