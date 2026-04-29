@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentfield.ai/schemas/connector/v1.0.json",
+  "title": "AgentField connector manifest (v1.0)",
+  "description": "Single source of truth for one connector. Drives the Go executor, SDK codegen, the Integrations UI, the Triggers UI when an inbound block is present, the Active connectors operator page, the agentfield-multi-reasoner-builder skill reference, and app.ai(tools=...) JSON Schemas. Schema lives at connectors/schema/connector.schema.json; manifests reference it via the yaml-language-server hint at the top of each manifest.yaml so editors get live validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "display", "category", "version", "description", "ui", "auth", "operations"],
+  "properties": {
+    "schema_version": {
+      "description": "Manifest schema version. v1 manifests use \"1.0\". The framework rejects manifests with a schema_version it doesn't know.",
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "name": {
+      "description": "Lowercase connector identifier. Must match the directory name under connectors/manifests/. Used in URLs (POST /api/v1/connectors/:name/:op) and in SDK imports (agentfield.connectors.v1.<name>).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,63}$"
+    },
+    "display": {
+      "description": "Human-readable connector name shown on the Integrations card and in SDK docstrings.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "category": {
+      "description": "Sort bucket for the Integrations catalog. Provider = third-party SaaS (GitHub, Stripe). Schedule = recurring (cron). Generic = bring-your-own-API. Internal = first-party AgentField services.",
+      "type": "string",
+      "enum": ["Provider", "Schedule", "Generic", "Internal"]
+    },
+    "version": {
+      "description": "Connector-specific version. Major bumps land alongside the prior major (codegen emits agentfield.connectors.v1.<name>, v2.<name>, etc.) until the prior version is deprecated.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "description": {
+      "description": "One paragraph. First sentence becomes the SDK docstring summary. Surfaces in Integrations card, skill reference, and the LLM tool-selection prompt.",
+      "type": "string",
+      "minLength": 20
+    },
+    "ui": {
+      "$ref": "#/$defs/ConnectorUI"
+    },
+    "auth": {
+      "$ref": "#/$defs/AuthBlock"
+    },
+    "inbound": {
+      "$ref": "#/$defs/InboundBlock",
+      "description": "Optional. Present when the connector receives webhooks. Mirrors the trigger system's source-plugin shape so Inbound + Outbound live in one manifest."
+    },
+    "operations": {
+      "description": "Map of operation name to operation definition. Operation names are snake_case identifiers; they become method names on the typed SDK binding.",
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{0,63}$": { "$ref": "#/$defs/Operation" }
+      },
+      "additionalProperties": false
+    },
+    "concurrency": {
+      "$ref": "#/$defs/ConnectorConcurrency"
+    }
+  },
+
+  "$defs": {
+
+    "ConnectorUI": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["icon"],
+      "properties": {
+        "icon": { "$ref": "#/$defs/IconRef" },
+        "brand_color": {
+          "description": "Hex color used as a subtle accent on the Integrations card. Never used for status semantics — that stays theme-token-driven.",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "hover_blurb": {
+          "description": "Tooltip-sized blurb shown when hovering the connector card. ~80 chars max.",
+          "type": "string",
+          "maxLength": 120
+        },
+        "highlights": {
+          "description": "Short event-type or feature chips shown on the Integrations card. Pipe through unchanged — operators recognize these.",
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 8
+        },
+        "docs_url": {
+          "description": "External documentation link shown next to the connector header.",
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+
+    "IconRef": {
+      "description": "Icon source. Two source types: branded SVG sitting next to the manifest, OR a lucide-react icon name for generic categories.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file"],
+          "properties": {
+            "file": {
+              "description": "Path relative to manifest.yaml. Conventionally './icon.svg'. Embedded into the binary at build time alongside the manifest.",
+              "type": "string",
+              "pattern": "^\\./[^/].*\\.svg$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lucide"],
+          "properties": {
+            "lucide": {
+              "description": "Lucide-react icon name (e.g. 'Webhook', 'Clock', 'MessageSquare'). UI imports from the existing icon-bridge.",
+              "type": "string",
+              "pattern": "^[A-Z][A-Za-z0-9]*$"
+            }
+          }
+        }
+      ]
+    },
+
+    "AuthBlock": {
+      "description": "Outbound credential strategy. The strategy name must reference a registered Go function in control-plane/internal/connectors/auth/. The CP reads secret_env from the host environment at request time; the secret value never leaves the CP process.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "secret_env"],
+      "properties": {
+        "strategy": {
+          "description": "Registered auth strategy name. Finite, slow-growing set in the Go binary.",
+          "type": "string",
+          "enum": [
+            "bearer",
+            "apikey_header",
+            "apikey_query",
+            "hmac",
+            "oauth2",
+            "oauth2_with_refresh",
+            "aws_sigv4",
+            "none"
+          ]
+        },
+        "secret_env": {
+          "description": "Environment variable name on the CP host that holds the secret. Must be UPPER_SNAKE_CASE. Reading happens at request time.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "description": {
+          "description": "How an operator gets this credential. Surfaces in the Integrations card's setup hint.",
+          "type": "string"
+        }
+      }
+    },
+
+    "InboundBlock": {
+      "description": "Optional inbound webhook spec. Mirrors the existing trigger source-plugin posture: the CP verifies signatures before dispatch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_kind", "event_types"],
+      "properties": {
+        "source_kind": {
+          "type": "string",
+          "enum": ["http", "loop"]
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy", "secret_env"],
+          "properties": {
+            "strategy": {
+              "description": "Registered signature-verification strategy name.",
+              "type": "string",
+              "enum": [
+                "stripe_signature",
+                "hub_signature_256",
+                "slack_signature",
+                "hmac_sha256",
+                "hmac_sha1",
+                "bearer_token",
+                "none"
+              ]
+            },
+            "secret_env": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            }
+          }
+        },
+        "event_types": {
+          "description": "Event types this inbound endpoint accepts. Matched at ingest; non-matching events are dropped before dispatch.",
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+
+    "Operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display", "description", "method", "url", "inputs", "output"],
+      "properties": {
+        "display": {
+          "description": "Human-readable operation name shown in the Integrations card's operation list and the connector detail page.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "description": "Plain-language description. First sentence becomes the SDK method docstring. The full text is included in the LLM tool schema for app.ai(tools=...) selection.",
+          "type": "string",
+          "minLength": 20
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        },
+        "url": {
+          "description": "URL template. Path variables in {curly_braces} must match an input declared `in: path`.",
+          "type": "string",
+          "format": "uri-template"
+        },
+        "inputs": {
+          "type": "object",
+          "minProperties": 0,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": { "$ref": "#/$defs/Input" }
+          },
+          "additionalProperties": false
+        },
+        "output": { "$ref": "#/$defs/Output" },
+        "paginate": { "$ref": "#/$defs/Paginate" },
+        "concurrency": { "$ref": "#/$defs/OperationConcurrency" },
+        "ui": { "$ref": "#/$defs/OperationUI" }
+      }
+    },
+
+    "Input": {
+      "description": "One input field on an operation. Validated by the Go executor before the request is built; the validator's error becomes a 400 to the agent without ever reaching the upstream service.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "in", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean", "object", "array"]
+        },
+        "in": {
+          "description": "Where in the HTTP request this input goes. path = URL template variable; query = ?param; body = JSON body field; header = request header.",
+          "type": "string",
+          "enum": ["path", "query", "body", "header"]
+        },
+        "description": {
+          "description": "Plain-language description. Becomes the SDK parameter docstring. Required (linter rejects empty descriptions) so generated SDKs never have anonymous parameters.",
+          "type": "string",
+          "minLength": 1
+        },
+        "default": {
+          "description": "Optional default. When present, the input is treated as not-required."
+        },
+        "enum": {
+          "description": "Optional value-set restriction. Validator rejects values outside this list before sending the request.",
+          "type": "array"
+        },
+        "example": {
+          "description": "Example value used in generated docstrings and the connector detail page's call-form helper."
+        },
+        "items": {
+          "description": "When type is 'array', describes the element type. Mirrors JSON Schema's items.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["string", "integer", "number", "boolean", "object"]
+            }
+          }
+        },
+        "sensitive": {
+          "description": "When true, the value is redacted in the connector_invocations audit log. Default false.",
+          "type": "boolean"
+        }
+      }
+    },
+
+    "Output": {
+      "description": "Shape of the operation's result. The executor maps each named field via its jsonpath against the upstream response so the SDK consumer gets a clean dict.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["object", "array"]
+        },
+        "schema": {
+          "description": "For type=object: a map of field name → field spec. For type=array: provide a single 'items' key whose value is the per-item field map.",
+          "type": "object"
+        }
+      }
+    },
+
+    "Paginate": {
+      "description": "Optional pagination policy. The strategy name must reference a registered Go function in control-plane/internal/connectors/paginate/.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "github_link_header",
+            "link_header",
+            "cursor",
+            "offset",
+            "page_token"
+          ]
+        },
+        "max_pages": {
+          "description": "Hard cap on pages followed per call. Prevents an unbounded fan-out if the upstream returns infinite pages.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 10
+        }
+      }
+    },
+
+    "OperationConcurrency": {
+      "description": "Per-operation in-flight cap. The executor enforces this with a semaphore keyed by (connector, op). Reactive rate-limit handling (Retry-After / X-RateLimit-Reset) is independent and always on.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_in_flight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 10
+        }
+      }
+    },
+
+    "ConnectorConcurrency": {
+      "description": "Per-connector in-flight cap. Total concurrent ops on this connector cannot exceed max_in_flight regardless of which operations are firing.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_in_flight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50
+        },
+        "default_op_max_in_flight": {
+          "description": "Default per-op cap inherited by operations that don't declare their own concurrency block.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 10
+        }
+      }
+    },
+
+    "OperationUI": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_icon": { "$ref": "#/$defs/IconRef" },
+        "tags": {
+          "description": "Free-form labels rendered next to the operation in the connector detail page. Common values: read, write, destructive, social, analytics.",
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 8
+        }
+      }
+    }
+
+  }
+}
