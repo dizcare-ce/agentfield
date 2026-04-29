@@ -796,7 +796,17 @@ class TestErrorHandling:
         manager = ConnectionManager(mock_agent, fast_config)
         await manager.start()
 
-        await asyncio.sleep(0.07)
+        # Poll the state up to 1s instead of a fixed 70ms sleep — the prior
+        # constant-time wait flaked on slower CI runners where the second
+        # heartbeat hadn't fired yet by the time the assertion ran.
+        deadline = asyncio.get_event_loop().time() + 1.0
+        while asyncio.get_event_loop().time() < deadline:
+            if manager.state in (
+                ConnectionState.DEGRADED,
+                ConnectionState.RECONNECTING,
+            ):
+                break
+            await asyncio.sleep(0.02)
 
         assert manager.state in (ConnectionState.DEGRADED, ConnectionState.RECONNECTING)
 
