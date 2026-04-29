@@ -27,6 +27,7 @@ from typing import (
 from agentfield.agent_ai import AgentAI
 from agentfield.agent_cli import AgentCLI
 from agentfield.agent_field_handler import AgentFieldHandler
+from agentfield.connector import Connector
 from agentfield.agent_registry import clear_current_agent, set_current_agent
 from agentfield.agent_server import AgentServer
 from agentfield.agent_workflow import AgentWorkflow
@@ -658,6 +659,9 @@ class Agent(FastAPI):
         self.agentfield_handler = AgentFieldHandler(self)
         self.workflow_handler = AgentWorkflow(self)
         self.server_handler = AgentServer(self)
+        
+        # Initialize connector facade for calling external APIs via control plane
+        self.connector = Connector(self.client, self._current_execution_context)
 
         # Register this agent instance for enhanced decorator system
         set_current_agent(self)

@@ -67,6 +67,22 @@ from .tool_calling import (
     capability_to_tool_schema,
     capabilities_to_tool_schemas,
 )
+from .connector import (
+    Connector,
+    ConnectorResult,
+    ConnectorInfo,
+    ConnectorDetail,
+    OperationInfo,
+)
+from ._connector_errors import (
+    ConnectorError,
+    ConnectorNotFoundError,
+    OperationNotFoundError,
+    ConnectorAuthError,
+    ConnectorValidationError,
+    ConnectorUpstreamError,
+    ConnectorTimeoutError,
+)
 
 __all__ = [
     "Agent",
@@ -127,6 +143,19 @@ __all__ = [
     "ToolCallTrace",
     "capability_to_tool_schema",
     "capabilities_to_tool_schemas",
+    # Connector framework
+    "Connector",
+    "ConnectorResult",
+    "ConnectorInfo",
+    "ConnectorDetail",
+    "OperationInfo",
+    "ConnectorError",
+    "ConnectorNotFoundError",
+    "OperationNotFoundError",
+    "ConnectorAuthError",
+    "ConnectorValidationError",
+    "ConnectorUpstreamError",
+    "ConnectorTimeoutError",
     # Exceptions
     "AgentFieldError",
     "AgentFieldClientError",
