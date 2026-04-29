@@ -304,3 +304,51 @@ func TestWithTriggerConfig_DoesNotAffectCodeOrigin(t *testing.T) {
 	assert.NotEmpty(t, binding.Config, "Config should be set")
 	assert.Contains(t, binding.CodeOrigin, "agent_trigger_origin_test.go")
 }
+
+func TestTriggerOptions_EdgeBranches(t *testing.T) {
+	t.Run("captureCodeOrigin returns empty when stack frame is unavailable", func(t *testing.T) {
+		assert.Empty(t, captureCodeOrigin(100000))
+	})
+
+	t.Run("WithTriggers ignores unknown trigger values", func(t *testing.T) {
+		reasoner := &Reasoner{}
+		WithTriggers(struct{ Unsupported bool }{Unsupported: true})(reasoner)
+		assert.Empty(t, reasoner.Triggers)
+	})
+
+	t.Run("WithTriggerSecretEnv and config are noops without a trigger", func(t *testing.T) {
+		reasoner := &Reasoner{}
+		WithTriggerSecretEnv("SECRET")(reasoner)
+		WithTriggerConfig(map[string]any{"path": "/hook"})(reasoner)
+		assert.Empty(t, reasoner.Triggers)
+	})
+
+	t.Run("WithTriggerConfig ignores unmarshalable config", func(t *testing.T) {
+		reasoner := &Reasoner{}
+		WithEventTrigger("generic_bearer", "push")(reasoner)
+		WithTriggerConfig(map[string]any{"bad": func() {}})(reasoner)
+		require.Len(t, reasoner.Triggers, 1)
+		assert.Empty(t, reasoner.Triggers[0].Config)
+	})
+
+	t.Run("triggerToBinding covers config, timezone, and unknown types", func(t *testing.T) {
+		eventBinding, ok := triggerToBinding(EventTrigger{
+			Source:    "generic_bearer",
+			Types:     []string{"push"},
+			SecretEnv: "TOKEN",
+			Config:    map[string]any{"path": "/hook"},
+		})
+		require.True(t, ok)
+		assert.Equal(t, "generic_bearer", eventBinding.Source)
+		assert.JSONEq(t, `{"path":"/hook"}`, string(eventBinding.Config))
+		assert.Equal(t, "TOKEN", eventBinding.SecretEnvVar)
+
+		scheduleBinding, ok := triggerToBinding(ScheduleTrigger{Cron: "*/5 * * * *", Timezone: "America/Toronto"})
+		require.True(t, ok)
+		assert.Equal(t, "cron", scheduleBinding.Source)
+		assert.Contains(t, string(scheduleBinding.Config), "America/Toronto")
+
+		_, ok = triggerToBinding(42)
+		assert.False(t, ok)
+	})
+}
