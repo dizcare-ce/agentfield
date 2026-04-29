@@ -286,6 +286,19 @@ func (s *VCStorage) convertVCInfoToExecutionVC(vcInfo *types.ExecutionVCInfo) (*
 		OutputHash:   vcInfo.OutputHash,
 		Status:       vcInfo.Status,
 		CreatedAt:    vcInfo.CreatedAt,
+		// Chain pointers — these are populated by StoreExecutionVCRecord and
+		// read back by ListExecutionVCs into ExecutionVCInfo. Forwarding them
+		// here is what lets TriggerForExecution walk the parent chain and the
+		// vc-chain endpoint surface the trigger_event → execution linkage.
+		// Without this, the storage row has the pointers but every API
+		// consumer (chain UI, runs trigger badge, af vc verify) sees them as
+		// nil/empty and thinks the run wasn't webhook-triggered.
+		Kind:       vcInfo.Kind,
+		ParentVCID: vcInfo.ParentVCID,
+		TriggerID:  vcInfo.TriggerID,
+		SourceName: vcInfo.SourceName,
+		EventType:  vcInfo.EventType,
+		EventID:    vcInfo.EventID,
 	}, nil
 }
 
