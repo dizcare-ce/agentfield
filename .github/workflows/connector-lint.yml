@@ -3,8 +3,8 @@ name: Connector Lint
 on:
   pull_request:
     paths:
-      - 'connectors/manifests/**'
-      - 'connectors/schema/**'
+      - 'control-plane/connectors/manifests/**'
+      - 'control-plane/connectors/schema/**'
       - '.github/workflows/connector-lint.yml'
 
 jobs:

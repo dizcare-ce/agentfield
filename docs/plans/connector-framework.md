@@ -11,7 +11,7 @@ The six open questions in §8 are resolved. Each answer below shapes Phases 1–
 | # | Question | Decision |
 |---|---|---|
 | 1 | Manifest source format | **YAML** for editing, JSON Schema for validation |
-| 2 | Manifest packaging | **Embed only** via Go `embed`. All manifests in-tree under `connectors/manifests/<name>/`. No on-disk loader in v1 |
+| 2 | Manifest packaging | **Embed only** via Go `embed`. All manifests in-tree under `control-plane/connectors/manifests/<name>/`. No on-disk loader in v1 |
 | 3 | Versioning | `version: "1.0"` per manifest. SDK codegen produces `v1.<connector>` namespace. Major bumps land as new files; old surface stays callable until deprecated |
 | 4 | Per-operation rate limiting | **Reactive only in v1** — honor `Retry-After` and `X-RateLimit-Reset` response headers. Active per-op limits deferred to v2 |
 | 5 | Operator sideloading of custom manifests | **Out of v1.** The loader reads exclusively from the embedded set. Adding a connector = PR. Sideloading is on the v2/v3 roadmap if customer demand surfaces |
@@ -78,7 +78,7 @@ Single edit in YAML ripples to all six. Drift becomes structurally impossible.
 Real schema lives in `control-plane/internal/connectors/manifest/schema.json` (JSON Schema, validated at load + linted in CI). High-level shape:
 
 ```yaml
-# connectors/manifests/github/manifest.yaml
+# control-plane/connectors/manifests/github/manifest.yaml
 name: github
 display: GitHub
 category: Provider                             # Provider | Schedule | Generic | Internal
@@ -215,7 +215,7 @@ The executor is a single Go package, `control-plane/internal/connectors/`:
 
 | Concern | Where it lives |
 |---|---|
-| Manifest load + validate | `manifest/loader.go` — reads YAML from the **embedded `connectors/manifests/` tree only**, validates against JSON Schema, registers operations into the runtime registry. No disk fallback in v1 |
+| Manifest load + validate | `manifest/loader.go` — reads YAML from the **embedded `control-plane/connectors/manifests/` tree only**, validates against JSON Schema, registers operations into the runtime registry. No disk fallback in v1 |
 | Auth strategies | `auth/{bearer.go, apikey_header.go, apikey_query.go, hmac.go, oauth2.go, aws_sigv4.go}` — registered Go function table. Manifest references by name. **Finite, slow-growing set (~10 ever)** |
 | Pagination | `paginate/{github_link_header.go, cursor.go, offset.go}` — registered named paginators. Manifest references by name |
 | Response transformers | `transform/{jsonpath.go, github_link_merge.go, ...}` — for the rare case where a response needs flattening or accumulation. Used by ~5% of operations |
@@ -390,7 +390,7 @@ Review, iterate, lock the manifest schema. **Output:** the `[Epic] Connector Fra
 | email_resend | send |
 | twilio | send_sms |
 
-Each manifest ships `manifest.yaml` + `icon.svg` in `connectors/manifests/<name>/`.
+Each manifest ships `manifest.yaml` + `icon.svg` in `control-plane/connectors/manifests/<name>/`.
 
 **Acceptance:** `make connector-lint` passes on all 10. End-to-end test: `app.connector.call("slack", "post_message", channel="...", text="...")` posts to a real demo workspace.
 
@@ -407,7 +407,7 @@ Each manifest ships `manifest.yaml` + `icon.svg` in `connectors/manifests/<name>
 
 - `tools/connector-scaffold` CLI generates a manifest skeleton
 - CONTRIBUTING-CONNECTORS.md documents the manifest format with examples
-- CI `connector-lint` job runs on every PR touching `connectors/manifests/`
+- CI `connector-lint` job runs on every PR touching `control-plane/connectors/manifests/`
 - Tier 1 manifests get a "core" badge in the UI; community manifests carry their author attribution
 
 ## 7. Risks and mitigations

@@ -120,4 +120,4 @@ test-functional-ci:
 
 .PHONY: connector-lint
 connector-lint:
-	cd control-plane && go run ./cmd/connector-lint -root ../connectors/manifests
+	cd control-plane && go run ./cmd/connector-lint -root ./connectors/manifests

@@ -108,8 +108,14 @@ operations:
     method: GET
     url: "https://api.github.com/repos/{owner}/{repo}/issues"
     inputs:
-      owner: { type: string, in: path }
-      repo:  { type: string, in: path }
+      owner:
+        type: string
+        in: path
+        description: Repository owner (org or user login).
+      repo:
+        type: string
+        in: path
+        description: Repository name.
       state:
         type: string
         in: query
@@ -128,7 +134,7 @@ operations:
           state:     { jsonpath: "$.state" }
           html_url:  { jsonpath: "$.html_url" }
           author:    { jsonpath: "$.user.login" }
-          created_at:{ jsonpath: "$.created_at" }
+          created_at: { jsonpath: "$.created_at" }
     concurrency:
       max_in_flight: 5
     ui:
@@ -143,8 +149,14 @@ operations:
     method: POST
     url: "https://api.github.com/repos/{owner}/{repo}/issues"
     inputs:
-      owner: { type: string, in: path }
-      repo:  { type: string, in: path }
+      owner:
+        type: string
+        in: path
+        description: Repository owner (org or user login).
+      repo:
+        type: string
+        in: path
+        description: Repository name.
       title:
         type: string
         in: body
@@ -180,8 +192,14 @@ operations:
     method: PUT
     url: "https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge"
     inputs:
-      owner:  { type: string, in: path }
-      repo:   { type: string, in: path }
+      owner:
+        type: string
+        in: path
+        description: Repository owner (org or user login).
+      repo:
+        type: string
+        in: path
+        description: Repository name.
       number:
         type: integer
         in: path
