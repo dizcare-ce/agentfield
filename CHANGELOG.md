@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.73-rc.2] - 2026-05-04
+
+
+### Fixed
+
+- Fix(harness/opencode): surface stderr Error: lines on exit 0 (#525)
+
+The opencode CLI sometimes prints a hard error to stderr but exits 0,
+notably "Error: Model not found: …", auth errors, and APIErrors. The
+provider's previous logic only flagged failures on non-zero exit, so
+these cases returned RawResult(is_error=False, result=None) — silently
+empty output that downstream callers interpret as "agent failed to
+produce a valid result".
+
+The bug also hid behind the diagnostic: clean_stderr is logged truncated
+to 800 chars, but opencode opens stderr with the SQLite migration
+prelude ("Performing one time database migration..."), pushing the real
+Error: line off the end of the truncation window. Operators saw the
+prelude in logs and assumed migration was the issue.
+
+This change:
+
+- Adds explicit detection of error-shaped stderr (Error:, Model not
+  found, AuthenticationError, Unauthorized, APIError) and treats them
+  as CRASH failures even when returncode == 0.
+- Extracts the meaningful error line + a small context window via
+  _extract_opencode_error() so the surfaced message contains the real
+  cause, not the migration prelude.
+- Uses the same extractor for the existing non-zero-exit branch so log
+  truncation can no longer hide the cause there either.
+
+Tests: 3 new regression tests (Model not found exit 0, migration-only
+stderr is not a failure, long-prelude + AuthenticationError on
+non-zero exit). Full opencode + harness suite: 48/48.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (720a48e)
+
 ## [0.1.73-rc.1] - 2026-05-04
 
 
