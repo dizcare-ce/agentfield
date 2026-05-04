@@ -6,6 +6,109 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.73-rc.1] - 2026-05-04
+
+
+### Added
+
+- Feat(sdk/go): add audio and file multimodal helpers (#520)
+
+* feat(sdk/go): add audio and file multimodal helpers
+
+* fix(sdk/go): bound WithAudioURL with timeout and size cap
+
+Replace bare http.Get with a client that has a 30s timeout, and cap
+the response body at 50 MiB via io.LimitReader so a slow or oversized
+URL can't hang the caller or exhaust memory.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(sdk/go): drop empty Test_detectMIMEType stub
+
+The auto-generated stub had no test cases (the loop body never ran)
+and silently passed. detectMIMEType is already covered by
+TestDetectMIMEType in multimodal_additional_test.go.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(sdk/go): cover WithAudioURL/WithAudioFile/WithFile error paths
+
+Adds tests for the read-error, fetch-error, HTTP-error, and size-cap
+branches so patch coverage stays above the 80% gate. Switches
+maxAudioURLBytes from const to var so the cap test can shrink it
+instead of streaming 50 MiB.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Santosh kumar <29346072+santoshkumarradha@users.noreply.github.com>
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (395336b)
+
+
+
+### Fixed
+
+- Fix(railway): remove dead root railway.json hijacking template builds (#523)
+
+* fix(railway): remove dead repo-root railway.json
+
+Every Railway template that ships AgentField (controlplane-template,
+sec-af, swe-af, contract-af, cloudsecurity-af, agentfield-deep-research)
+deploys the control plane via the prebuilt image
+agentfield/control-plane:latest, not by building this repo. No live
+service in the workspace builds the agentfield repo as a control plane,
+and deployments/railway/README.md documents image-based deploys only.
+
+This file was a leftover from before the switchover to prebuilt images.
+Worse, it actively breaks any service that points at a sub-path of the
+repo via rootDirectory: Railway falls back to /railway.json, finds
+"dockerfilePath: deployments/docker/Dockerfile.control-plane", and tries
+to build the control plane Dockerfile against the sub-path's context —
+which has no control-plane/ directory, so the first COPY fails with:
+
+    failed to compute cache key: "/control-plane/web/client": not found
+
+That's exactly what the controlplane-template's "example node" service
+(rootDirectory /examples/ts-node-examples/init-example) hit on every
+fresh template instantiation since PR #151. With this file gone Railway
+falls through to auto-detecting the local Dockerfile in the service's
+rootDirectory, which is what the example was always meant to use.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* chore(examples/init-example): drop now-redundant railway.json
+
+Added in #522 as a defensive override against the dead repo-root
+railway.json. With that root file removed in the previous commit,
+Railway auto-detects the local Dockerfile in the service's rootDirectory
+on its own, so this per-example config is dead weight too.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (5338ac5)
+
+- Fix(examples/init-example): pin Railway build to local Dockerfile (#522)
+
+The Railway "example node" service deploys with rootDirectory set to
+examples/ts-node-examples/init-example/. With no local railway.json,
+Railway falls back to the repo-root /railway.json, which targets
+deployments/docker/Dockerfile.control-plane. That Dockerfile expects
+the repo root as build context (it COPYs control-plane/web/client/...),
+but the build context here is the example dir, so the build fails with:
+
+    failed to compute cache key: "/control-plane/web/client": not found
+
+Add an example-local railway.json that pins the build to the existing
+Dockerfile in this directory, so the example builds as the simple Node
+agent it is and is no longer coupled to the control-plane template
+config.
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (9fb4315)
+
 ## [0.1.72] - 2026-05-03
 
 ## [0.1.72-rc.11] - 2026-05-01
