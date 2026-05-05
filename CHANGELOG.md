@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.74-rc.1] - 2026-05-05
+
+
+### Fixed
+
+- Fix: reject terminal-state regression on execution status writes (#528)
+
+* fix(workflow-events): reject terminal-state regression on /workflow/executions/events
+
+`applyEventToExecution` was unconditionally writing whatever status
+arrived in the fire-and-forget workflow event, with no guard against
+regressing from a terminal state (failed/succeeded/cancelled/timeout)
+back to a non-terminal one (running/queued/pending).
+
+The Python SDK fires these events from many paths — notify_call_start,
+notify_call_complete, notify_call_error, plus retries — and they are
+not strictly ordered. A late "running" event for the same execution_id
+could land after a "failed" event and stomp the row's status back, so
+callers polling /api/v1/executions/:id would never see the terminal
+status. In production this stranded github-buddy's `app.call` for the
+full 7200s wall-clock timeout despite pr-af.review having reported
+"failed" 6 minutes in.
+
+Once an execution has reached a terminal state, treat the row as
+immutable for status / result / error / completion fields. The endpoint
+still returns 200 so the SDK's fire-and-forget call site doesn't trip
+its own retry, but the row no longer regresses.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* fix(executions): reject terminal-state regression on /executions/:id/status
+
+Companion to the /workflow/executions/events guard: the
+/api/v1/executions/:id/status callback handler had a partial transition
+guard (only for the 'waiting' state) but allowed terminal→non-terminal
+writes. A late or replayed status callback could regress a finished
+execution back to 'running' and strand any caller polling the GET
+endpoint for completion.
+
+Reject any non-terminal write against an already-terminal record with
+500 + a descriptive error so the SDK's `_post_execution_status` retry
+loop sees a hard failure (rather than silently re-stomping). Same-
+terminal writes are still accepted to keep the SDK's at-least-once
+delivery idempotent.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (290d3df)
+
 ## [0.1.73] - 2026-05-04
 
 ## [0.1.73-rc.2] - 2026-05-04
