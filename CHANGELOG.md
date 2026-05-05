@@ -6,6 +6,130 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.75-rc.1] - 2026-05-05
+
+
+### Fixed
+
+- Fix: detect mid-flight agent redeploys via instance_id and reap orphaned executions (#531)
+
+* fix(control-plane): reap orphaned executions on agent instance change
+
+When an agent process is killed mid-flight (graceful redeploy, OOM,
+SIGKILL), every cross-agent Agent.call that was inside its
+wait_for_execution_result poll loses its in-memory state with the
+process. Until now the control plane had no way to detect this — the
+parent reasoner sat in `running` forever, even after the child completed
+successfully (production trace: run_1778004368903_9345a88f, where pr-af
+finished but the parent github-buddy reasoner was orphaned by the
+previous PR's deploy and stayed `running` for 70+ minutes with nothing
+listening).
+
+Fix: add a per-process `instance_id` to AgentNode. SDKs send it on every
+registration; the control plane compares the incoming value to the one
+last stored. If both are non-empty and differ, MarkAgentExecutionsOrphaned
+fails every still-running execution owned by that agent_node_id with
+status_reason="agent_restart_orphaned".
+
+Backward compatible: empty instance_id is the legacy-SDK signal; reap
+only fires when both old and new are populated and differ. Reap failures
+are logged-and-continue — the existing 30-minute stale-execution sweep
+remains as the safety net.
+
+Coverage:
+- Storage: 5 tests for MarkAgentExecutionsOrphaned (status filtering,
+  agent isolation, terminal-status protection, empty-id rejection,
+  default-reason fallback)
+- Handler: 6 tests for the registration path (reap on change, no reap
+  on same instance / first registration / legacy SDK, instance_id
+  persists through, reap failure does not block registration)
+
+Includes goose migration 033_agent_instance_id.sql for Postgres
+production. SQLite picks up the column via GORM AutoMigrate.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* feat(sdk/python): emit per-process agent_instance_id for orphan-reap
+
+Pairs with the control-plane fix in the previous commit. The SDK now
+generates a fresh UUID4 hex on every Agent() construction (i.e. every
+Python process) and ships it on:
+
+  * register_agent (the long-form registration path)
+  * register_agent_with_status (the fast-lifecycle path used after
+    redeploys; this is the load-bearing path for the redeploy-orphan
+    detection)
+  * every HeartbeatData (defense-in-depth in case re-registration is
+    suppressed by the connection manager's reconnect short-circuit)
+
+The control plane compares this value across re-registrations and fails
+every in-flight execution owned by the previous instance — the work
+inside that process is unrecoverable (the wait_for_execution_result
+poll died with the OS process), so leaving it `running` strands the
+parent reasoner forever.
+
+Tests pin the load-bearing invariants:
+  - instance_id is generated, non-empty, and a valid UUID4 hex
+  - distinct Agent instances produce distinct values (= a redeploy is
+    detectable)
+  - the same Agent instance returns a stable value (= heartbeats don't
+    look like fake redeploys)
+  - register_agent and register_agent_with_status both put it on the
+    wire; missing kwarg defaults to "" (legacy-SDK back-compat)
+  - HeartbeatData.to_dict carries it; default is "" so positional
+    constructors still work
+  - end-to-end: agent_field_handler threads agent.agent_instance_id
+    through to the client (the most regression-prone link — silent
+    breakage here would disable the whole feature)
+
+DummyAgentFieldClient in tests/helpers.py is updated to accept the new
+kwarg so existing tests that exercise registration keep passing.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* chore(sdk/python): drop unused imports flagged by ruff
+
+asyncio and importlib were leftovers from earlier drafts of the test —
+neither is used by any test in the file. Caught by `ruff check .` in CI;
+the lint step is what failed PR #531's lint-and-test (3.10/3.11/3.12)
+matrix jobs.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* refactor(control-plane): collapse MarkAgentExecutionsOrphaned to bulk UPDATE
+
+The original implementation followed the prepare-statement-then-loop
+pattern from MarkStaleWorkflowExecutions, which left ~30 unreachable SQL
+error paths in the patch — every prepare/exec/scan call had its own
+fmt.Errorf wrap. The patch coverage gate (≥80% on touched lines) failed
+at 70% because those error paths are only reachable via DB fault
+injection.
+
+The bulk UPDATE form is equivalent for our needs and much smaller:
+
+  - workflow_executions update is the source of truth (DAG UI reads it)
+  - executions update is a best-effort legacy mirror (errors swallowed
+    intentionally — the comment makes that explicit)
+  - duration_ms is no longer written; consumers that care about runtime
+    can compute completed_at - started_at since started_at is preserved
+
+Net effect: ~70 lines of error-handling boilerplate removed, the
+function runs as a single SQL statement against the source of truth
+(faster too — was N+1), and the audit signal (status='failed' +
+status_reason='agent_restart_orphaned') is unchanged.
+
+Adds TestRegisterNodeHandler_InstanceChangeWithNothingToReap to cover
+the "instance flipped but no in-flight work" branch — the most common
+production case (idle-agent restart).
+
+All existing storage and handler tests still pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (5da0e27)
+
 ## [0.1.74] - 2026-05-05
 
 ## [0.1.74-rc.2] - 2026-05-05
