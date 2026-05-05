@@ -6,6 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.74-rc.2] - 2026-05-05
+
+
+### Fixed
+
+- Fix(sdk): don't fall back to sync when the reasoner already ran (#530)
+
+`Agent.call`'s async-then-sync-fallback was retrying any non-401/403
+exception from the async path. That includes the case where the call
+reached the reasoner, the reasoner ran, and the reasoner explicitly
+returned a failed status — at which point retrying via the sync path
+just runs the same reasoner again with the same input, burns the same
+budget, and produces the same deterministic failure.
+
+Observed in production: github-buddy → pr-af.review fails with
+`pr_af.orchestrator.BudgetExhaustedError`; the SDK silently retries
+via sync 1 ms later, pr-af runs intake + anatomy from scratch, hits
+budget again, double-billed. Same pattern would apply to any
+deterministic 5xx surface (validation errors, malformed input, exhausted
+quotas) — one logical failure, two charges.
+
+## Fix
+
+Add a new `ExecutionFailedError(AgentFieldClientError)` exception to
+distinguish "the work ran and failed" from "the call never reached the
+reasoner":
+
+- `async_execution_manager.wait_for_result` now raises
+  `ExecutionFailedError` instead of plain `AgentFieldClientError` when
+  the polled execution status is `FAILED`. (Backward-compatible:
+  `ExecutionFailedError` inherits from `AgentFieldClientError`, so
+  callers catching the parent still see it.)
+- `Agent.call`'s exception handler skips the sync fallback when the
+  async exception is `ExecutionFailedError` or `ExecutionTimeoutError`
+  — both mean the work has already used its budget on the agent side.
+  Plain `AgentFieldClientError` (transport / submission / network)
+  continues to fall back via sync, preserving the recovery path that
+  fallback_to_sync was designed for.
+
+The fix is asymmetric on purpose: retry remains on for transient
+transport failures (the legitimate use case), but is now off for
+post-execution failures (the wasteful case). No new config knob —
+this is the right default and an opt-in env override would invite
+future regressions.
+
+## Test plan
+
+`tests/test_agent_call.py` adds three pinning tests:
+- `test_call_skips_sync_fallback_on_execution_failed_error`
+- `test_call_skips_sync_fallback_on_execution_timeout_error`
+- `test_call_still_falls_back_on_transport_errors` (regression guard
+  for the recovery path)
+
+All 65 tests pass across the affected files (`test_agent_call.py`,
+`test_agent_core.py`, `test_async_execution_manager_*`,
+`test_client_*`).
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (cecb776)
+
 ## [0.1.74-rc.1] - 2026-05-05
 
 
