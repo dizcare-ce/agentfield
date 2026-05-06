@@ -3253,6 +3253,7 @@ class Agent(FastAPI):
         max_turns: Optional[int] = None,
         max_budget_usd: Optional[float] = None,
         tools: Optional[List[str]] = None,
+        mcp_servers: Optional[Dict[str, Any]] = None,
         permission_mode: Optional[str] = None,
         system_prompt: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
@@ -3273,6 +3274,10 @@ class Agent(FastAPI):
             max_turns: Maximum agent iterations.
             max_budget_usd: Cost cap in USD.
             tools: Allowed tools list.
+            mcp_servers: Mapping of MCP server name to server config (e.g. from
+                ``claude_agent_sdk.create_sdk_mcp_server``). Only honored by the
+                ``claude-code`` provider; other providers ignore it. Tool names
+                from MCP servers must also appear in ``tools`` to be invokable.
             permission_mode: Permission mode ("plan", "auto", None).
             system_prompt: System prompt for the agent.
             env: Environment variables for the agent.
@@ -3290,6 +3295,7 @@ class Agent(FastAPI):
             max_turns=max_turns,
             max_budget_usd=max_budget_usd,
             tools=tools,
+            mcp_servers=mcp_servers,
             permission_mode=permission_mode,
             system_prompt=system_prompt,
             env=env,

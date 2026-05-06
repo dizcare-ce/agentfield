@@ -132,7 +132,10 @@ async def _ai_schema_repair(
         )
         content = response.choices[0].message.content  # type: ignore[union-attr]
     except Exception as exc:
-        logger.info("AI schema repair: LLM call failed (%s); falling through to harness retry", exc)
+        logger.info(
+            "AI schema repair: LLM call failed (%s); falling through to harness retry",
+            exc,
+        )
         return None
 
     if not content:
@@ -156,6 +159,7 @@ def _resolve_options(
             "max_delay",
             "backoff_factor",
             "tools",
+            "mcp_servers",
             "permission_mode",
             "system_prompt",
             "env",
@@ -209,6 +213,7 @@ class HarnessRunner:
         max_turns: Optional[int] = None,
         max_budget_usd: Optional[float] = None,
         tools: Optional[list[str]] = None,
+        mcp_servers: Optional[Dict[str, Any]] = None,
         permission_mode: Optional[str] = None,
         system_prompt: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
@@ -221,6 +226,7 @@ class HarnessRunner:
             "max_turns": max_turns,
             "max_budget_usd": max_budget_usd,
             "tools": tools,
+            "mcp_servers": mcp_servers,
             "permission_mode": permission_mode,
             "system_prompt": system_prompt,
             "env": env,

@@ -47,6 +47,11 @@ class ClaudeCodeProvider:
             agent_options["max_turns"] = options["max_turns"]
         if options.get("tools") is not None:
             agent_options["allowed_tools"] = options["tools"]
+        if options.get("mcp_servers") is not None:
+            # In-process or external MCP servers exposed to the agent. Maps directly
+            # to ClaudeAgentOptions.mcp_servers — values are McpSdkServerConfig
+            # (from claude_agent_sdk.create_sdk_mcp_server) or other server configs.
+            agent_options["mcp_servers"] = options["mcp_servers"]
         if options.get("system_prompt") is not None:
             agent_options["system_prompt"] = options["system_prompt"]
         if options.get("max_budget_usd") is not None:
