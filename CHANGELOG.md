@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.77-rc.3] - 2026-05-06
+
+
+### Fixed
+
+- Fix(web-ui): independent scroll for Steps list and run detail panel (#527) (#535)
+
+The execution detail page used a single page-level scroll, so on
+fan-out runs with 100+ steps the right-hand Input/Output/Provenance
+panel scrolled out of view as the user moved through the Steps list.
+
+Root cause: <TabsContent> (Radix) renders a non-flex <div>, breaking
+the flex-1/min-h-0 height chain that the inner two-pane wrapper
+relied on. Cards collapsed to content height and overflow bubbled up
+to the page-level <main> scroller. Measured: <main> scrollHeight was
+3128px on a 100-step run with viewport 820px.
+
+Fix (CSS only, no data change):
+
+- overflow-hidden on the page wrapper so the height budget is bounded.
+- flex flex-col on both <TabsContent> panels so the inner two-pane
+  wrapper sizes correctly.
+- Pin the Steps column on lg+ to a fixed width (lg:w-[420px],
+  lg:max-w-[520px], lg:flex-none); long agent names truncate via the
+  existing truncate min-w-0 pattern in RunTrace.
+- shrink-0 on the run-context cards row and tab bar header.
+
+The existing internal scrollers — RunTrace (overflow-auto), StepDetail
+(<ScrollArea>), and WorkflowDAGViewer — now receive a bounded parent
+height and scroll independently. Same behavior in Trace and Graph
+view modes.
+
+Refs #527
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com> (05a76e9)
+
 ## [0.1.77-rc.2] - 2026-05-06
 
 
