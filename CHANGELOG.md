@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.78-rc.1] - 2026-05-06
+
+
+### Testing
+
+- Test(harness): regression-guard run_cli parent env propagation (#544)
+
+Adds a small unit test asserting that ``run_cli``:
+
+1. Propagates parent process env to the subprocess (the contract that lets
+   CLI providers inherit deployment-level vars like OPENCODE_ENABLE_EXA /
+   EXA_API_KEY)
+2. Lets explicit per-call env override parent env on conflict
+3. Layers explicit env on top of parent env additively
+4. Inherits parent env even when the explicit env arg is None
+
+Motivates why this matters: opencode's built-in websearch / webfetch tools
+are gated on env vars (OPENCODE_ENABLE_EXA + EXA_API_KEY). They reach the
+opencode subprocess only because run_cli's ``merged_env = {**os.environ}``
+preserves parent env. If a refactor ever drops that line, every CLI
+provider quietly stops seeing deployment env and tools that depend on
+them silently break across every consumer (SWE-AF, PR-AF, github-buddy).
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (04cacd1)
+
 ## [0.1.77] - 2026-05-06
 
 ## [0.1.77-rc.5] - 2026-05-06
