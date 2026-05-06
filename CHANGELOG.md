@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.77-rc.2] - 2026-05-06
+
+
+### Chores
+
+- Chore(deps): bump the npm_and_yarn group across 2 directories with 1 update (#534)
+
+Bumps the npm_and_yarn group with 1 update in the /examples/benchmarks/100k-scale/mastra-bench directory: [ip-address](https://github.com/beaugunderson/ip-address).
+Bumps the npm_and_yarn group with 1 update in the /sdk/typescript directory: [ip-address](https://github.com/beaugunderson/ip-address).
+
+
+Updates `ip-address` from 10.1.0 to 10.2.0
+- [Commits](https://github.com/beaugunderson/ip-address/commits)
+
+Updates `ip-address` from 10.1.0 to 10.2.0
+- [Commits](https://github.com/beaugunderson/ip-address/commits)
+
+---
+updated-dependencies:
+- dependency-name: ip-address
+  dependency-version: 10.2.0
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: ip-address
+  dependency-version: 10.2.0
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com> (dc8a488)
+
 ## [0.1.77-rc.1] - 2026-05-06
 
 
