@@ -6,6 +6,208 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.77-rc.5] - 2026-05-06
+
+
+### Added
+
+- Feat: end-to-end cooperative cancellation (cancel-tree + dispatcher + 3 SDKs) (#542)
+
+* feat(workflows): add bottom-up cancel-tree endpoint
+
+POST /workflows/:run_id/cancel-tree walks the run DAG and marks every
+non-terminal execution cancelled, bottom-up by computed depth so leaves
+transition before their parents. Reuses the existing per-execution cancel
+state-transition, sibling-table sync, and event-publishing pattern via a
+local helper to keep blast radius small.
+
+Motivation: per-execution cancel cannot reach a run whose root has already
+terminated but whose children are still flagged non-terminal (zombied
+fan-out workers, dispatched siblings outliving their parent). The control
+plane needs a single endpoint the UI can hit that means "stop the whole
+run" without the caller having to enumerate child executions.
+
+Mounted at both /api/v1/ and /api/ui/v1/, mirroring the existing per-execution
+cancel surface. Catalog entry added.
+
+* feat(ui-runs): wire Cancel to cancel-tree, gate on aggregate status
+
+The Cancel button on the run detail page and the per-row kebab in the
+runs list both gated visibility on the ROOT execution's status. That
+left users with no way to cancel a run whose root had already
+terminated while children were still flagged non-terminal — the
+button simply did not render.
+
+Switch the Cancel guard to the aggregate workflow_status (root status
+still drives Pause/Resume, since those are scoped to the root row the
+user controls). Wire all three Cancel surfaces — run-detail header,
+per-row kebab, and bulk toolbar — to the new useCancelWorkflowTree
+mutation, which calls POST /workflows/:run_id/cancel-tree to walk the
+whole DAG.
+
+Tests updated to match the new call shape.
+
+* feat(workers): cancel-signal transport via HTTP callback
+
+Add a CancelDispatcher service that subscribes to the in-process
+ExecutionEventBus and forwards every ExecutionCancelledEvent as an HTTP
+POST to the worker that owns the execution. The cancel-tree endpoint
+(PR #536) and the per-execution cancel handler both publish to this bus
+already, so the dispatcher gives every cancellation source a single
+mechanism for reaching remote SDK workers.
+
+Transport: POST {agent.BaseURL}/_internal/executions/:exec_id/cancel
+with a JSON body of {execution_id, workflow_id, reason, emitted_at}
+and an X-AgentField-Source header. Reuses the existing dispatch HTTP
+channel — no second long-lived connection per worker, no auth changes.
+
+Best-effort delivery: 5s timeout, no retries, 404 from older SDKs is
+treated as a no-op. The control plane's storage record of the cancelled
+status is the source of truth; the callback only exists so the worker's
+SDK can short-circuit in-flight reasoner code (raise CancelledError /
+abort signals / cancel contexts), which the per-language SDK PRs will
+implement on top of this transport.
+
+Wired into server.Start/Stop alongside the other background services.
+
+* feat(workers): forward Authorization: Bearer to worker cancel callback
+
+Workers running with RequireOriginAuth=true reject requests without a
+matching Authorization header. The reasoner-dispatch path already sends
+Authorization: Bearer <internal_token> from
+config.Features.DID.Authorization.InternalToken; thread the same value
+into CancelDispatcher so the cancel callback is accepted on auth-on
+workers.
+
+Empty-token deployments fall back to no Authorization header (current
+behaviour preserved).
+
+* feat(sdk-go): cooperative cancel via /_internal/executions/:id/cancel
+
+Register a context.CancelFunc per in-flight reasoner invocation, keyed
+on execution_id. The control plane's cancel dispatcher (PR #538) POSTs
+to /_internal/executions/:id/cancel; the SDK looks up the matching
+cancel func and fires it, short-circuiting reasoner code that honors
+ctx.Done(). Idiomatic Go code already does this via net/http,
+database/sql, and the official Anthropic SDK — so most reasoners get
+cooperative cancellation for free.
+
+Backwards compatible: reasoners that don't honor ctx.Done() finish
+naturally, and their output is discarded by the control plane (existing
+behaviour). The endpoint is exempted from local DID verification but
+still gated by the existing originAuthMiddleware Bearer token check.
+
+Three call sites wire the registration:
+  - sync /reasoners/ handler
+  - async executeReasonerAsync (dispatched goroutine)
+  - /execute/ serverless-style entry point
+
+Tests cover the cancel registry (register / release / concurrent
+release+cancel), the HTTP handler (active / unknown / malformed paths,
+method gate), and an end-to-end test where a long-running reasoner
+exits cleanly via the HTTP cancel endpoint.
+
+* feat(sdk-python): cooperative cancel via /_internal/executions/:id/cancel
+
+Register an asyncio.Task per in-flight reasoner invocation, keyed on
+execution_id. The control plane's cancel dispatcher (PR #538) POSTs
+/_internal/executions/:id/cancel; the SDK looks up the matching task
+and calls task.cancel(), which raises asyncio.CancelledError into the
+user's coroutine. Async I/O libraries (httpx, the official anthropic
+and openai SDKs, asyncpg) honor task cancellation natively, so most
+reasoners get cooperative cancellation without changes.
+
+Two call sites wire the registration:
+  - sync path of the FastAPI reasoner endpoint: wrap run_reasoner() in
+    a Task, register, await, catch CancelledError → 499 response.
+  - async path (_execute_async_with_callback): catch CancelledError,
+    emit a "cancelled" status payload to the control-plane callback,
+    deregister in finally.
+
+The cancel route bypasses path-based DID verification (control-plane→
+worker notification, not a DID-signed user call). Bearer-token origin
+auth still applies through the usual middleware path.
+
+Backwards compatible: reasoners that swallow CancelledError or use
+blocking sync code finish naturally, and their output is discarded by
+the control plane (existing behaviour). Authors who need to poll
+inside CPU loops can use is_execution_cancelled(agent, execution_id).
+
+Tests cover the registry (register/replace/deregister/concurrent),
+direct cancel via cancel_execution(), the HTTP route handler shape,
+and the info-log path on actual cancellation.
+
+* feat(sdk-typescript): cooperative cancel via /_internal/executions/:id/cancel
+
+Register an AbortController per in-flight reasoner / skill invocation,
+keyed on execution_id. The control plane's cancel dispatcher (PR #538)
+POSTs /_internal/executions/:id/cancel; the SDK looks up the matching
+controller and calls .abort(), which fires signal.aborted=true and
+rejects any pending fetch / Anthropic SDK / OpenAI SDK call bound to
+ctx.signal. Pure-JS CPU loops can poll signal.aborted between chunks.
+
+Three pieces:
+  - new src/agent/cancel.ts: CancelRegistry + installCancelRoute
+  - Agent ctor: install the route on this.app, hold a registry instance
+  - runReasoner / runSkill: register a controller around the handler
+    invocation, pass signal: controller.signal into the context, release
+    in finally
+  - ReasonerContext / SkillContext: new readonly signal: AbortSignal
+    field. Optional in the constructor, defaults to a never-aborted
+    signal so existing call sites and getCurrent*Context helpers
+    continue to work unchanged.
+
+Backwards compatible: handlers that ignore ctx.signal finish naturally
+and their output is discarded by the control plane (existing per-
+execution cancel behaviour). Workers running without the dispatcher in
+front of them simply never see the cancel callback.
+
+Tests: 14 pass — registry semantics (register/cancel/release/replace/
+double-cancel/idempotent-release/empty-id), HTTP route shape (active /
+unknown / reason forwarding / source-header logging), and an Agent-
+level integration test where ctx.signal aborts mid-flight when the
+cancel route fires.
+
+* test(control-plane): cover cancel-tree handler + cancel-dispatcher edge cases
+
+Lifts patch coverage on the new files above the 80% gate. New cases:
+- cancel_tree handler: missing/fallback workflowId param, malformed JSON
+  body, empty body (io.EOF bind), QueryExecutionRecords failure,
+  errAlreadyTerminal race, generic update error, nil workflow_executions
+  row.
+- cancel_dispatcher: default Bus/path/subscriber, idempotent Start,
+  ctx.Done() loop exit, blank execution_id, blank agent_node_id, empty
+  BaseURL (serverless agents), worker 404, worker 5xx, transport error
+  recovery, trailing-slash BaseURL, non-string reason fallback.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(web-ui): cover cancelWorkflowTree service and useCancelWorkflowTree hook
+
+The patch-coverage gate flagged both files at 0% on the touched lines.
+Adds:
+- workflowsApi: posts URL/method/body/reason; defaults reason to ""
+  when omitted.
+- useExecutionMutations: covers the new useCancelWorkflowTree mutation
+  (success invalidates ["runs"]/["run-dag"]; error surfaces without
+  invalidating) plus the existing cancel/pause/resume hooks.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(web-ui): cover cancel-tree success and zero-cancel branches in pages
+
+RunDetailPage: separate cases for cancelled_count > 1 (plural-step copy),
+cancelled_count == 1 (singular-step copy), cancelled_count == 0 (nothing
+to cancel), and aggregate-terminal status (Cancel button hidden).
+RunsPage: row-level zero-cancel notification and Cancel-failed
+notification when the row mutation rejects.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (bba55d8)
+
 ## [0.1.77-rc.4] - 2026-05-06
 
 
