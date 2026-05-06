@@ -24,6 +24,19 @@ from agentfield.tools.web_search import (
 pytestmark = pytest.mark.unit
 
 
+# The @tool decorator and create_sdk_mcp_server must be exercised against
+# the *real* claude_agent_sdk to verify the resulting SdkMcpTool /
+# McpSdkServerConfig shapes. Tests that call those functions are gated on
+# the SDK being installed (it's an optional dependency under the
+# harness-claude / harness extras). Pure-Python tests above this fixture
+# (markdown formatting) need no gating.
+def _require_claude_sdk():
+    pytest.importorskip(
+        "claude_agent_sdk",
+        reason="claude_agent_sdk not installed (optional dep — install via .[harness])",
+    )
+
+
 # ---------- markdown formatting ----------
 
 
@@ -120,6 +133,7 @@ def _clear_all_keys(monkeypatch):
 
 
 def _get_handler():
+    _require_claude_sdk()
     sdk_tool = _build_web_search_tool()
     # SdkMcpTool exposes the original async fn via .handler
     return sdk_tool.handler
@@ -198,6 +212,7 @@ async def test_handler_catches_search_exception(monkeypatch):
 
 
 def test_get_web_search_server_returns_config_and_namespaced_tool_names(monkeypatch):
+    _require_claude_sdk()
     _clear_all_keys(monkeypatch)
     monkeypatch.setenv("JINA_API_KEY", "k")
 

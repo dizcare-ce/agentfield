@@ -129,6 +129,10 @@ async def test_harness_omits_mcp_servers_when_not_provided(fake_sdk):
 async def test_harness_with_real_web_search_server_config(fake_sdk, monkeypatch):
     """End-to-end shape check: build the real web_search MCP server config and
     verify it makes it through the harness layer untouched."""
+    pytest.importorskip(
+        "claude_agent_sdk",
+        reason="claude_agent_sdk not installed (optional dep)",
+    )
     monkeypatch.setenv("JINA_API_KEY", "fake-key")  # avoid no-provider gate
     from agentfield.tools.web_search import get_web_search_server
 
