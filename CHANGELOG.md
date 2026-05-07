@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 <!-- changelog:entries -->
 
+## [0.1.78-rc.5] - 2026-05-07
+
+
+### Other
+
+- Feat/UI llm health widget 322 (#549)
+
+* feat(ui): add LLM health dashboard widget
+
+* fix(handlers): deflake TestReplayEvent_StoresReplayOfPointer
+
+The test pinned the *boot* status of a freshly-minted replay row
+(=replayed), but ReplayEvent kicks off the dispatcher in a goroutine
+that immediately marks the row "failed" because the test fixture has
+no target agent node registered. Under CI load that goroutine wins
+the race against the test's GetInboundEvent and the assertion flips
+to "failed", breaking the control-plane coverage job and (cascading)
+the coverage-summary check.
+
+Pass nil for the dispatcher in this test — many sibling tests in
+triggers_api_contract_test.go already do this — and gate the three
+goroutine launch sites in the trigger handler on a nil-check so the
+contract is honored consistently.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+* test(web-ui): await events fetch in triggers-pages flake
+
+The "filters active triggers..." test queries for the EventRow toggle
+button with getByRole synchronously, but the events list is fetched
+async by TriggerSheet on open (useEffect → refreshEvents). Under CI
+load the fetch hasn't resolved when the assertion runs, so no EventRow
+has mounted and the query throws. Locally the fetch is fast enough
+that the race never surfaces.
+
+Switch to findByRole so the query waits for the events list to render.
+The earlier getAllByText still passes because it matches the trigger's
+event_types summary which renders synchronously from the trigger row.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---------
+
+Co-authored-by: Abir Abbas <abirabbas1998@gmail.com>
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com> (27614d8)
+
 ## [0.1.78-rc.4] - 2026-05-07
 
 
