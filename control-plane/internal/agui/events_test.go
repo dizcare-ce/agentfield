@@ -7,51 +7,52 @@ import (
 	"testing"
 )
 
-// TestWriteSSE_FrameShape asserts the SSE wire format the AG-UI spec requires:
-// each event must be `event: <Type>\ndata: <json>\n\n`, and the JSON body must
-// carry a `type` discriminator matching the event line.
+// TestWriteSSE_FrameShape pins the canonical AG-UI wire format:
+//   - frame is `data: <json>\n\n` only (no `event:` line — see encoder.ts /
+//     encoder.py in ag-ui-protocol/ag-ui)
+//   - `type` field carries the UPPER_SNAKE_CASE event name
+//   - timestamp, when present, is a number (Unix ms)
 func TestWriteSSE_FrameShape(t *testing.T) {
 	cases := []struct {
-		name    string
-		ev      Event
-		wantTyp string
-		// Field paths that must appear in the JSON payload.
+		name       string
+		ev         Event
+		wantTyp    string
 		wantFields []string
 	}{
 		{
 			name:       "RunStarted",
-			ev:         RunStarted{ThreadID: "thread-1", RunID: "run-1", Input: map[string]any{"q": "hi"}},
-			wantTyp:    "RunStarted",
-			wantFields: []string{`"threadId":"thread-1"`, `"runId":"run-1"`},
+			ev:         RunStarted{ThreadID: "thread-1", RunID: "run-1", Timestamp: 1700000000000},
+			wantTyp:    "RUN_STARTED",
+			wantFields: []string{`"threadId":"thread-1"`, `"runId":"run-1"`, `"timestamp":1700000000000`},
 		},
 		{
-			name:       "RunFinished_success",
-			ev:         RunFinished{Outcome: &Outcome{Type: "success"}, Result: map[string]any{"answer": 42}},
-			wantTyp:    "RunFinished",
-			wantFields: []string{`"outcome":{"type":"success"}`, `"answer":42`},
+			name:       "RunFinished_success_carriesIDs",
+			ev:         RunFinished{ThreadID: "thread-1", RunID: "run-1", Outcome: &Outcome{Type: "success"}, Result: map[string]any{"answer": 42}},
+			wantTyp:    "RUN_FINISHED",
+			wantFields: []string{`"threadId":"thread-1"`, `"runId":"run-1"`, `"outcome":{"type":"success"}`, `"answer":42`},
 		},
 		{
 			name:       "RunError",
 			ev:         RunError{Message: "boom", Code: "ERR_X"},
-			wantTyp:    "RunError",
+			wantTyp:    "RUN_ERROR",
 			wantFields: []string{`"message":"boom"`, `"code":"ERR_X"`},
 		},
 		{
 			name:       "TextMessageStart",
 			ev:         TextMessageStart{MessageID: "msg-1", Role: "assistant"},
-			wantTyp:    "TextMessageStart",
+			wantTyp:    "TEXT_MESSAGE_START",
 			wantFields: []string{`"messageId":"msg-1"`, `"role":"assistant"`},
 		},
 		{
 			name:       "TextMessageContent",
 			ev:         TextMessageContent{MessageID: "msg-1", Delta: "hello"},
-			wantTyp:    "TextMessageContent",
+			wantTyp:    "TEXT_MESSAGE_CONTENT",
 			wantFields: []string{`"messageId":"msg-1"`, `"delta":"hello"`},
 		},
 		{
 			name:       "TextMessageEnd",
 			ev:         TextMessageEnd{MessageID: "msg-1"},
-			wantTyp:    "TextMessageEnd",
+			wantTyp:    "TEXT_MESSAGE_END",
 			wantFields: []string{`"messageId":"msg-1"`},
 		},
 	}
@@ -64,17 +65,18 @@ func TestWriteSSE_FrameShape(t *testing.T) {
 			}
 			frame := buf.String()
 
-			// Wire format: must begin with the event line, then data line, then blank line.
-			wantPrefix := "event: " + tc.wantTyp + "\ndata: "
-			if !strings.HasPrefix(frame, wantPrefix) {
-				t.Fatalf("frame missing %q prefix:\n%s", wantPrefix, frame)
+			// Canonical wire shape: `data: <json>\n\n`. No `event:` line.
+			if !strings.HasPrefix(frame, "data: ") {
+				t.Fatalf("frame must start with `data: `:\n%s", frame)
 			}
 			if !strings.HasSuffix(frame, "\n\n") {
 				t.Fatalf("frame must end with blank-line terminator:\n%s", frame)
 			}
+			if strings.Contains(frame, "\nevent:") || strings.HasPrefix(frame, "event:") {
+				t.Fatalf("frame must not include an `event:` line (canonical encoder omits it):\n%s", frame)
+			}
 
-			// Extract the JSON body and assert it parses + carries a matching type.
-			body := strings.TrimSuffix(strings.TrimPrefix(frame, wantPrefix), "\n\n")
+			body := strings.TrimSuffix(strings.TrimPrefix(frame, "data: "), "\n\n")
 			var decoded map[string]any
 			if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 				t.Fatalf("data line is not JSON: %v\nbody: %s", err, body)
@@ -88,5 +90,22 @@ func TestWriteSSE_FrameShape(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWriteSSE_OmitsZeroOptionalFields confirms our `omitempty` tags drop
+// timestamp / role / outcome / code when they're at zero values, matching
+// the Python encoder's `exclude_none=True` semantics.
+func TestWriteSSE_OmitsZeroOptionalFields(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteSSE(&buf, TextMessageStart{MessageID: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	if strings.Contains(body, `"role":""`) {
+		t.Errorf("empty role should be omitted: %s", body)
+	}
+	if strings.Contains(body, `"timestamp":0`) {
+		t.Errorf("zero timestamp should be omitted: %s", body)
 	}
 }

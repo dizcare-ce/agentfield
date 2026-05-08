@@ -3,10 +3,20 @@
 // AG-UI-compatible Server-Sent Events stream that frontends like CopilotKit
 // can consume.
 //
+// Wire format and field shapes are kept faithful to the reference TypeScript
+// and Python SDKs at https://github.com/ag-ui-protocol/ag-ui:
+//
+//   - SSE frames are `data: <json>\n\n` only — no `event:` line. The TS
+//     EventEncoder.encodeSSE and the Python EventEncoder._encode_sse both
+//     emit exactly this; the discriminator lives in the JSON `type` field.
+//   - Event type values are UPPER_SNAKE_CASE (RUN_STARTED, TEXT_MESSAGE_CONTENT, …),
+//     matching the EventType enum the reference clients validate against.
+//   - `timestamp` is an optional Unix-millisecond integer.
+//   - Optional fields are omitted when empty (mirrors `exclude_none=True`).
+//
 // This is the POC subset — lifecycle + a single TextMessage carrying the
 // reasoner's final result. Token-level streaming, tool-call frames, and
-// state deltas are not yet implemented; see the ToolCall/State event stubs
-// below for the next iteration.
+// state deltas land in subsequent iterations.
 package agui
 
 import (
@@ -17,27 +27,29 @@ import (
 )
 
 // Event is implemented by every AG-UI event payload. The Type method returns
-// the canonical AG-UI event name used in both the SSE `event:` line and the
-// JSON `type` field.
+// the canonical AG-UI event name used in the JSON `type` field (e.g.
+// "RUN_STARTED"). It is exposed so the SSE writer can name the frame in
+// errors and logs without re-marshaling.
 type Event interface {
 	Type() string
 }
 
 // RunStarted signals the beginning of an agent run.
-// AG-UI: https://docs.ag-ui.com/concepts/events#run-started
+//
+// The `input` field is intentionally omitted from this struct: the reference
+// schema types it as RunAgentInput (threadId/runId/state/messages/tools/
+// context/forwardedProps), not a freeform map. Until we plumb that structured
+// shape through, we surface `threadId` and `runId` only — strict clients
+// validating against RunAgentInputSchema would reject a freeform map here.
 type RunStarted struct {
-	ThreadID    string         `json:"threadId"`
-	RunID       string         `json:"runId"`
-	ParentRunID string         `json:"parentRunId,omitempty"`
-	Input       map[string]any `json:"input,omitempty"`
-	Timestamp   string         `json:"timestamp,omitempty"`
+	ThreadID    string `json:"threadId"`
+	RunID       string `json:"runId"`
+	ParentRunID string `json:"parentRunId,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
 }
 
-func (RunStarted) Type() string { return "RunStarted" }
+func (RunStarted) Type() string { return "RUN_STARTED" }
 
-// MarshalJSON injects the discriminator `type` field. We do this in
-// MarshalJSON rather than as a struct field so callers can construct events
-// without manually setting the type each time.
 func (e RunStarted) MarshalJSON() ([]byte, error) {
 	type alias RunStarted
 	return json.Marshal(struct {
@@ -47,13 +59,16 @@ func (e RunStarted) MarshalJSON() ([]byte, error) {
 }
 
 // RunFinished signals a successful (or interrupted) run completion.
+// Per the reference schema both threadId and runId are required.
 type RunFinished struct {
+	ThreadID  string   `json:"threadId"`
+	RunID     string   `json:"runId"`
 	Outcome   *Outcome `json:"outcome,omitempty"`
 	Result    any      `json:"result,omitempty"`
-	Timestamp string   `json:"timestamp,omitempty"`
+	Timestamp int64    `json:"timestamp,omitempty"`
 }
 
-func (RunFinished) Type() string { return "RunFinished" }
+func (RunFinished) Type() string { return "RUN_FINISHED" }
 
 func (e RunFinished) MarshalJSON() ([]byte, error) {
 	type alias RunFinished
@@ -63,14 +78,14 @@ func (e RunFinished) MarshalJSON() ([]byte, error) {
 	}{Type: e.Type(), alias: alias(e)})
 }
 
-// Outcome is a discriminated union ({type: "success"} | {type: "interrupt", interrupts: [...]}).
+// Outcome is a discriminated union: {type: "success"} | {type: "interrupt", interrupts: [...]}.
 type Outcome struct {
 	Type       string      `json:"type"`
 	Interrupts []Interrupt `json:"interrupts,omitempty"`
 }
 
 // Interrupt represents a pause point requiring external resolution
-// (e.g. human approval). Not used by the POC but reserved for HITL flows.
+// (e.g. human approval). Reserved for HITL flows; not used by the POC.
 type Interrupt struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason,omitempty"`
@@ -80,10 +95,10 @@ type Interrupt struct {
 type RunError struct {
 	Message   string `json:"message"`
 	Code      string `json:"code,omitempty"`
-	Timestamp string `json:"timestamp,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
-func (RunError) Type() string { return "RunError" }
+func (RunError) Type() string { return "RUN_ERROR" }
 
 func (e RunError) MarshalJSON() ([]byte, error) {
 	type alias RunError
@@ -97,11 +112,11 @@ func (e RunError) MarshalJSON() ([]byte, error) {
 // TextMessageContent events with the same messageId carry the body.
 type TextMessageStart struct {
 	MessageID string `json:"messageId"`
-	Role      string `json:"role,omitempty"` // typically "assistant"
-	Timestamp string `json:"timestamp,omitempty"`
+	Role      string `json:"role,omitempty"` // defaults to "assistant" client-side when omitted
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
-func (TextMessageStart) Type() string { return "TextMessageStart" }
+func (TextMessageStart) Type() string { return "TEXT_MESSAGE_START" }
 
 func (e TextMessageStart) MarshalJSON() ([]byte, error) {
 	type alias TextMessageStart
@@ -117,10 +132,10 @@ func (e TextMessageStart) MarshalJSON() ([]byte, error) {
 type TextMessageContent struct {
 	MessageID string `json:"messageId"`
 	Delta     string `json:"delta"`
-	Timestamp string `json:"timestamp,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
-func (TextMessageContent) Type() string { return "TextMessageContent" }
+func (TextMessageContent) Type() string { return "TEXT_MESSAGE_CONTENT" }
 
 func (e TextMessageContent) MarshalJSON() ([]byte, error) {
 	type alias TextMessageContent
@@ -133,10 +148,10 @@ func (e TextMessageContent) MarshalJSON() ([]byte, error) {
 // TextMessageEnd closes a text message.
 type TextMessageEnd struct {
 	MessageID string `json:"messageId"`
-	Timestamp string `json:"timestamp,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
-func (TextMessageEnd) Type() string { return "TextMessageEnd" }
+func (TextMessageEnd) Type() string { return "TEXT_MESSAGE_END" }
 
 func (e TextMessageEnd) MarshalJSON() ([]byte, error) {
 	type alias TextMessageEnd
@@ -146,22 +161,25 @@ func (e TextMessageEnd) MarshalJSON() ([]byte, error) {
 	}{Type: e.Type(), alias: alias(e)})
 }
 
-// Now returns an RFC3339 timestamp. Wrapped so tests can replace it.
-var Now = func() string { return time.Now().UTC().Format(time.RFC3339) }
+// NowMillis returns the current Unix time in milliseconds. Wrapped so tests
+// can replace it. Milliseconds match the JS `Date.now()` convention that
+// AG-UI clients are most likely to interpret correctly.
+var NowMillis = func() int64 { return time.Now().UnixMilli() }
 
-// WriteSSE writes one AG-UI event to w in SSE wire format:
+// WriteSSE writes one AG-UI event to w in the canonical wire format used by
+// the reference TS and Python encoders:
 //
-//	event: <Type>
-//	data: {<json>}
+//	data: <json>
 //
-// (trailing blank line). Returns an error if the JSON encode or the write
-// fails. Caller is responsible for flushing.
+// (followed by a blank line). The discriminator is in the JSON `type` field,
+// not in an SSE `event:` line — clients dispatch on the JSON `type`. Caller
+// is responsible for flushing.
 func WriteSSE(w io.Writer, ev Event) error {
 	payload, err := json.Marshal(ev)
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", ev.Type(), err)
 	}
-	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type(), payload); err != nil {
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 		return fmt.Errorf("write %s: %w", ev.Type(), err)
 	}
 	return nil

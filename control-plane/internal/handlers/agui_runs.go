@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/internal/agui"
 	"github.com/Agent-Field/agentfield/control-plane/internal/storage"
@@ -16,6 +17,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// AGUIHeartbeatInterval is how often we emit an SSE comment (`: keep-alive`)
+// while waiting for a slow reasoner. AG-UI clients silently drop comment
+// lines per the SSE spec, but proxies (nginx, ALBs) see the bytes and don't
+// idle out the connection. 15s leaves comfortable headroom under the 60s
+// nginx default. Exposed for tests.
+var AGUIHeartbeatInterval = 15 * time.Second
 
 // AGUIRunRequest is the POST body the AG-UI run endpoint accepts. It mirrors
 // AG-UI's input shape (threadId/runId optional, freeform input map) plus a
@@ -154,8 +162,7 @@ func aguiRunHandler(storageProvider storage.StorageProvider, invoker agentInvoke
 		if !write(agui.RunStarted{
 			ThreadID:  threadID,
 			RunID:     runID,
-			Input:     req.Input,
-			Timestamp: agui.Now(),
+			Timestamp: agui.NowMillis(),
 		}) {
 			return
 		}
@@ -165,17 +172,53 @@ func aguiRunHandler(storageProvider storage.StorageProvider, invoker agentInvoke
 			write(agui.RunError{
 				Message:   fmt.Sprintf("failed to marshal input: %v", err),
 				Code:      "ERR_INPUT_MARSHAL",
-				Timestamp: agui.Now(),
+				Timestamp: agui.NowMillis(),
 			})
 			return
 		}
 
-		body, invokeErr := invoker.Invoke(ctx, agent, reasonerName, inputJSON)
+		// Run the agent invocation in a goroutine so the main loop can emit
+		// SSE keep-alive comments while we wait. AG-UI has no heartbeat
+		// event, but `:` comment frames are valid SSE that clients ignore
+		// and proxies see as activity.
+		type invokeResult struct {
+			body []byte
+			err  error
+		}
+		resultCh := make(chan invokeResult, 1)
+		go func() {
+			b, e := invoker.Invoke(ctx, agent, reasonerName, inputJSON)
+			resultCh <- invokeResult{body: b, err: e}
+		}()
+
+		ticker := time.NewTicker(AGUIHeartbeatInterval)
+		defer ticker.Stop()
+
+		var (
+			body      []byte
+			invokeErr error
+		)
+	waitLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := fmt.Fprint(c.Writer, ": keep-alive\n\n"); err != nil {
+					return
+				}
+				flush()
+			case r := <-resultCh:
+				body, invokeErr = r.body, r.err
+				break waitLoop
+			}
+		}
+
 		if invokeErr != nil {
 			write(agui.RunError{
 				Message:   invokeErr.Error(),
 				Code:      "ERR_AGENT_CALL",
-				Timestamp: agui.Now(),
+				Timestamp: agui.NowMillis(),
 			})
 			return
 		}
@@ -204,27 +247,29 @@ func aguiRunHandler(storageProvider storage.StorageProvider, invoker agentInvoke
 		if !write(agui.TextMessageStart{
 			MessageID: messageID,
 			Role:      "assistant",
-			Timestamp: agui.Now(),
+			Timestamp: agui.NowMillis(),
 		}) {
 			return
 		}
 		if !write(agui.TextMessageContent{
 			MessageID: messageID,
 			Delta:     resultText,
-			Timestamp: agui.Now(),
+			Timestamp: agui.NowMillis(),
 		}) {
 			return
 		}
 		if !write(agui.TextMessageEnd{
 			MessageID: messageID,
-			Timestamp: agui.Now(),
+			Timestamp: agui.NowMillis(),
 		}) {
 			return
 		}
 		write(agui.RunFinished{
+			ThreadID:  threadID,
+			RunID:     runID,
 			Outcome:   &agui.Outcome{Type: "success"},
 			Result:    parsed,
-			Timestamp: agui.Now(),
+			Timestamp: agui.NowMillis(),
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Agent-Field/agentfield/control-plane/pkg/types"
 
@@ -15,34 +16,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// aguiFrame is a parsed SSE frame: the `event:` discriminator and the JSON
-// payload from the `data:` line, decoded into a map.
+// aguiFrame is a parsed SSE frame: just the JSON object decoded from the
+// `data:` line. The canonical AG-UI encoder emits frames as `data: <json>\n\n`
+// only — no `event:` line — so the JSON `type` field is the sole discriminator.
 type aguiFrame struct {
-	Event string
-	Data  map[string]any
+	Data map[string]any
+}
+
+func (f aguiFrame) Type() string {
+	t, _ := f.Data["type"].(string)
+	return t
 }
 
 // parseAGUIStream splits an SSE response body into one frame per AG-UI event.
-// It is intentionally strict — every frame must have both `event:` and
-// `data:` lines, terminated by a blank line — because that strictness is
-// what the AG-UI protocol guarantees and what we want to assert against.
+// Strict on shape: every frame must be `data: <json>\n\n`. We assert against
+// the strictness because that's exactly what the AG-UI spec guarantees and
+// what the reference encoders emit (see ag-ui-protocol/ag-ui encoder.ts /
+// encoder.py).
 func parseAGUIStream(t *testing.T, body string) []aguiFrame {
 	t.Helper()
 	var frames []aguiFrame
 	scanner := bufio.NewScanner(strings.NewReader(body))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var curEvent, curData string
+	var curData string
 	flush := func() {
-		if curEvent == "" && curData == "" {
+		if curData == "" {
 			return
 		}
-		require.NotEmpty(t, curEvent, "frame missing event line: data=%q", curData)
-		require.NotEmpty(t, curData, "frame missing data line: event=%q", curEvent)
 		var decoded map[string]any
 		require.NoError(t, json.Unmarshal([]byte(curData), &decoded), "data line is not JSON: %s", curData)
-		frames = append(frames, aguiFrame{Event: curEvent, Data: decoded})
-		curEvent, curData = "", ""
+		frames = append(frames, aguiFrame{Data: decoded})
+		curData = ""
 	}
 
 	for scanner.Scan() {
@@ -50,8 +55,8 @@ func parseAGUIStream(t *testing.T, body string) []aguiFrame {
 		switch {
 		case line == "":
 			flush()
-		case strings.HasPrefix(line, "event: "):
-			curEvent = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "event:"):
+			t.Fatalf("AG-UI frames must not include an `event:` line; got: %q", line)
 		case strings.HasPrefix(line, "data: "):
 			curData = strings.TrimPrefix(line, "data: ")
 		}
@@ -69,11 +74,11 @@ func mountAGUIRouter(t *testing.T, store *reasonerTestStorage) *gin.Engine {
 }
 
 // TestAGUIRunHandler_HappyPath_EmitsCanonicalEventSequence is the core POC
-// assertion: a successful run must produce exactly RunStarted →
-// TextMessageStart → TextMessageContent → TextMessageEnd → RunFinished, in
-// that order, with the threadId/runId from the request propagated to the
-// frames that carry them, and the reasoner's `result` value surfaced as the
-// TextMessageContent delta.
+// assertion: a successful run must produce exactly RUN_STARTED →
+// TEXT_MESSAGE_START → TEXT_MESSAGE_CONTENT → TEXT_MESSAGE_END → RUN_FINISHED,
+// in that order, with the threadId/runId from the request propagated through
+// to RUN_FINISHED, and the reasoner's `result` value surfaced as the
+// TEXT_MESSAGE_CONTENT delta.
 func TestAGUIRunHandler_HappyPath_EmitsCanonicalEventSequence(t *testing.T) {
 	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/reasoners/echo", r.URL.Path)
@@ -106,23 +111,23 @@ func TestAGUIRunHandler_HappyPath_EmitsCanonicalEventSequence(t *testing.T) {
 	frames := parseAGUIStream(t, w.Body.String())
 	require.Len(t, frames, 5, "want 5 frames, got: %s", w.Body.String())
 
-	// Sequence + discriminator: event-line type and JSON `type` field must agree.
 	wantSequence := []string{
-		"RunStarted",
-		"TextMessageStart",
-		"TextMessageContent",
-		"TextMessageEnd",
-		"RunFinished",
+		"RUN_STARTED",
+		"TEXT_MESSAGE_START",
+		"TEXT_MESSAGE_CONTENT",
+		"TEXT_MESSAGE_END",
+		"RUN_FINISHED",
 	}
 	for i, want := range wantSequence {
-		require.Equal(t, want, frames[i].Event, "frame %d event line", i)
-		require.Equal(t, want, frames[i].Data["type"], "frame %d JSON type", i)
+		require.Equal(t, want, frames[i].Type(), "frame %d: %v", i, frames[i].Data)
 	}
 
-	// RunStarted carries threadId/runId/input.
+	// RUN_STARTED carries threadId/runId; we deliberately do NOT emit `input`
+	// because the spec types it as RunAgentInput, not a freeform map.
 	require.Equal(t, "thread-test", frames[0].Data["threadId"])
 	require.Equal(t, "run-test", frames[0].Data["runId"])
-	require.Equal(t, map[string]any{"prompt": "hi"}, frames[0].Data["input"])
+	require.NotContains(t, frames[0].Data, "input",
+		"input must be omitted until we emit it as the spec's RunAgentInput shape")
 
 	// TextMessage* share a stable messageId.
 	msgID, _ := frames[1].Data["messageId"].(string)
@@ -132,10 +137,19 @@ func TestAGUIRunHandler_HappyPath_EmitsCanonicalEventSequence(t *testing.T) {
 	require.Equal(t, "hello world", frames[2].Data["delta"])
 	require.Equal(t, msgID, frames[3].Data["messageId"])
 
-	// RunFinished reports success and surfaces the parsed agent JSON.
+	// RUN_FINISHED carries threadId/runId (required by spec), success outcome,
+	// and the parsed agent JSON.
+	require.Equal(t, "thread-test", frames[4].Data["threadId"])
+	require.Equal(t, "run-test", frames[4].Data["runId"])
 	outcome, _ := frames[4].Data["outcome"].(map[string]any)
 	require.Equal(t, "success", outcome["type"])
 	require.Equal(t, map[string]any{"result": "hello world"}, frames[4].Data["result"])
+
+	// Spot-check: timestamp on RUN_STARTED is a number (Unix ms), not a string.
+	if ts, ok := frames[0].Data["timestamp"]; ok {
+		_, isFloat := ts.(float64) // JSON numbers decode as float64 in map[string]any
+		require.True(t, isFloat, "timestamp must be a number, got %T", ts)
+	}
 }
 
 // TestAGUIRunHandler_GeneratesIDsWhenAbsent confirms that omitted threadId
@@ -166,14 +180,22 @@ func TestAGUIRunHandler_GeneratesIDsWhenAbsent(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	frames := parseAGUIStream(t, w.Body.String())
 	require.NotEmpty(t, frames)
-	require.Equal(t, "RunStarted", frames[0].Event)
-	require.NotEmpty(t, frames[0].Data["threadId"], "threadId should be auto-generated")
-	require.NotEmpty(t, frames[0].Data["runId"], "runId should be auto-generated")
+	require.Equal(t, "RUN_STARTED", frames[0].Type())
+	threadID, _ := frames[0].Data["threadId"].(string)
+	runID, _ := frames[0].Data["runId"].(string)
+	require.NotEmpty(t, threadID, "threadId should be auto-generated")
+	require.NotEmpty(t, runID, "runId should be auto-generated")
+
+	// Auto-generated IDs propagate through to RUN_FINISHED.
+	last := frames[len(frames)-1]
+	require.Equal(t, "RUN_FINISHED", last.Type())
+	require.Equal(t, threadID, last.Data["threadId"])
+	require.Equal(t, runID, last.Data["runId"])
 }
 
-// TestAGUIRunHandler_AgentFailureEmitsRunError confirms the error path on
-// the streaming side: once the SSE stream has opened, a downstream agent
-// failure must surface as a RunError frame, not as a partial happy path.
+// TestAGUIRunHandler_AgentFailureEmitsRunError confirms the streaming-side
+// error path: once SSE is open, downstream agent failure must surface as a
+// terminal RUN_ERROR frame, never as a partial happy-path-shaped sequence.
 func TestAGUIRunHandler_AgentFailureEmitsRunError(t *testing.T) {
 	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -199,30 +221,69 @@ func TestAGUIRunHandler_AgentFailureEmitsRunError(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	frames := parseAGUIStream(t, w.Body.String())
 	require.GreaterOrEqual(t, len(frames), 2)
-	require.Equal(t, "RunStarted", frames[0].Event)
+	require.Equal(t, "RUN_STARTED", frames[0].Type())
 
-	// Last frame must be RunError; nothing past it.
 	last := frames[len(frames)-1]
-	require.Equal(t, "RunError", last.Event)
+	require.Equal(t, "RUN_ERROR", last.Type())
 	require.NotEmpty(t, last.Data["message"])
 	require.Equal(t, "ERR_AGENT_CALL", last.Data["code"])
 
-	// Critically: no TextMessage* and no RunFinished should follow RunStarted
-	// when the agent call fails. We never want a happy-path-shaped stream
-	// that secretly didn't succeed.
+	// No happy-path frames after RUN_STARTED on the failure path.
 	for _, f := range frames[1:] {
 		require.NotContains(t,
-			[]string{"TextMessageStart", "TextMessageContent", "TextMessageEnd", "RunFinished"},
-			f.Event, "unexpected post-error frame: %s", f.Event)
+			[]string{"TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"},
+			f.Type(), "unexpected post-error frame: %s", f.Type())
 	}
 }
 
-// TestAGUIRunHandler_ValidationErrorsReturnJSON confirms that pre-stream
-// validation errors are returned as plain JSON 4xx responses (not as
-// SSE frames). Once we emit RunStarted, the contract is "you'll see
-// RunError on failure" — but until then, conventional REST errors win
-// because clients can't tell from the wire whether a stream is going to
-// open or not until they read at least one frame.
+// TestAGUIRunHandler_EmitsHeartbeatWhileReasonerIsSlow confirms that a
+// long-running reasoner produces SSE comment frames (`: keep-alive`) so
+// proxies don't idle-time-out the connection. The comment line is invisible
+// to AG-UI clients (the spec only defines `data:`-prefixed events) but
+// keeps intermediaries happy.
+func TestAGUIRunHandler_EmitsHeartbeatWhileReasonerIsSlow(t *testing.T) {
+	prev := AGUIHeartbeatInterval
+	AGUIHeartbeatInterval = 50 * time.Millisecond
+	defer func() { AGUIHeartbeatInterval = prev }()
+
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Block long enough for several heartbeat ticks before responding.
+		time.Sleep(250 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"finally"}`))
+	}))
+	defer agentServer.Close()
+
+	store := &reasonerTestStorage{agent: &types.AgentNode{
+		ID:              "node-1",
+		BaseURL:         agentServer.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "slow"}},
+	}}
+	router := mountAGUIRouter(t, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agui/runs",
+		strings.NewReader(`{"reasoner":"node-1.slow","input":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	body := w.Body.String()
+	require.Contains(t, body, ": keep-alive",
+		"expected at least one SSE comment heartbeat in:\n%s", body)
+
+	// Lifecycle still completes correctly after the heartbeats.
+	frames := parseAGUIStream(t, body)
+	require.Equal(t, "RUN_STARTED", frames[0].Type())
+	require.Equal(t, "RUN_FINISHED", frames[len(frames)-1].Type())
+}
+
+// TestAGUIRunHandler_ValidationErrorsReturnJSON: pre-stream validation
+// errors come back as plain JSON 4xx, never as an SSE stream. Once we emit
+// RUN_STARTED the contract becomes "you'll see RUN_ERROR on failure" — but
+// until the first frame, conventional REST errors win.
 func TestAGUIRunHandler_ValidationErrorsReturnJSON(t *testing.T) {
 	store := &reasonerTestStorage{agent: &types.AgentNode{
 		ID:              "node-1",
