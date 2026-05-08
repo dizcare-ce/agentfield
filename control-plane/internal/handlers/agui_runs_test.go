@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -278,6 +279,231 @@ func TestAGUIRunHandler_EmitsHeartbeatWhileReasonerIsSlow(t *testing.T) {
 	frames := parseAGUIStream(t, body)
 	require.Equal(t, "RUN_STARTED", frames[0].Type())
 	require.Equal(t, "RUN_FINISHED", frames[len(frames)-1].Type())
+}
+
+// TestAGUIRunHandler_AgentBodyWithoutResultKey_StringifiesWholeMap covers
+// the fallthrough path in the handler: when the agent returns a JSON object
+// that doesn't have a `result` key, the entire body becomes the
+// TEXT_MESSAGE_CONTENT delta and the parsed map becomes RUN_FINISHED.result.
+// This also exercises stringifyResult's non-string branch.
+func TestAGUIRunHandler_AgentBodyWithoutResultKey_StringifiesWholeMap(t *testing.T) {
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","count":3}`))
+	}))
+	defer agentServer.Close()
+
+	store := &reasonerTestStorage{agent: &types.AgentNode{
+		ID:              "node-1",
+		BaseURL:         agentServer.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "ping"}},
+	}}
+	router := mountAGUIRouter(t, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agui/runs",
+		strings.NewReader(`{"reasoner":"node-1.ping","input":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	frames := parseAGUIStream(t, w.Body.String())
+	require.Len(t, frames, 5)
+
+	// delta is the full body re-serialized (Go's json.Marshal sorts map keys).
+	require.Equal(t, `{"count":3,"status":"ok"}`, frames[2].Data["delta"])
+	// result preserves the parsed JSON object (decoded to map[string]any with float numbers).
+	res, _ := frames[4].Data["result"].(map[string]any)
+	require.Equal(t, "ok", res["status"])
+	require.EqualValues(t, 3, res["count"])
+}
+
+// TestStringifyResult_BranchCoverage covers the cheap branches of the
+// helper directly: string passthrough, nil, and arbitrary value JSON-encode.
+func TestStringifyResult_BranchCoverage(t *testing.T) {
+	require.Equal(t, "hello", stringifyResult("hello"))
+	require.Equal(t, "", stringifyResult(nil))
+	require.Equal(t, `[1,2,3]`, stringifyResult([]any{1, 2, 3}))
+	require.Equal(t, `{"a":1}`, stringifyResult(map[string]any{"a": 1}))
+}
+
+// TestAGUIRunHandler_AgentReturnsNonJSON falls through to the
+// `string(body)` branch when the agent's response isn't valid JSON.
+func TestAGUIRunHandler_AgentReturnsNonJSON(t *testing.T) {
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(`plain text answer`))
+	}))
+	defer agentServer.Close()
+
+	store := &reasonerTestStorage{agent: &types.AgentNode{
+		ID:              "node-1",
+		BaseURL:         agentServer.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "raw"}},
+	}}
+	router := mountAGUIRouter(t, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agui/runs",
+		strings.NewReader(`{"reasoner":"node-1.raw","input":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	frames := parseAGUIStream(t, w.Body.String())
+	require.Equal(t, "plain text answer", frames[2].Data["delta"])
+}
+
+// TestAGUIRunHandler_ContextCancelMidFlight covers the <-ctx.Done() branch
+// in the wait loop: if the client (or upstream) cancels the request while
+// we're blocked on the agent, the handler must return cleanly without
+// emitting any post-RUN_STARTED frames.
+func TestAGUIRunHandler_ContextCancelMidFlight(t *testing.T) {
+	prev := AGUIHeartbeatInterval
+	AGUIHeartbeatInterval = time.Hour // disable heartbeats so we don't race the cancel
+	defer func() { AGUIHeartbeatInterval = prev }()
+
+	released := make(chan struct{})
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block until the test releases or the request context cancels.
+		select {
+		case <-released:
+		case <-r.Context().Done():
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"too late"}`))
+	}))
+	defer func() { close(released); agentServer.Close() }()
+
+	store := &reasonerTestStorage{agent: &types.AgentNode{
+		ID:              "node-1",
+		BaseURL:         agentServer.URL,
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "hang"}},
+	}}
+	router := mountAGUIRouter(t, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agui/runs",
+		strings.NewReader(`{"reasoner":"node-1.hang","input":{}}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		router.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Wait until RUN_STARTED has been emitted, then cancel.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(w.Body.String(), `"type":"RUN_STARTED"`) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Contains(t, w.Body.String(), `"type":"RUN_STARTED"`, "RUN_STARTED should arrive before cancel")
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return within 2s of context cancel")
+	}
+
+	// No post-RUN_STARTED happy frames should have been emitted on cancel.
+	body := w.Body.String()
+	require.NotContains(t, body, "TEXT_MESSAGE_START")
+	require.NotContains(t, body, "RUN_FINISHED")
+}
+
+// TestAGUIRunHandler_RejectsMalformedJSON covers the c.ShouldBindJSON error
+// branch — completely invalid request bodies must be rejected as 400 before
+// any of the agent lookup or stream-opening logic runs.
+func TestAGUIRunHandler_RejectsMalformedJSON(t *testing.T) {
+	store := &reasonerTestStorage{agent: &types.AgentNode{
+		ID:              "node-1",
+		BaseURL:         "http://unused",
+		HealthStatus:    types.HealthStatusActive,
+		LifecycleStatus: types.AgentStatusReady,
+		Reasoners:       []types.ReasonerDefinition{{ID: "echo"}},
+	}}
+	router := mountAGUIRouter(t, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agui/runs", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.NotEqual(t, "text/event-stream", w.Header().Get("Content-Type"))
+}
+
+// TestHTTPAgentInvoker_HappyPath exercises the real httpAgentInvoker against
+// a stub agent server — the handler tests use an interface stub so this
+// concrete path otherwise goes uncovered.
+func TestHTTPAgentInvoker_HappyPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/reasoners/ping", r.URL.Path)
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		got, _ := io.ReadAll(r.Body)
+		require.JSONEq(t, `{"k":1}`, string(got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	body, err := httpAgentInvoker{}.Invoke(context.Background(),
+		&types.AgentNode{BaseURL: server.URL}, "ping", []byte(`{"k":1}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"ok":true}`, string(body))
+}
+
+// TestHTTPAgentInvoker_4xxBubblesUpAsError covers the resp.StatusCode >= 400
+// branch — the body is still returned but as a callError so the handler can
+// turn it into a RUN_ERROR.
+func TestHTTPAgentInvoker_4xxBubblesUpAsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"oops":"server"}`))
+	}))
+	defer server.Close()
+
+	body, err := httpAgentInvoker{}.Invoke(context.Background(),
+		&types.AgentNode{BaseURL: server.URL}, "boom", []byte(`{}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent returned 500")
+	require.Contains(t, string(body), "oops")
+}
+
+// TestHTTPAgentInvoker_DialFailureSurfacesError covers the client.Do error
+// branch by pointing the invoker at a closed listener.
+func TestHTTPAgentInvoker_DialFailureSurfacesError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := server.URL
+	server.Close() // closes the listener; subsequent dials get connection refused
+
+	_, err := httpAgentInvoker{}.Invoke(context.Background(),
+		&types.AgentNode{BaseURL: addr}, "ping", []byte(`{}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent call failed")
+}
+
+// TestHTTPAgentInvoker_BadURLFailsRequestConstruction covers the
+// http.NewRequestWithContext error branch — an invalid URL never makes it
+// to a dial.
+func TestHTTPAgentInvoker_BadURLFailsRequestConstruction(t *testing.T) {
+	_, err := httpAgentInvoker{}.Invoke(context.Background(),
+		// `\n` in the URL is rejected at request construction time.
+		&types.AgentNode{BaseURL: "http://bad\nhost"}, "ping", []byte(`{}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "create agent request")
 }
 
 // TestAGUIRunHandler_ValidationErrorsReturnJSON: pre-stream validation

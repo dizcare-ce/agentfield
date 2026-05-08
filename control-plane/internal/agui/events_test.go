@@ -109,3 +109,50 @@ func TestWriteSSE_OmitsZeroOptionalFields(t *testing.T) {
 		t.Errorf("zero timestamp should be omitted: %s", body)
 	}
 }
+
+// unmarshalableEvent fails JSON encoding deterministically so we can exercise
+// the marshal-error branch in WriteSSE.
+type unmarshalableEvent struct{}
+
+func (unmarshalableEvent) Type() string                  { return "BAD_EVENT" }
+func (unmarshalableEvent) MarshalJSON() ([]byte, error)  { return nil, errBoom }
+
+var errBoom = &boomError{}
+
+type boomError struct{}
+
+func (b *boomError) Error() string { return "boom" }
+
+// TestWriteSSE_MarshalErrorIsReturned ensures encode failures surface to the
+// caller rather than producing a silently-malformed frame.
+func TestWriteSSE_MarshalErrorIsReturned(t *testing.T) {
+	var buf bytes.Buffer
+	err := WriteSSE(&buf, unmarshalableEvent{})
+	if err == nil {
+		t.Fatalf("expected marshal error, got nil; buf=%q", buf.String())
+	}
+	if !strings.Contains(err.Error(), "marshal BAD_EVENT") {
+		t.Errorf("error should name the event type: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("nothing should be written on marshal failure; got %q", buf.String())
+	}
+}
+
+// failingWriter returns an error on every Write — used to cover the
+// write-error branch of WriteSSE.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errBoom }
+
+// TestWriteSSE_WriteErrorIsReturned confirms a flaky writer surfaces to the
+// caller (the handler uses this to bail out cleanly on client disconnect).
+func TestWriteSSE_WriteErrorIsReturned(t *testing.T) {
+	err := WriteSSE(failingWriter{}, RunStarted{ThreadID: "t", RunID: "r"})
+	if err == nil {
+		t.Fatalf("expected write error, got nil")
+	}
+	if !strings.Contains(err.Error(), "write RUN_STARTED") {
+		t.Errorf("error should name the event type: %v", err)
+	}
+}
