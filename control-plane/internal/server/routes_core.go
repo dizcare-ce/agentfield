@@ -107,6 +107,11 @@ func (s *AgentFieldServer) registerCoreRoutes(agentAPI *gin.RouterGroup) {
 		executeGroup.POST("/:target", handlers.ExecuteHandler(s.storage, s.payloadStore, s.webhookDispatcher, s.config.AgentField.ExecutionQueue.AgentCallTimeout, s.config.Features.DID.Authorization.InternalToken))
 		executeGroup.POST("/async/:target", handlers.ExecuteAsyncHandler(s.storage, s.payloadStore, s.webhookDispatcher, s.config.AgentField.ExecutionQueue.AgentCallTimeout, s.config.Features.DID.Authorization.InternalToken))
 	}
+
+	// AG-UI protocol adapter (https://docs.ag-ui.com). POC-level: emits
+	// lifecycle + a single TextMessage event sequence carrying the reasoner's
+	// final result. Token-level streaming is the next iteration.
+	agentAPI.POST("/agui/runs", handlers.AGUIRunHandler(s.storage))
 	agentAPI.GET("/executions/:execution_id", handlers.GetExecutionStatusHandler(s.storage))
 	agentAPI.POST("/executions/batch-status", handlers.BatchExecutionStatusHandler(s.storage))
 	agentAPI.POST("/executions/:execution_id/status", handlers.UpdateExecutionStatusHandler(s.storage, s.payloadStore, s.webhookDispatcher, s.config.AgentField.ExecutionQueue.AgentCallTimeout))
