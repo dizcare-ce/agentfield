@@ -1,21 +1,54 @@
 ---
 name: Feature Request
-about: Suggest an idea for AgentField
-labels: enhancement
+about: Suggest an idea or enhancement for agentfield
+title: '[FEAT] '
+labels: ['enhancement', 'triage']
+assignees: ''
 ---
 
-## Summary
+## Feature Summary
 
-<!-- What problem are you trying to solve? -->
+<!-- A clear and concise description of the feature you're requesting. -->
 
-## Proposed solution
+## Problem Statement
 
-<!-- Describe the solution you'd like. -->
+**Is your feature request related to a problem? Please describe.**
 
-## Alternatives considered
+<!-- A clear and concise description of what the problem is. -->
+<!-- Example: "I'm always frustrated when [...]" -->
 
-<!-- Describe any alternative solutions or features you've considered. -->
+## Proposed Solution
 
-## Additional context
+**Describe the solution you'd like:**
 
-<!-- Add any other context or screenshots about the feature request here. -->
+<!-- A clear and concise description of what you want to happen. -->
+
+**Describe alternatives you've considered:**
+
+<!-- A clear and concise description of any alternative solutions or features you've considered. -->
+
+## Use Case
+
+<!-- Describe the use case(s) this feature would address. -->
+<!-- Who would benefit from this feature? How would it be used? -->
+
+## Acceptance Criteria
+
+<!-- List the specific criteria that must be met for this feature to be considered complete. -->
+
+- [ ] 
+- [ ] 
+- [ ] 
+
+## Additional Context
+
+<!-- Add any other context, screenshots, mockups, or references about the feature request here. -->
+
+## Implementation Notes
+
+<!-- Optional: Any technical notes or suggestions on how this could be implemented. -->
+
+---
+
+> **Note:** Feature requests are evaluated based on alignment with the agentfield roadmap and community demand.
+> Please check existing issues and discussions before submitting to avoid duplicates.
